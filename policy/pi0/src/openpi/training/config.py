@@ -19,6 +19,7 @@ import openpi.models.pi0_fast as pi0_fast
 import openpi.models.tokenizer as _tokenizer
 import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.droid_policy as droid_policy
+import openpi.policies.franka_policy as franka_policy
 import openpi.policies.libero_policy as libero_policy
 import openpi.shared.download as _download
 import openpi.shared.normalize as _normalize
@@ -224,6 +225,51 @@ class LeRobotAlohaDataConfig(DataConfigFactory):
         )
         if self.use_delta_joint_actions:
             delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        model_transforms = ModelTransformFactory(default_prompt=self.default_prompt)(model_config)
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs),
+            repack_transforms=self.repack_transforms,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+            action_sequence_keys=self.action_sequence_keys,
+        )
+
+
+@dataclasses.dataclass(frozen=False)
+class LeRobotFrankaDataConfig(DataConfigFactory):
+    # If true, will convert joint dimensions to deltas with respect to the current state before passing to the model.
+    # Gripper dimensions will remain in absolute values.
+    use_delta_joint_actions: bool = True
+    # If provided, will be injected into the input data if the "prompt" key is not present.
+    default_prompt: str | None = None
+
+    # Repack transforms.
+    repack_transforms: tyro.conf.Suppress[_transforms.Group] = dataclasses.field(default=_transforms.Group(inputs=[
+        _transforms.RepackTransform({
+            "images": {
+                "cam_high": "observation.images.top"
+            },
+            "state": "observation.state",
+            "actions": "action",
+        })
+    ]))
+    # Action keys that will be used to read the action sequence from the dataset.
+    action_sequence_keys: Sequence[str] = ("action", )
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        data_transforms = _transforms.Group(
+            inputs=[franka_policy.FrankaInputs(action_dim=model_config.action_dim)],
+            outputs=[franka_policy.FrankaOutputs()],
+        )
+        if self.use_delta_joint_actions:
+            delta_action_mask = _transforms.make_bool_mask(7, -1, 7, -1)
             data_transforms = data_transforms.push(
                 inputs=[_transforms.DeltaActions(delta_action_mask)],
                 outputs=[_transforms.AbsoluteActions(delta_action_mask)],
@@ -499,6 +545,35 @@ _CONFIGS = [
         batch_size=32,
         weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_fast_base/params"),
         num_train_steps=30000,
+        fsdp_devices=1,  # refer line 359
+    ),
+    TrainConfig(
+        name="pi0_base_franka_robotwin_lora",
+        model=pi0.Pi0Config(paligemma_variant="gemma_2b_lora", action_expert_variant="gemma_300m_lora"),
+        data=LeRobotFrankaDataConfig(
+            repo_id="robotwin_franka_clean_20260112",  # your datasets repo_id
+            repack_transforms=_transforms.Group(inputs=[
+                _transforms.RepackTransform({
+                    "images": {
+                        "cam_high": "observation.images.cam_high",
+                        "cam_left_wrist": "observation.images.cam_left_wrist",
+                        "cam_right_wrist": "observation.images.cam_right_wrist",
+                    },
+                    "state": "observation.state",
+                    "actions": "action",
+                    "prompt": "prompt",
+                })
+            ]),
+            base_config=DataConfig(
+                local_files_only=True,  # Set to True for local-only datasets.
+                prompt_from_task=True,  # Set to True for prompt by task_name
+            ),
+        ),
+        freeze_filter=pi0.Pi0Config(paligemma_variant="gemma_2b_lora",
+                                    action_expert_variant="gemma_300m_lora").get_freeze_filter(),
+        batch_size=32,  # the total batch_size not pre_gpu batch_size
+        weight_loader=weight_loaders.CheckpointWeightLoader("s3://openpi-assets/checkpoints/pi0_base/params"),
+        num_train_steps=3000,
         fsdp_devices=1,  # refer line 359
     ),
 ]

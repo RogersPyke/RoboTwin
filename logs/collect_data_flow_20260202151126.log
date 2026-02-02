@@ -1,0 +1,209 @@
+==========================================
+Data Collection Flow Log
+Script: collect_data_flow.sh
+Start Time: 2026-02-02 15:11:26 CST
+Configuration: ARX-X5
+GPU ID: 0
+Total Tasks: 4
+==========================================
+
+[2026-02-02 15:11:26] [INFO] Log file: /home/rogerspyke/projects/RoboTwin/logs/collect_data_flow_20260202151126.log
+[2026-02-02 15:11:26] [INFO] Starting data collection flow: 4 tasks
+[2026-02-02 15:11:26] [INFO] Configuration: ARX-X5
+[2026-02-02 15:11:26] [INFO] GPU ID: 0
+[2026-02-02 15:11:26] [INFO] [1/4] Collecting data for task: lift_pot
+[2026-02-02 15:11:26] [INFO] Task config: ARX-X5, GPU: 0
+[2026-02-02 15:11:26] [INFO] Starting data collection for task: lift_pot, config: ARX-X5, GPU: 0
+[2026-02-02 15:11:26] [INFO] Added cusparselt library path to LD_LIBRARY_PATH: /home/rogerspyke/miniforge3/envs/robotwin/lib/python3.10/site-packages/cusparselt/lib
+--- Output for task: lift_pot ---
+kinematics_fused_cu not found, JIT compiling...
+[32mRender Well[0m
+geom_cu binary not found, jit compiling...
+tensor_step_cu not found, jit compiling...
+lbfgs_step_cu not found, JIT compiling...
+line_search_cu not found, JIT compiling...
+missing pytorch3d
+============= Config =============
+
+[95mMessy Table:[0m False
+[95mRandom Background:[0m False
+[95mRandom Light:[0m False
+[95mRandom Table Height:[0m 0
+[95mRandom Head Camera Distance:[0m 0
+[94mHead Camera Config:[0m D435, True
+[94mWrist Camera Config:[0m D435, True
+[94mEmbodiment Config:[0m ARX-X5+ARX-X5
+
+==================================
+Task Name: [34mlift_pot[0m
+[93m[Start Seed and Pre Motion Data Collection][0m
+Warp DeprecationWarning: The namespace `warp.torch` will soon be removed from the public API. It can still be accessed from `warp._src.torch` but might be changed or removed without notice.
+Warp DeprecationWarning: The symbol `warp.torch.device_from_torch` will soon be removed from the public API. Use `warp.device_from_torch` instead.
+simulate data episode 0 success! (seed = 0)
+simulate data episode 1 success! (seed = 1)
+simulate data episode 2 fail! (seed = 2)
+simulate data episode 2 fail! (seed = 3)
+simulate data episode 2 fail! (seed = 4)
+simulate data episode 2 fail! (seed = 5)
+ -------------
+simulate data episode 2 fail! (seed = 6)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 2 success! (seed = 7)
+simulate data episode 3 success! (seed = 8)
+simulate data episode 4 success! (seed = 9)
+simulate data episode 5 fail! (seed = 10)
+simulate data episode 5 fail! (seed = 11)
+simulate data episode 5 success! (seed = 12)
+simulate data episode 6 success! (seed = 13)
+ -------------
+simulate data episode 7 fail! (seed = 14)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 7 fail! (seed = 15)
+simulate data episode 7 success! (seed = 16)
+simulate data episode 8 success! (seed = 17)
+simulate data episode 9 fail! (seed = 18)
+simulate data episode 9 success! (seed = 19)
+simulate data episode 10 success! (seed = 20)
+simulate data episode 11 success! (seed = 21)
+ -------------
+simulate data episode 12 fail! (seed = 22)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 12 fail! (seed = 23)
+simulate data episode 12 fail! (seed = 24)
+simulate data episode 12 success! (seed = 25)
+ -------------
+simulate data episode 13 fail! (seed = 26)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 13 fail! (seed = 27)
+simulate data episode 13 success! (seed = 28)
+ -------------
+simulate data episode 14 fail! (seed = 29)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 14 fail! (seed = 30)
+simulate data episode 14 success! (seed = 31)
+simulate data episode 15 fail! (seed = 32)
+simulate data episode 15 fail! (seed = 33)
+simulate data episode 15 success! (seed = 34)
+simulate data episode 16 success! (seed = 35)
+simulate data episode 17 success! (seed = 36)
+simulate data episode 18 fail! (seed = 37)
+ -------------
+simulate data episode 18 fail! (seed = 38)
+Error:  target_pose cannot be None for move action.
+ -------------
+ -------------
+simulate data episode 18 fail! (seed = 39)
+Error:  target_pose cannot be None for move action.
+ -------------
+ -------------
+simulate data episode 18 fail! (seed = 40)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 18 success! (seed = 41)
+simulate data episode 19 fail! (seed = 42)
+simulate data episode 19 fail! (seed = 43)
+simulate data episode 19 fail! (seed = 44)
+simulate data episode 19 fail! (seed = 45)
+ -------------
+simulate data episode 19 fail! (seed = 46)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 19 success! (seed = 47)
+simulate data episode 20 success! (seed = 48)
+ -------------
+simulate data episode 21 fail! (seed = 49)
+Error:  target_pose cannot be None for move action.
+ -------------
+ -------------
+simulate data episode 21 fail! (seed = 50)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 21 success! (seed = 51)
+simulate data episode 22 fail! (seed = 52)
+simulate data episode 22 success! (seed = 53)
+ -------------
+simulate data episode 23 fail! (seed = 54)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 23 success! (seed = 55)
+simulate data episode 24 success! (seed = 56)
+simulate data episode 25 fail! (seed = 57)
+simulate data episode 25 success! (seed = 58)
+ -------------
+simulate data episode 26 fail! (seed = 59)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 26 success! (seed = 60)
+simulate data episode 27 fail! (seed = 61)
+simulate data episode 27 fail! (seed = 62)
+simulate data episode 27 fail! (seed = 63)
+simulate data episode 27 success! (seed = 64)
+ -------------
+simulate data episode 28 fail! (seed = 65)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 28 success! (seed = 66)
+simulate data episode 29 fail! (seed = 67)
+simulate data episode 29 success! (seed = 68)
+simulate data episode 30 success! (seed = 69)
+simulate data episode 31 success! (seed = 70)
+simulate data episode 32 fail! (seed = 71)
+simulate data episode 32 fail! (seed = 72)
+simulate data episode 32 success! (seed = 73)
+simulate data episode 33 fail! (seed = 74)
+simulate data episode 33 fail! (seed = 75)
+simulate data episode 33 fail! (seed = 76)
+simulate data episode 33 success! (seed = 77)
+simulate data episode 34 success! (seed = 78)
+simulate data episode 35 success! (seed = 79)
+ -------------
+simulate data episode 36 fail! (seed = 80)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 36 fail! (seed = 81)
+simulate data episode 36 success! (seed = 82)
+simulate data episode 37 success! (seed = 83)
+simulate data episode 38 fail! (seed = 84)
+simulate data episode 38 fail! (seed = 85)
+simulate data episode 38 fail! (seed = 86)
+simulate data episode 38 fail! (seed = 87)
+simulate data episode 38 success! (seed = 88)
+simulate data episode 39 success! (seed = 89)
+simulate data episode 40 success! (seed = 90)
+simulate data episode 41 success! (seed = 91)
+simulate data episode 42 fail! (seed = 92)
+simulate data episode 42 fail! (seed = 93)
+simulate data episode 42 success! (seed = 94)
+ -------------
+simulate data episode 43 fail! (seed = 95)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 43 fail! (seed = 96)
+ -------------
+simulate data episode 43 fail! (seed = 97)
+Error:  target_pose cannot be None for move action.
+ -------------
+simulate data episode 43 fail! (seed = 98)
+simulate data episode 43 fail! (seed = 99)
+simulate data episode 43 fail! (seed = 100)
+Traceback (most recent call last):
+  File "/home/rogerspyke/projects/RoboTwin/script/collect_data.py", line 250, in <module>
+    main(task_name=task_name, task_config=task_config)
+  File "/home/rogerspyke/projects/RoboTwin/script/collect_data.py", line 103, in main
+    run(task, args)
+  File "/home/rogerspyke/projects/RoboTwin/script/collect_data.py", line 171, in run
+    with open(os.path.join(args["save_path"], "seed.txt"), "w") as file:
+FileNotFoundError: [Errno 2] No such file or directory: './data/lift_pot/ARX-X5/seed.txt'
+--- End of output for task: lift_pot ---
+
+[2026-02-02 15:13:21] [INFO] Data collection script completed with exit code 0 for task: lift_pot
+[2026-02-02 15:13:21] [SUCCESS] [1/4] Successfully completed: lift_pot
+[2026-02-02 15:13:21] [INFO] [2/4] Collecting data for task: place_can_basket
+[2026-02-02 15:13:21] [INFO] Task config: ARX-X5, GPU: 0
+[2026-02-02 15:13:21] [INFO] Starting data collection for task: place_can_basket, config: ARX-X5, GPU: 0
+[2026-02-02 15:13:21] [INFO] Added cusparselt library path to LD_LIBRARY_PATH: /home/rogerspyke/miniforge3/envs/robotwin/lib/python3.10/site-packages/cusparselt/lib

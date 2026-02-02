@@ -3,6 +3,8 @@
 """
 #!/usr/bin/python3
 """
+
+import os
 import json
 import sys
 import jax
