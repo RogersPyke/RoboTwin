@@ -1,5 +1,5 @@
 """
-Single-block unstack: move only the top block (green) to target; bottom block (red) stays at stack.
+Two-block unstack: place both blocks (top first, then bottom) to their targets.
 - Grasp: top-down contact points only (box 0,1,2,3).
 - Place: default place_actor (pre_dis_axis="fp").
 """
@@ -51,14 +51,15 @@ class unstack_blocks_three(Base_Task):
         self.last_gripper = None
         self.last_actor = None
 
-        # Move only the top block (block2); block1 stays at stack.
+        # Unstack top first, then bottom; place both to their targets.
         arm_tag2 = self.unstack_and_place_block(self.block2, self.block2_target_pose)
+        arm_tag1 = self.unstack_and_place_block(self.block1, self.block1_target_pose)
 
         self.info["info"] = {
             "{A}": "red block",
             "{B}": "green block",
             "{C}": "blue block",
-            "{a}": str(arm_tag2),
+            "{a}": str(arm_tag1),
             "{b}": str(arm_tag2),
             "{c}": str(arm_tag2),
         }
@@ -109,8 +110,7 @@ class unstack_blocks_three(Base_Task):
         z_table_min = 0.74 + self.table_z_bias
         block1_pose = self.block1.get_pose().p
         block2_pose = self.block2.get_pose().p
-        # Block1 stays at stack; block2 placed on table.
-        block1_at_stack = block1_pose[2] >= z_table_min
-        block2_placed = block2_pose[2] >= z_table_min
+        # Both blocks placed on table.
+        on_table = block1_pose[2] >= z_table_min and block2_pose[2] >= z_table_min
         grippers_open = self.is_left_gripper_open() and self.is_right_gripper_open()
-        return block1_at_stack and block2_placed and grippers_open
+        return on_table and grippers_open
