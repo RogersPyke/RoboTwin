@@ -178,13 +178,13 @@ class Base_Task(gym.Env):
             for idx, actor in enumerate(actors_list):
                 final_pose = actors_pose_list[idx][-1]
                 for pose in actors_pose_list[idx][-200:]:
-                    if get_sim(final_pose, pose) > 3.0:
+                    if get_sim(final_pose, pose) > 5.0:
                         is_stable = False
                         unstable_list.append(actor.get_name())
                         break
 
         is_stable = True
-        for _ in range(2000):
+        for _ in range(3500):
             self.scene.step()
         for idx, actor in enumerate(actors_list):
             actors_pose_list.append([actor.get_pose()])
@@ -571,6 +571,8 @@ class Base_Task(gym.Env):
         self.need_plan = args.get("need_plan", True)
         self.left_joint_path = args.get("left_joint_path", [])
         self.right_joint_path = args.get("right_joint_path", [])
+        self.left_cnt = 0
+        self.right_cnt = 0
 
     def _set_eval_video_ffmpeg(self, ffmpeg):
         self.eval_video_ffmpeg = ffmpeg

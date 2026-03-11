@@ -1,0 +1,39 @@
+{
+  "full_description": "there are three blocks stacked in the center, the color of the blocks is <red, green and blue>, <unstack the blocks from the tower>, and <place each block at its target position on the table>",
+  "schema": "{A} notifies the red block, {B} notifies the green block, {C} notifies the blue block, {a} notifies the arm to manipulate the red block, {b} notifies the arm to manipulate the green block, {c} notifies the arm to manipulate the blue block",
+  "preference": "num of words should not exceed 20. Degree of detail avg 8",
+  "seen": [
+    "Unstack {C} from {B}, then {B} from {A}; place {A}, {B}, {C} at their targets.",
+    "Take apart the stack: move {C}, then {B}, then {A} to their target positions.",
+    "Use {a}, {b}, {c} to unstack {C} from {B} and {B} from {A}, then place each at target.",
+    "Unstack the tower and place {A}, {B}, and {C} at their target poses.",
+    "Remove {C} from {B}, then {B} from {A}; place all three at target positions.",
+    "Disassemble the stack and move {A}, {B}, {C} to their target locations.",
+    "With {a}, {b}, {c}, unstack {C} then {B} then {A} and place at targets.",
+    "Unstack {C} off {B}, {B} off {A}; use {a}, {b}, {c} to place each at target.",
+    "Take down the stack: place {C}, {B}, and {A} at their target positions.",
+    "Unstack the blocks and relocate {A}, {B}, {C} to the table targets.",
+    "Dismantle the tower; move {A}, {B}, {C} to center targets with {a}, {b}, {c}.",
+    "Unstack {C} from {B} and {B} from {A}, then place each block at its target.",
+    "Use {a}, {b}, {c} to unstack and place {A}, {B}, {C} at target poses.",
+    "Remove blocks from the stack and place {A}, {B}, {C} at their targets.",
+    "Unstack and place {A}, {B}, and {C} at their target positions on the table.",
+    "Take {C} off, then {B} off {A}; place {A}, {B}, {C} at targets.",
+    "Disassemble and place {A}, {B}, {C} at their target locations.",
+    "Unstack the three blocks and move {A}, {B}, {C} to target positions.",
+    "With {a}, {b}, {c}, unstack and place {A}, {B}, {C} at targets.",
+    "Unstack {C} on {B} on {A}; place each at its target using {a}, {b}, {c}."
+  ],
+  "unseen": [
+    "Unstack the blocks and place {A}, {B}, {C} at their targets.",
+    "Take apart the stack; move {A}, {B}, and {C} to target positions.",
+    "Unstack {C} from {B} and {B} from {A}, then place at targets.",
+    "Disassemble the tower and place {A}, {B}, {C} at their target poses.",
+    "Unstack and place {A}, {B}, {C} at the table targets.",
+    "Remove {C}, then {B}, then {A} from the stack and place at targets.",
+    "Unstack the three blocks and relocate them to target positions.",
+    "Take down the stack and place {A}, {B}, {C} at targets.",
+    "Unstack {A}, {B}, {C} and place each at its target.",
+    "Dismantle and place {A}, {B}, {C} at their target locations."
+  ]
+}
