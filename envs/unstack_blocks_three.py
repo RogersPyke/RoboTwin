@@ -1,11 +1,15 @@
 """
-Minimal test: ONE block on table, place to ONE fixed target.
-Aligned with stack_blocks_three so grasp/place behave the same as working tasks.
+Single-block unstack: move only the top block (green) to target; bottom block (red) stays at stack.
+- Grasp: top-down contact points only (box 0,1,2,3).
+- Place: default place_actor (pre_dis_axis="fp").
 """
 from ._base_task import Base_Task
 from .utils import *
 import sapien
 import math
+
+# Minimum standoff from block surface to avoid gripper going too deep (double-grasp).
+GRASP_MIN_STANDOFF = 0.02
 
 
 class unstack_blocks_three(Base_Task):
@@ -15,7 +19,8 @@ class unstack_blocks_three(Base_Task):
 
     def load_actors(self):
         block_half_size = 0.025
-        z_table = 0.741 + block_half_size  # block center on table
+        center_xy = [0.0, -0.13]
+        z_base = 0.75 - block_half_size  # block center so top of bottom block = 0.75
 
         def create_block(block_pose, color):
             return create_box(
@@ -26,46 +31,63 @@ class unstack_blocks_three(Base_Task):
                 name="box",
             )
 
-        # Simplest: ONE block on table at center (no stack).
-        center_xy = [0.0, -0.13]
-        z_base = 0.75 - block_half_size
+        # Two blocks stacked at center (block1 bottom, block2 top).
         self.block1 = create_block(sapien.Pose(center_xy + [z_base], [1, 0, 0, 0]), (1, 0, 0))
-        self.block2 = self.block3 = None
+        self.block2 = create_block(sapien.Pose(center_xy + [z_base + 0.05], [1, 0, 0, 0]), (0, 1, 0))
+        self.block3 = None
 
         self.add_prohibit_area(self.block1, padding=0.05)
+        self.add_prohibit_area(self.block2, padding=0.05)
         target_pose = [-0.04, -0.13, 0.04, -0.05]
         self.prohibited_area.append(target_pose)
 
-        # Place target: same format as stack_blocks_three first block — quat (0,1,0,0), no constrain="free".
-        self.block1_target_pose = [0.22, -0.13, 0.75 + self.table_z_bias, 0, 1, 0, 0]
+        # Fixed place targets: same format as stack (quat 0,1,0,0).
+        q = [0, 1, 0, 0]
+        z_t = 0.75 + self.table_z_bias
+        self.block1_target_pose = [-0.22, -0.13, z_t, *q]   # left
+        self.block2_target_pose = [0.22, -0.13, z_t, *q]     # right
 
     def play_once(self):
         self.last_gripper = None
         self.last_actor = None
 
-        arm_tag = self.unstack_and_place_block(self.block1, self.block1_target_pose)
+        # Move only the top block (block2); block1 stays at stack.
+        arm_tag2 = self.unstack_and_place_block(self.block2, self.block2_target_pose)
 
         self.info["info"] = {
             "{A}": "red block",
             "{B}": "green block",
             "{C}": "blue block",
-            "{a}": str(arm_tag),
-            "{b}": str(arm_tag),
-            "{c}": str(arm_tag),
+            "{a}": str(arm_tag2),
+            "{b}": str(arm_tag2),
+            "{c}": str(arm_tag2),
         }
         return self.info
 
     def unstack_and_place_block(self, block: Actor, target_pose, arm_tag=None):
-        # Arm by target side (left if target x < 0 else right), like other place tasks.
         if arm_tag is None:
             target_x = target_pose[0] if len(target_pose) >= 1 else 0
             arm_tag = ArmTag("left" if target_x < 0 else "right")
 
-        # Match stack_blocks_three: no contact_point_id (let choose_grasp_pose pick a feasible grasp).
-        self.move(self.grasp_actor(block, arm_tag=arm_tag, pre_grasp_dis=0.09))
+        # Grasp: top-down only; grasp_dis = standoff so gripper keeps minimum distance from block surface.
+        grasp_kw = dict(
+            actor=block,
+            arm_tag=arm_tag,
+            pre_grasp_dis=0.09,
+            grasp_dis=GRASP_MIN_STANDOFF,
+            contact_point_id=[0, 1, 2, 3],
+        )
+        if self.last_gripper is not None and (self.last_gripper != arm_tag):
+            self.move(
+                self.grasp_actor(**grasp_kw),
+                self.back_to_origin(arm_tag=arm_tag.opposite),
+            )
+        else:
+            self.move(self.grasp_actor(**grasp_kw))
         self.move(self.move_by_displacement(arm_tag=arm_tag, z=0.07))
 
-        # Match stack_blocks_three place_actor exactly: no constrain=, same pre_dis/dis/pre_dis_axis.
+        # Place: top-down approach (pre_dis_axis="fp" = along target z). No align_axis — it can cause
+        # "Eigenvalues did not converge" when actor_axis is block z (degenerate in get_place_pose).
         self.move(
             self.place_actor(
                 block,
@@ -75,7 +97,8 @@ class unstack_blocks_three(Base_Task):
                 pre_dis=0.05,
                 dis=0.0,
                 pre_dis_axis="fp",
-            ))
+            )
+        )
         self.move(self.move_by_displacement(arm_tag=arm_tag, z=0.07))
 
         self.last_gripper = arm_tag
@@ -85,6 +108,9 @@ class unstack_blocks_three(Base_Task):
     def check_success(self):
         z_table_min = 0.74 + self.table_z_bias
         block1_pose = self.block1.get_pose().p
-        on_table = block1_pose[2] >= z_table_min
+        block2_pose = self.block2.get_pose().p
+        # Block1 stays at stack; block2 placed on table.
+        block1_at_stack = block1_pose[2] >= z_table_min
+        block2_placed = block2_pose[2] >= z_table_min
         grippers_open = self.is_left_gripper_open() and self.is_right_gripper_open()
-        return on_table and grippers_open
+        return block1_at_stack and block2_placed and grippers_open
