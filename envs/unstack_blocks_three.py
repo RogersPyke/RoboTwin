@@ -13,6 +13,10 @@ import transforms3d as t3d
 
 # Minimum standoff from block surface to avoid gripper going too deep (double-grasp).
 GRASP_MIN_STANDOFF = 0.02
+# Vertical (z) gap between consecutive block centers at init. Next block placed by reading previous pose, same xy/quat, z += BLOCK_GAP_DIST.
+BLOCK_GAP_DIST = 0.02
+# Physics steps after each block placement so the stack settles before placing the next.
+SETTLE_STEP = 3500
 # Random place target bounds (position and orientation).
 TARGET_XLIM = [-0.28, 0.28]
 TARGET_YLIM = [-0.18, 0.02]
@@ -40,10 +44,21 @@ class unstack_blocks_three(Base_Task):
                 name="box",
             )
 
-        # Three blocks stacked at center (block1 bottom, block2 middle, block3 top).
+        # Place one block then settle; repeat. Use previous block's settled pose (same xy and quat, z += BLOCK_GAP_DIST).
+        # Reading the actual pose after settle ensures proper alignment and avoids interpenetration/collision explosion.
         self.block1 = create_block(sapien.Pose(center_xy + [z_base], [1, 0, 0, 0]), (1, 0, 0))
-        self.block2 = create_block(sapien.Pose(center_xy + [z_base + 0.05], [1, 0, 0, 0]), (0, 1, 0))
-        self.block3 = create_block(sapien.Pose(center_xy + [z_base + 0.10], [1, 0, 0, 0]), (0, 0, 1))
+        for _ in range(SETTLE_STEP):
+            self.scene.step()
+        prev_pose = self.block1.get_pose()
+        pos2 = [prev_pose.p[0], prev_pose.p[1], prev_pose.p[2] + BLOCK_GAP_DIST]
+        self.block2 = create_block(sapien.Pose(pos2, prev_pose.q), (0, 1, 0))
+        for _ in range(SETTLE_STEP):
+            self.scene.step()
+        prev_pose = self.block2.get_pose()
+        pos3 = [prev_pose.p[0], prev_pose.p[1], prev_pose.p[2] + BLOCK_GAP_DIST]
+        self.block3 = create_block(sapien.Pose(pos3, prev_pose.q), (0, 0, 1))
+        for _ in range(SETTLE_STEP):
+            self.scene.step()
 
         self.add_prohibit_area(self.block1, padding=0.05)
         self.add_prohibit_area(self.block2, padding=0.05)

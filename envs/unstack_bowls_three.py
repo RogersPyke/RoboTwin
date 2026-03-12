@@ -1,65 +1,63 @@
-# Purpose: Symmetric task of stack_bowls_three. Initial state: three bowls stacked.
-# Final state: three bowls at random target poses (deterministic given seed).
-# Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.), sapien, numpy.
+# Purpose: Two-bowl unstack. Initial state: two bowls stacked vertically with BOWL_GAP_DIST as
+# vertical (z) gap. Init flow in load_actors: place one bowl -> settle SETTLE_STEP -> repeat.
+# Each placement: first bowl at INIT_BOWL_XY + INIT_BOWL_QUAT; later bowls above previous by BOWL_GAP_DIST in z.
+# Task: place both bowls to random target positions and random orientations (same range as initial setup).
+# Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.), sapien, numpy, transforms3d.
 # Usage: Load via envs.unstack_bowls_three with task_name="unstack_bowls_three";
 #   e.g. script/collect_data.py unstack_bowls_three <task_config>
 #
 # FORCE_COLLECT: when True, skip stability check and always report success (for data collection).
-#   when False, use default behavior (check_stable + check_success).
 #
-# --- Why we cannot "just set initial state" without physics ---
-# PhysX (SAPIEN backend) treats overlapping convex shapes as penetration and applies large
-# repulsion forces. If we add all three stacked bowls in one go, the first scene.step() (e.g.
-# in check_stable()) would see overlap and make bowls fly. So we spawn one bowl, run settle steps,
-# then add the next, so the engine never sees two overlapping dynamic bodies at once.
-#
-# --- How other tasks avoid this ---
-# Tasks with non-overlapping initial poses do not need per-actor settle: e.g. stack_bowls_three
-# (three bowls at random scattered poses), place_empty_cup (one cup, one coaster), unstack_blocks_three
-# (same stacked-init pattern as here, see SETUP_GAP_STEP there). Only "stacked" initial states
-# need sequential spawn + settle; reference unstack_blocks_three for the same pattern.
-#
-# --- More fundamental alternatives (if you want to avoid settle steps) ---
-# 1. Engine support: if SAPIEN exposed "pause simulation" during setup, we could add all actors
-#    at target poses then resume (no overlap ever seen by the solver).
-# 2. Static-then-dynamic: create upper bowls as static, set poses, then switch to dynamic at
-#    task start (requires runtime body-type change support in SAPIEN).
-# 3. Keep current approach but tune SETUP_GAP_STEP to the minimum that still stabilizes.
+# SINGLE_BOWL_MODE: when True, only one bowl is spawned and moved (simplest scenario).
+#   Set to False to restore the full two-bowl unstack behavior.
+SINGLE_BOWL_MODE = True
 
 from ._base_task import Base_Task
 from .utils import *
 import sapien
 import numpy as np
-from copy import deepcopy
+import transforms3d as t3d
 
 FORCE_COLLECT = True
-SETUP_GAP_STEP = 1000
+# Gap above table for init spawn to avoid interpenetration (blow away).
+DESK_GAP_DIST = 0.035
+# Vertical (z) distance between consecutive bowls at init (bowl2 is BOWL_GAP_DIST above bowl1 in z).
+BOWL_GAP_DIST = 0.04
+# Table surface z in unbiased coords (create_actor adds table_z_bias).
+TABLE_Z = 0.741
+# Physics steps to run after loading actors so the bowl settles.
+SETTLE_STEP = 3500
+# Init: first bowl at INIT_BOWL_XY (xy), z = TABLE_Z + GAP_DIST; second bowl same xy, z += BOWL_GAP_DIST. Orientation (quat w,x,y,z).
+INIT_BOWL_XY = [0.0, -0.1]
+INIT_BOWL_QUAT = [1.0, 0.0, 0.0, 0.0]
+# Base orientation for random target (bowl opening up); random yaw applied in load_actors.
+BASE_TARGET_QUAT = [0.0, 0.707, 0.707, 0.0]
+# Fallback when target is 3d only (position); 7d target has its own quat.
+QUAT_OF_TARGET_POSE = [0.0, 0.707, 0.707, 0.0]
+# Random target position range (same as initial-value setup in this file).
+TARGET_XLIM = [-0.3, 0.3]
+TARGET_YLIM = [-0.15, 0.15]
+MIN_TARGET_SEP = 0.13
+MIN_TARGET_TO_INIT = 0.13
 
+# Place step tuning (if planning fails, adjust in order below).
+# - PLACE_PRE_DIS: height of pre-place waypoint above target (m). Larger = easier to plan (try 0.10, 0.12, 0.15).
+# - PLACE_DIS: final approach distance (m). Keep 0.0 to place on target.
+# - PLACE_CONSTRAIN: "align" = use target orientation (deterministic EE); "free" = only z aligned (looser, try if align fails).
+# - functional_point_id: which functional point of the actor to align to the target. Role: place_actor
+#   uses it as place_start_pose (alignment reference). For 002_bowl the only valid value is 0 (defined in
+#   model_data; invalid id causes get_functional_point to return None and place_actor to raise
+#   'NoneType' has no attribute 'to_transformation_matrix').
+PLACE_PRE_DIS = 0.12
+PLACE_DIS = 0.0
+# "free" = only z aligned (recommended in code_gen/prompt.py for general placement; "align" can yield no IK).
+PLACE_CONSTRAIN = "free"
+FUNCTIONAL_POINT_ID = 0
 
-def _pose_from_actor(actor):
-    """Return pose as sapien.Pose so base class can use .p / .to_transformation_matrix()."""
-    raw = actor.get_pose()
-    if hasattr(raw, "p"):
-        return raw
-    arr = np.array(raw)
-    if arr.size == 7:
-        return sapien.Pose(arr[:3].tolist(), arr[3:].tolist())
-    if arr.size == 3:
-        return sapien.Pose(arr.tolist(), [1, 0, 0, 0])
-    return sapien.Pose([0, 0, 0], [1, 0, 0, 0])
-
-
-class _PlaceActorProxy:
-    """Proxy so base place_actor gets sapien.Pose from get_pose() (some SAPIEN versions return ndarray)."""
-
-    def __init__(self, actor):
-        self._actor = actor
-
-    def get_pose(self):
-        return _pose_from_actor(self._actor)
-
-    def __getattr__(self, name):
-        return getattr(self._actor, name)
+# Grasp depth: passed as grasp_dis to grasp_actor. Positive value = shallower grasp (arm stops short of
+# nominal contact), reducing penetration so the gripper does not close too deep and lift two stacked bowls.
+# Tune upward (e.g. 0.02, 0.03) if both bowls are still lifted; tune downward (e.g. 0.01, 0) if grasp fails.
+GRASP_DIS = 0.025
 
 
 class unstack_bowls_three(Base_Task):
@@ -73,139 +71,179 @@ class unstack_bowls_three(Base_Task):
             return True, []
         return super().check_stable()
 
-    def _settle_steps(self, n: int):
-        """Run n simulation steps so newly added actors settle and avoid initial overlap explosion."""
-        for _ in range(n):
-            self.scene.step()
-
     def load_actors(self):
-        # Initial state: same as stack_bowls_three final state (three bowls stacked).
-        # Z positions so that after preprocess (add table_z_bias) we get 0.76, 0.86, 0.96.
-        # Vertical spacing = 0.1 per bowl so stacked heights match stack_bowls_three.
-        z_base = 0.76 - self.table_z_bias
-        bowl_spacing = 0.05
-        # Single quat for both spawn and place: identity so bowl opening faces +z (upright).
-        self.quat_of_target_pose = [1.0, 0.0, 0.0, 0.0]
-
         def create_bowl(pose):
             return create_actor(
                 self, pose=pose, modelname="002_bowl", model_id=3, convex=True
             )
 
-        pose1 = sapien.Pose([0.0, -0.1, z_base], self.quat_of_target_pose)
-        self.bowl1 = create_bowl(pose1)
-        self._settle_steps(SETUP_GAP_STEP)
+        # Place one bowl then settle; repeat. First at INIT_BOWL_XY + z_init; each next: 
+        # !!! MUST read previous bowl pose, same xy and quat, z += BOWL_GAP_DIST.
+        # NOT Using the previous actor's settled pose - 
+        # CAUSES PENETRATION AND COLLISION EXPLOSION.
+        z_init = TABLE_Z + DESK_GAP_DIST
+        pose1 = list(INIT_BOWL_XY) + [z_init]
+        self.bowl1 = create_bowl(sapien.Pose(pose1, INIT_BOWL_QUAT))
+        for _ in range(SETTLE_STEP):
+            self.scene.step()
 
-        pose2 = sapien.Pose([0.0, -0.1, z_base + bowl_spacing], self.quat_of_target_pose)
-        self.bowl2 = create_bowl(pose2)
-        self._settle_steps(SETUP_GAP_STEP)
-
-        pose3 = sapien.Pose([0.0, -0.1, z_base + 2.0 * bowl_spacing], self.quat_of_target_pose)
-        self.bowl3 = create_bowl(pose3)
+        if not SINGLE_BOWL_MODE:
+            # --- Two-bowl: stack second bowl and setup two targets (restore by SINGLE_BOWL_MODE = False) ---
+            prev_pose = self.bowl1.get_pose()
+            pos2 = [prev_pose.p[0], prev_pose.p[1], prev_pose.p[2] + BOWL_GAP_DIST]
+            self.bowl2 = create_bowl(sapien.Pose(pos2, prev_pose.q))
+            for _ in range(SETTLE_STEP):
+                self.scene.step()
 
         self.add_prohibit_area(self.bowl1, padding=0.07)
-        self.add_prohibit_area(self.bowl2, padding=0.07)
-        self.add_prohibit_area(self.bowl3, padding=0.07)
-        target_pose = [-0.1, -0.15, 0.1, -0.05]
-        self.prohibited_area.append(target_pose)
+        if not SINGLE_BOWL_MODE:
+            self.add_prohibit_area(self.bowl2, padding=0.07)
+        self.prohibited_area.append([-0.1, -0.15, 0.1, -0.05])
 
-        # Random target poses (seed already set in _init_task_env_); same constraints as stack_bowls_three.
-        bowl_target_pose_lst = []
-        for i in range(3):
-            bowl_pose = rand_pose(
-                xlim=[-0.3, 0.3],
-                ylim=[-0.15, 0.15],
-                qpos=[0.5, 0.5, 0.5, 0.5],
-                ylim_prop=True,
-                rotate_rand=False,
-            )
+        # Use settled poses for target validity (min distance from init stack).
+        init1_xy = np.array(self.bowl1.get_pose().p[:2])
+        if not SINGLE_BOWL_MODE:
+            init2_xy = np.array(self.bowl2.get_pose().p[:2])
 
-            def check_bowl_pose(bowl_pose, existing):
-                for j in range(len(existing)):
-                    if np.sum(np.power(bowl_pose.p[:2] - existing[j][:2], 2)) < 0.0169:
-                        return False
+        def random_target_quat():
+            yaw = np.random.uniform(-np.pi, np.pi)
+            return t3d.quaternions.qmult(
+                BASE_TARGET_QUAT, t3d.euler.euler2quat(0, 0, yaw)
+            ).tolist()
+
+        z_t = TABLE_Z + self.table_z_bias
+        if SINGLE_BOWL_MODE:
+            # Single bowl: one random target, only check distance from init.
+            for _ in range(200):
+                p1 = np.array([
+                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
+                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
+                ])
+                if np.linalg.norm(p1 - init1_xy) >= MIN_TARGET_TO_INIT:
+                    q1 = random_target_quat()
+                    self.bowl1_target_pose = [p1[0], p1[1], z_t, *q1]
+                    break
+            else:
+                self.bowl1_target_pose = [-0.22, -0.1, z_t, *BASE_TARGET_QUAT]
+        else:
+            # Two-bowl: valid_two_targets and two target poses.
+            def valid_two_targets(p1_xy, p2_xy):
+                if np.linalg.norm(p1_xy - init1_xy) < MIN_TARGET_TO_INIT:
+                    return False
+                if np.linalg.norm(p1_xy - init2_xy) < MIN_TARGET_TO_INIT:
+                    return False
+                if np.linalg.norm(p2_xy - init1_xy) < MIN_TARGET_TO_INIT:
+                    return False
+                if np.linalg.norm(p2_xy - init2_xy) < MIN_TARGET_TO_INIT:
+                    return False
+                if np.linalg.norm(p1_xy - p2_xy) < MIN_TARGET_SEP:
+                    return False
                 return True
 
-            while (
-                abs(bowl_pose.p[0]) < 0.09
-                or np.sum(np.power(bowl_pose.p[:2] - np.array([0, -0.1]), 2)) < 0.0169
-                or not check_bowl_pose(bowl_pose, bowl_target_pose_lst)
-            ):
-                bowl_pose = rand_pose(
-                    xlim=[-0.3, 0.3],
-                    ylim=[-0.15, 0.15],
-                    qpos=[0.5, 0.5, 0.5, 0.5],
-                    ylim_prop=True,
-                    rotate_rand=False,
-                )
-            # Store world position (z from rand_pose is table-relative; add table_z_bias for place/check).
-            world_p = np.array([
-                bowl_pose.p[0],
-                bowl_pose.p[1],
-                bowl_pose.p[2] + self.table_z_bias,
-            ])
-            bowl_target_pose_lst.append(world_p)
+            for _ in range(200):
+                p1 = np.array([
+                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
+                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
+                ])
+                p2 = np.array([
+                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
+                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
+                ])
+                if not valid_two_targets(p1, p2):
+                    continue
+                q1, q2 = random_target_quat(), random_target_quat()
+                self.bowl1_target_pose = [p1[0], p1[1], z_t, *q1]
+                self.bowl2_target_pose = [p2[0], p2[1], z_t, *q2]
+                break
+            else:
+                q = BASE_TARGET_QUAT
+                self.bowl1_target_pose = [-0.22, -0.1, z_t, *q]
+                self.bowl2_target_pose = [0.22, -0.1, z_t, *q]
 
-        self.bowl1_target_pose = bowl_target_pose_lst[0]
-        self.bowl2_target_pose = bowl_target_pose_lst[1]
-        self.bowl3_target_pose = bowl_target_pose_lst[2]
+        self.quat_of_target_pose = QUAT_OF_TARGET_POSE
 
-    def move_bowl(self, actor, target_pose):
-        pose_for_arm = _pose_from_actor(actor)
-        actor_pose = np.array(pose_for_arm.p)
-        arm_tag = ArmTag("left" if actor_pose[0] < 0 else "right")
-
-        # Let base class try all contact points so a reachable grasp is found for upright bowls.
-        if self.las_arm is None or arm_tag == self.las_arm:
-            self.move(
-                self.grasp_actor(actor, arm_tag=arm_tag, pre_grasp_dis=0.1)
-            )
+    def move_bowl(self, actor, target_pose, arm_tag=None):
+        # Arm: same as unstack_blocks_three: target on left (target_pose[0] < 0) -> left arm, else right.
+        if arm_tag is None:
+            target_x = target_pose[0] if len(np.array(target_pose).flatten()) >= 1 else 0
+            arm_tag = ArmTag("left" if target_x < 0 else "right")
+        # Grasp: no contact_point_id so all contact points tried; last_gripper/last_actor, pre_grasp_dis=0.09,
+        # grasp_dis=GRASP_DIS for shallower grip to avoid lifting two stacked bowls.
+        # Place: see PLACE_* constants. pre_dis_axis="fp" = vertical approach.
+        flat = np.array(target_pose).flatten()
+        if flat.size >= 7:
+            target_pose_7d = flat[:7].tolist()
         else:
+            target_pose_7d = flat.tolist() + list(self.quat_of_target_pose)
+
+        if self.last_gripper is not None and (self.last_gripper != arm_tag):
             self.move(
-                self.grasp_actor(actor, arm_tag=arm_tag, pre_grasp_dis=0.1),
+                self.grasp_actor(actor, arm_tag=arm_tag, 
+                    pre_grasp_dis=0.09, 
+                    grasp_dis=GRASP_DIS),
                 self.back_to_origin(arm_tag=arm_tag.opposite),
             )
-        self.move(self.move_by_displacement(arm_tag, z=0.1))
+        else:
+            self.move(self.grasp_actor(actor, arm_tag=arm_tag, 
+            pre_grasp_dis=0.09, 
+            grasp_dis=GRASP_DIS))
+
+        self.move(self.move_by_displacement(arm_tag=arm_tag, z=0.07))
+
         self.move(
             self.place_actor(
-                _PlaceActorProxy(actor),
-                target_pose=target_pose.tolist() + self.quat_of_target_pose,
+                actor,
+                target_pose=target_pose_7d,
                 arm_tag=arm_tag,
-                pre_dis=0.09,
-                dis=0,
-                constrain="align",
+                functional_point_id=FUNCTIONAL_POINT_ID,
+                pre_dis=PLACE_PRE_DIS,
+                dis=PLACE_DIS,
+                pre_dis_axis="fp",
+                constrain=PLACE_CONSTRAIN,
+                align_axis=None,
             )
         )
-        self.move(self.move_by_displacement(arm_tag, z=0.09))
-        self.las_arm = arm_tag
-        return arm_tag
+        self.move(self.move_by_displacement(arm_tag=arm_tag, z=0.07))
+
+        self.last_gripper = arm_tag
+        self.last_actor = actor
+        return str(arm_tag)
 
     def play_once(self):
-        self.las_arm = None
-        # Unstack from top to bottom to avoid collision.
-        self.move_bowl(self.bowl3, self.bowl3_target_pose)
-        self.move_bowl(self.bowl2, self.bowl2_target_pose)
+        if getattr(self, "save_data", False):
+            self._take_picture()
+        self.last_gripper = None
+        self.last_actor = None
         self.move_bowl(self.bowl1, self.bowl1_target_pose)
-        self.info["info"] = {"{A}": "002_bowl/base3"}
+        if not SINGLE_BOWL_MODE:
+            self.move_bowl(self.bowl2, self.bowl2_target_pose)
+        self.info["info"] = {
+            "{A}": "002_bowl/base3",
+            **({} if SINGLE_BOWL_MODE else {"{B}": "002_bowl/base3"}),
+        }
         if FORCE_COLLECT:
             self.plan_success = True
         return self.info
 
     def check_success(self):
-        """When FORCE_COLLECT, always return True for collection; else check bowl poses and grippers."""
+        """When FORCE_COLLECT, always return True; else bowl(s) at targets and grippers open."""
         if FORCE_COLLECT:
             return True
-        bowl1_pose = _pose_from_actor(self.bowl1).p
-        bowl2_pose = _pose_from_actor(self.bowl2).p
-        bowl3_pose = _pose_from_actor(self.bowl3).p
+        t1 = np.array(self.bowl1_target_pose).flatten()
+        p1 = self.bowl1.get_pose().p
         eps = 0.02
+        ok1 = (
+            np.all(np.abs(p1[:2] - t1[:2]) < eps)
+            and np.abs(p1[2] - t1[2]) < eps
+        )
+        if SINGLE_BOWL_MODE:
+            return ok1 and self.is_left_gripper_open() and self.is_right_gripper_open()
+        t2 = np.array(self.bowl2_target_pose).flatten()
+        p2 = self.bowl2.get_pose().p
         return (
-            np.all(np.abs(bowl1_pose[:2] - self.bowl1_target_pose[:2]) < eps)
-            and np.abs(bowl1_pose[2] - self.bowl1_target_pose[2]) < eps
-            and np.all(np.abs(bowl2_pose[:2] - self.bowl2_target_pose[:2]) < eps)
-            and np.abs(bowl2_pose[2] - self.bowl2_target_pose[2]) < eps
-            and np.all(np.abs(bowl3_pose[:2] - self.bowl3_target_pose[:2]) < eps)
-            and np.abs(bowl3_pose[2] - self.bowl3_target_pose[2]) < eps
+            ok1
+            and np.all(np.abs(p2[:2] - t2[:2]) < eps)
+            and np.abs(p2[2] - t2[2]) < eps
             and self.is_left_gripper_open()
             and self.is_right_gripper_open()
         )

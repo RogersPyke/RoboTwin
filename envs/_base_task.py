@@ -101,6 +101,10 @@ class Base_Task(gym.Env):
 
         self.save_freq = kwags.get("save_freq")
         self.world_pcd = None
+        # ======== CUSTOM FIX ========
+        # if self.save_data:
+        #     self.folder_path = {"cache": f"{self.save_dir}/.cache/episode{self.ep_num}/"}
+        # ============================
 
         self.size_dict = list()
         self.cluttered_objs = list()
@@ -112,8 +116,10 @@ class Base_Task(gym.Env):
         self.need_plan = kwags.get("need_plan", True)
         self.left_joint_path = kwags.get("left_joint_path", [])
         self.right_joint_path = kwags.get("right_joint_path", [])
+        # ======== CUSTOM FIX ========
         self.left_cnt = 0
         self.right_cnt = 0
+        # ============================
 
         self.instruction = None  # for Eval
 
