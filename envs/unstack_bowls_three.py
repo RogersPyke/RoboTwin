@@ -2,7 +2,7 @@
 # vertical (z) gap. Init flow in load_actors: place one bowl -> settle SETTLE_STEP -> repeat.
 # Each placement: first bowl at INIT_BOWL_XY + INIT_BOWL_QUAT; later bowls above previous by BOWL_GAP_DIST in z.
 # Task: place both bowls to random target positions and random orientations (same range as initial setup).
-# Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.), sapien, numpy, transforms3d.
+# Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.), sapien, numpy.
 # Usage: Load via envs.unstack_bowls_three with task_name="unstack_bowls_three";
 #   e.g. script/collect_data.py unstack_bowls_three <task_config>
 #
@@ -16,7 +16,6 @@ from ._base_task import Base_Task
 from .utils import *
 import sapien
 import numpy as np
-import transforms3d as t3d
 
 FORCE_COLLECT = True
 # Gap above table for init spawn to avoid interpenetration (blow away).
@@ -30,14 +29,10 @@ SETTLE_STEP = 3500
 # Init: first bowl at INIT_BOWL_XY (xy), z = TABLE_Z + GAP_DIST; second bowl same xy, z += BOWL_GAP_DIST. Orientation (quat w,x,y,z).
 INIT_BOWL_XY = [0.0, -0.1]
 INIT_BOWL_QUAT = [1.0, 0.0, 0.0, 0.0]
-# Base orientation for random target (bowl opening up); random yaw applied in load_actors.
-BASE_TARGET_QUAT = [0.0, 0.707, 0.707, 0.0]
 # Fallback when target is 3d only (position); 7d target has its own quat.
 QUAT_OF_TARGET_POSE = [0.0, 0.707, 0.707, 0.0]
-# Random target position range (same as initial-value setup in this file).
-TARGET_XLIM = [-0.3, 0.3]
-TARGET_YLIM = [-0.15, 0.15]
-MIN_TARGET_SEP = 0.13
+# Random target: same range and method as stack_bowls_three (rand_pose + validation).
+# Min distance^2 between targets and from [0, -0.1] (stack uses 0.0169 = 0.13^2).
 MIN_TARGET_TO_INIT = 0.13
 
 # Place step tuning (if planning fails, adjust in order below).
@@ -51,7 +46,7 @@ MIN_TARGET_TO_INIT = 0.13
 PLACE_PRE_DIS = 0.12
 PLACE_DIS = 0.0
 # "free" = only z aligned (recommended in code_gen/prompt.py for general placement; "align" can yield no IK).
-PLACE_CONSTRAIN = "free"
+PLACE_CONSTRAIN = "align"
 FUNCTIONAL_POINT_ID = 0
 
 # Grasp depth: passed as grasp_dis to grasp_actor. Positive value = shallower grasp (arm stops short of
@@ -105,60 +100,71 @@ class unstack_bowls_three(Base_Task):
         if not SINGLE_BOWL_MODE:
             init2_xy = np.array(self.bowl2.get_pose().p[:2])
 
-        def random_target_quat():
-            yaw = np.random.uniform(-np.pi, np.pi)
-            return t3d.quaternions.qmult(
-                BASE_TARGET_QUAT, t3d.euler.euler2quat(0, 0, yaw)
-            ).tolist()
-
         z_t = TABLE_Z + self.table_z_bias
+        # Same range and method as stack_bowls_three: rand_pose + validation (|x|>=0.09, dist^2 from [0,-0.1]>=0.0169).
+        def valid_target_pose(pose, existing_xy_list):
+            if abs(pose.p[0]) < 0.09:
+                return False
+            if np.sum(np.power(pose.p[:2] - np.array([0, -0.1]), 2)) < 0.0169:
+                return False
+            p_xy = np.array(pose.p[:2])
+            if np.linalg.norm(p_xy - init1_xy) < MIN_TARGET_TO_INIT:
+                return False
+            if not SINGLE_BOWL_MODE and np.linalg.norm(p_xy - init2_xy) < MIN_TARGET_TO_INIT:
+                return False
+            for ex in existing_xy_list:
+                if np.sum(np.power(p_xy - ex, 2)) < 0.0169:
+                    return False
+            return True
+
+        # Orientation for placement: bowl opening up so place_actor IK is feasible (do not use rand_pose quat).
+        target_quat = list(QUAT_OF_TARGET_POSE)
         if SINGLE_BOWL_MODE:
-            # Single bowl: one random target, only check distance from init.
+            # Single bowl: one random target via rand_pose (position only), same validation as stack_bowls_three.
             for _ in range(200):
-                p1 = np.array([
-                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
-                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
-                ])
-                if np.linalg.norm(p1 - init1_xy) >= MIN_TARGET_TO_INIT:
-                    q1 = random_target_quat()
-                    self.bowl1_target_pose = [p1[0], p1[1], z_t, *q1]
+                pose = rand_pose(
+                    xlim=[-0.3, 0.3],
+                    ylim=[-0.15, 0.15],
+                    zlim=[z_t, z_t],
+                    qpos=[0.5, 0.5, 0.5, 0.5],
+                    ylim_prop=True,
+                    rotate_rand=False,
+                )
+                if valid_target_pose(pose, []):
+                    self.bowl1_target_pose = [pose.p[0], pose.p[1], pose.p[2], *target_quat]
                     break
             else:
-                self.bowl1_target_pose = [-0.22, -0.1, z_t, *BASE_TARGET_QUAT]
+                self.bowl1_target_pose = [-0.22, -0.1, z_t, *target_quat]
         else:
-            # Two-bowl: valid_two_targets and two target poses.
-            def valid_two_targets(p1_xy, p2_xy):
-                if np.linalg.norm(p1_xy - init1_xy) < MIN_TARGET_TO_INIT:
-                    return False
-                if np.linalg.norm(p1_xy - init2_xy) < MIN_TARGET_TO_INIT:
-                    return False
-                if np.linalg.norm(p2_xy - init1_xy) < MIN_TARGET_TO_INIT:
-                    return False
-                if np.linalg.norm(p2_xy - init2_xy) < MIN_TARGET_TO_INIT:
-                    return False
-                if np.linalg.norm(p1_xy - p2_xy) < MIN_TARGET_SEP:
-                    return False
-                return True
-
+            # Two-bowl: two targets via rand_pose (position only), same validation as stack_bowls_three.
             for _ in range(200):
-                p1 = np.array([
-                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
-                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
-                ])
-                p2 = np.array([
-                    np.random.uniform(TARGET_XLIM[0], TARGET_XLIM[1]),
-                    np.random.uniform(TARGET_YLIM[0], TARGET_YLIM[1]),
-                ])
-                if not valid_two_targets(p1, p2):
+                pose1 = rand_pose(
+                    xlim=[-0.3, 0.3],
+                    ylim=[-0.15, 0.15],
+                    zlim=[z_t, z_t],
+                    qpos=[0.5, 0.5, 0.5, 0.5],
+                    ylim_prop=True,
+                    rotate_rand=False,
+                )
+                if not valid_target_pose(pose1, []):
                     continue
-                q1, q2 = random_target_quat(), random_target_quat()
-                self.bowl1_target_pose = [p1[0], p1[1], z_t, *q1]
-                self.bowl2_target_pose = [p2[0], p2[1], z_t, *q2]
+                p1_xy = np.array(pose1.p[:2])
+                pose2 = rand_pose(
+                    xlim=[-0.3, 0.3],
+                    ylim=[-0.15, 0.15],
+                    zlim=[z_t, z_t],
+                    qpos=[0.5, 0.5, 0.5, 0.5],
+                    ylim_prop=True,
+                    rotate_rand=False,
+                )
+                if not valid_target_pose(pose2, [p1_xy]):
+                    continue
+                self.bowl1_target_pose = [pose1.p[0], pose1.p[1], pose1.p[2], *target_quat]
+                self.bowl2_target_pose = [pose2.p[0], pose2.p[1], pose2.p[2], *target_quat]
                 break
             else:
-                q = BASE_TARGET_QUAT
-                self.bowl1_target_pose = [-0.22, -0.1, z_t, *q]
-                self.bowl2_target_pose = [0.22, -0.1, z_t, *q]
+                self.bowl1_target_pose = [-0.22, -0.1, z_t, *target_quat]
+                self.bowl2_target_pose = [0.22, -0.1, z_t, *target_quat]
 
         self.quat_of_target_pose = QUAT_OF_TARGET_POSE
 
