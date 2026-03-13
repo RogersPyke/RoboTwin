@@ -22,7 +22,7 @@
     "Disassemble and place {A}, {B}, {C} at their target locations.",
     "Unstack the three blocks and move {A}, {B}, {C} to target positions.",
     "With {a}, {b}, {c}, unstack and place {A}, {B}, {C} at targets.",
-    "Unstack {C} on {B} on {A}; place each at its target using {a}, {b}, {c}."
+    "Unstack {C} from {B} and {B} from {A}; place each at its target using {a}, {b}, {c}."
   ],
   "unseen": [
     "Unstack the blocks and place {A}, {B}, {C} at their targets.",

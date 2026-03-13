@@ -5,14 +5,11 @@
 # position (same xy range and validation as stack_bowls_three). Orientation: bowl opening up
 # (QUAT_OF_TARGET_POSE). Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.),
 # sapien, numpy. Usage: envs.unstack_bowls_three, e.g. script/collect_data.py unstack_bowls_three <task_config>
-# FORCE_COLLECT: when True, skip stability check and always report success (for data collection).
-
 from ._base_task import Base_Task
 from .utils import *
 import sapien
 import numpy as np
 
-FORCE_COLLECT = True
 # Gap above table for init spawn to avoid interpenetration (blow away).
 DESK_GAP_DIST = 0.035
 # Vertical (z) distance between consecutive bowls at init (bowl2/bowl3 each BOWL_GAP_DIST above previous in z).
@@ -56,9 +53,6 @@ class unstack_bowls_three(Base_Task):
         super()._init_task_env_(**kwags)
 
     def check_stable(self):
-        """When FORCE_COLLECT, skip stability check so setup never raises UnStableError."""
-        if FORCE_COLLECT:
-            return True, []
         return super().check_stable()
 
     def load_actors(self):
@@ -218,19 +212,12 @@ class unstack_bowls_three(Base_Task):
         self.move_bowl(self.bowl3, self.bowl3_target_pose)
         self.move_bowl(self.bowl2, self.bowl2_target_pose)
         self.move_bowl(self.bowl1, self.bowl1_target_pose)
-        self.info["info"] = {
-            "{A}": "002_bowl/base3",
-            "{B}": "002_bowl/base3",
-            "{C}": "002_bowl/base3",
-        }
-        if FORCE_COLLECT:
-            self.plan_success = True
+        # Only {A} so instructions (schema: "{A} notifies the bowls") pass filter_instructions.
+        self.info["info"] = {"{A}": "002_bowl/base3"}
         return self.info
 
     def check_success(self):
-        """When FORCE_COLLECT, always return True; else all three bowls at targets and grippers open."""
-        if FORCE_COLLECT:
-            return True
+        """All three bowls at targets and grippers open."""
         t1 = np.array(self.bowl1_target_pose).flatten()
         t2 = np.array(self.bowl2_target_pose).flatten()
         t3 = np.array(self.bowl3_target_pose).flatten()
