@@ -732,6 +732,35 @@ MOVE_PILLBOTTLE_PAD = {
     }
 }
 
+UNMOVE_PILLBOTTLE_PAD = {
+    "task_name": "unmove_pillbottle_pad",
+    "task_description": "Use one arm to pick the pillbottle from the pad and place it on the table.\
+                        Grasp the pillbottle from the pad. Lift it, then place the pillbottle at the table target pose (self.pillbottle_target_pose).\
+                        Arm selection: right if pillbottle x > 0 else left.",
+    "current_code": """
+                class gpt_unmove_pillbottle_pad(unmove_pillbottle_pad):
+                    def play_once(self):
+                        pass
+                """,
+    "actor_list": {
+        "self.pillbottle": {
+            "name": "pillbottle",
+            "description": "The pillbottle that needs to be moved from the pad to the table.",
+            "modelname": "080_pillbottle",
+        },
+        "self.pad": {
+            "name": "pad",
+            "description": "The pad from which the pillbottle should be picked.",
+            "modelname": "sapien-block1",
+        },
+        "self.pillbottle_target_pose": {
+            "name": "pillbottle_target_pose",
+            "description": "The target pose on the table where the pillbottle should be placed (7-dim list [x, y, z, qw, qx, qy, qz]).",
+            "modelname": None,
+        },
+    }
+}
+
 PLACE_A2B_LEFT = {
     "task_name": "place_a2b_left",
     "task_description": "Use appropriate arm to place object on the left of target object.\

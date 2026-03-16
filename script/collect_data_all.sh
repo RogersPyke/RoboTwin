@@ -28,10 +28,10 @@ run_one() {
 
 FAILED=0
 
-run_one unstack_bowls_three demo_clean || ((FAILED++))
-run_one unstack_bowls_three demo_randomized || ((FAILED++))
-run_one stack_bowls_three demo_clean || ((FAILED++))
-run_one stack_bowls_three demo_randomized || ((FAILED++))
+# run_one unhanging_mug demo_clean || ((FAILED++))
+# run_one unhanging_mug demo_randomized || ((FAILED++))
+run_one hanging_mug demo_clean || ((FAILED++))
+run_one hanging_mug demo_randomized || ((FAILED++))
 
 if [[ $FAILED -gt 0 ]]; then
   echo "Done. $FAILED task(s) failed."
