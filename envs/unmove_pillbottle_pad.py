@@ -121,7 +121,8 @@ class unmove_pillbottle_pad(Base_Task):
             return self.info
 
         # Same rule as move: right arm if pillbottle (on pad) x > 0, else left.
-        arm_tag = ArmTag("right" if self.pillbottle.get_pose().p[0] > 0 else "left")
+        # arm_tag = ArmTag("right" if self.pillbottle.get_pose().p[0] > 0 else "left")
+        arm_tag = ArmTag("right" if self.pillbottle_tgt_pose[0] > 0 else "left")
 
         # Grasp the pillbottle from the pad (mirror of move: same params).
         self.move(self.grasp_actor(self.pillbottle, arm_tag=arm_tag, pre_grasp_dis=0.06, gripper_pos=0))

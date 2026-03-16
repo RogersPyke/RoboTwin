@@ -128,12 +128,12 @@ class unhanging_mug(Base_Task):
             self.plan_success = True
             return self.info
 
-        # Hang arm: grasp the mug from the rack (contact_point_id for mug handle/body).
+        # Hang arm: grasp the mug from the rack — use contact points convenient for approach from rack (right) side.
         self.move(self.grasp_actor(
             self.mug,
             arm_tag=hang_arm_tag,
             pre_grasp_dis=0.05,
-            contact_point_id=[0, 1, 2, 3, 4, 5],
+            # contact_point_id=MUG_CONTACT_RACK_SIDE,
         ))
         # Hang arm: move the mug off the rack along the rack fp axis (reverse of hanging_mug place onto rack).
         off_rack_target = self._get_off_rack_place_pose(OFF_RACK_DIST)
@@ -165,15 +165,22 @@ class unhanging_mug(Base_Task):
         )
         self.move(self.move_by_displacement(arm_tag=hang_arm_tag, z=0.1))
 
-        # Handoff: hang arm back to origin, grasp arm grasps the mug from the middle (same as hanging_mug).
+        # Handoff: hang arm back to origin, grasp arm grasps the mug from the middle.
+        # Use contact points convenient for left-arm approach (table side), not the same as rack-side grasp.
         self.move(
             self.back_to_origin(hang_arm_tag),
-            self.grasp_actor(self.mug, arm_tag=grasp_arm_tag, pre_grasp_dis=0.05),
+            self.grasp_actor(
+                self.mug,
+                arm_tag=grasp_arm_tag,
+                pre_grasp_dis=0.05,
+                # contact_point_id=MUG_CONTACT_TABLE_SIDE,
+            ),
         )
-        self.move(self.move_by_displacement(arm_tag=grasp_arm_tag, 
-            z=0.1, 
-            # quat=GRASP_DIRECTION_DIC["front"],
-            ))
+        # Lift in z only; do NOT pass quat. move_by_displacement(quat=...) overwrites EE orientation
+        # (origin_pose[3:]=quat), forcing the gripper and grasped mug to rotate to that pose.
+        # GRASP_DIRECTION_DIC["front"] = [-0.707,0,0,-0.707] (EE "facing forward") would make
+        # the mug axis horizontal (parallel to XOY); omit quat to keep mug upright after grasp.
+        self.move(self.move_by_displacement(arm_tag=grasp_arm_tag, z=0.1))
 
         # Grasp arm: place the mug at final target on the table.
         self.move(
