@@ -1,9 +1,10 @@
 # Purpose: Unhang the mug from the rack and place it on the table.
 # Initial state: mug is hanging on the rack (mug's functional point 0 aligned with rack's functional point 0).
-# Task: grasp the mug from the rack, lift it off, and place it on the table at a target pose.
-# Design: Off-rack move uses place_actor with motion constrained along the rack functional-point axis.
-# This is the reverse of hanging_mug (place onto rack along fp axis); constrained motion along the fp
-# axis yields feasible IK and avoids collision with the rack edge.
+# Task: grasp the mug from the rack, lift it off, place at a middle pose on the table, then the other arm
+#       grasps from the middle and places at the final target (same two-arm handoff strategy as hanging_mug).
+# Design: Mirrors hanging_mug: fixed grasp_arm_tag=left (table side), hang_arm_tag=right (rack side);
+#        off-rack move uses place_actor along the rack fp axis; then place at middle_pos; handoff via
+#        back_to_origin(hang_arm) + grasp_actor(grasp_arm); grasp_arm places at mug_target_pose.
 # Dependencies: Base_Task, envs.utils (rand_pose, create_actor, etc.), _GLOBAL_CONFIGS, numpy.
 # Usage: envs.unhanging_mug, e.g. script/collect_data.py unhanging_mug <task_config>
 from ._base_task import Base_Task
@@ -93,15 +94,29 @@ class unhanging_mug(Base_Task):
 
         self.add_prohibit_area(self.mug, padding=0.1)
         self.add_prohibit_area(self.rack, padding=0.1)
-        # Target pose on table for placing the mug (same xy range as hanging_mug middle_pos).
+        # Middle pose on table for handoff (same as hanging_mug.middle_pos).
         z_table = 0.75 + getattr(self, "table_z_bias", 0)
-        self.mug_target_pose = [0.0, -0.15, z_table, 1, 0, 0, 0]
+        self.middle_pos = [0.0, -0.15, z_table, 1, 0, 0, 0]
+        # Final target: mirror hanging_mug's initial mug region (left side), so grasp_arm has a real role.
+        # Same xlim/ylim as hanging_mug rand_create_actor for mug; upright quat.
+        target_pose = rand_pose(
+            xlim=[-0.25, -0.1],
+            ylim=[-0.05, 0.05],
+            zlim=[z_table, z_table],
+            qpos=[1, 0, 0, 0],
+            rotate_rand=False,
+        )
+        self.mug_target_pose = [target_pose.p[0], target_pose.p[1], target_pose.p[2], 1, 0, 0, 0]
 
     def play_once(self):
+        # Same arm roles as hanging_mug: grasp_arm (left) = table side, hang_arm (right) = rack side.
+        grasp_arm_tag = ArmTag("left")
+        hang_arm_tag = ArmTag("right")
+        self._grasp_arm_tag = grasp_arm_tag
+        self._hang_arm_tag = hang_arm_tag
+
         if getattr(self, "skip_robot_movement", False):
             # Skip all planning/IK and movement; record env-only video (blocks planning raises).
-            mug_x = self.mug.get_pose().p[0]
-            self._hang_arm_tag = ArmTag("right") if mug_x > 0 else ArmTag("left")
             self.info["info"] = {"{A}": f"039_mug/base{self.mug_id}", "{B}": "040_rack/base0"}
             save_data_orig = self.save_data
             self.save_data = True
@@ -113,24 +128,14 @@ class unhanging_mug(Base_Task):
             self.plan_success = True
             return self.info
 
-        # Grasp the mug from the rack: right arm if mug x > 0 else left (front approach).
-        mug_x = self.mug.get_pose().p[0]
-        hang_arm_tag = ArmTag("right") if mug_x > 0 else ArmTag("left")
-        self._hang_arm_tag = hang_arm_tag
-        # Grasp mug on rack, then lift off.
-        # contact_point_id: restrict to mug handle/body points; None = try all from model_data.
-        # If the robot never moves, choose_grasp_pose likely returned (None, None) (no valid grasp).
-        # Try [0, 1, 2, 3] (common for mugs/blocks) or inspect with _print_all_grasp_pose_of_contact_points(self.mug).
-        self.move(self.grasp_actor(self.mug,
+        # Hang arm: grasp the mug from the rack (contact_point_id for mug handle/body).
+        self.move(self.grasp_actor(
+            self.mug,
             arm_tag=hang_arm_tag,
             pre_grasp_dis=0.05,
-            contact_point_id=[0,1,2,3,4,5],
+            contact_point_id=[0, 1, 2, 3, 4, 5],
         ))
-        # Move the mug off the rack by constrained motion along the rack functional-point axis.
-        # Reason: move_by_displacement in an arbitrary direction often had no IK solution after grasp.
-        # Fix: use place_actor to a pose along the fp axis (reverse of hanging_mug). Success is because
-        # the motion is constrained along the functional-point axis and is the exact reverse of the
-        # placing (hanging) action, so the same motion pattern that works for hang works for unhang.
+        # Hang arm: move the mug off the rack along the rack fp axis (reverse of hanging_mug place onto rack).
         off_rack_target = self._get_off_rack_place_pose(OFF_RACK_DIST)
         self.move(
             self.place_actor(
@@ -145,30 +150,51 @@ class unhanging_mug(Base_Task):
                 pre_dis_axis="fp",
             )
         )
-        # Move the eef : lift to avoid collision with table.
         self.move(self.move_by_displacement(arm_tag=hang_arm_tag, z=0.1, move_axis="world"))
-        # Place the mug on the table at target pose.
-        # Mirror hanging_mug's middle_pos placement: no functional_point_id, no pre_dis_axis,
-        # so approach uses default "grasp" axis and placement uses actor pose (z_transform=True).
-        # This avoids over-constraining and yields feasible IK like the inverse task.
+
+        # Hang arm: place the mug at middle_pos on the table (mirror of hanging_mug: grasp_arm places at middle).
         self.move(
             self.place_actor(
                 self.mug,
                 arm_tag=hang_arm_tag,
+                target_pose=self.middle_pos,
+                pre_dis=0.05,
+                dis=0.0,
+                constrain="free",
+            )
+        )
+        self.move(self.move_by_displacement(arm_tag=hang_arm_tag, z=0.1))
+
+        # Handoff: hang arm back to origin, grasp arm grasps the mug from the middle (same as hanging_mug).
+        self.move(
+            self.back_to_origin(hang_arm_tag),
+            self.grasp_actor(self.mug, arm_tag=grasp_arm_tag, pre_grasp_dis=0.05),
+        )
+        self.move(self.move_by_displacement(arm_tag=grasp_arm_tag, 
+            z=0.1, 
+            # quat=GRASP_DIRECTION_DIC["front"],
+            ))
+
+        # Grasp arm: place the mug at final target on the table.
+        self.move(
+            self.place_actor(
+                self.mug,
+                arm_tag=grasp_arm_tag,
                 target_pose=self.mug_target_pose,
                 pre_dis=0.05,
                 dis=0.0,
                 constrain="free",
             )
         )
-        self.move(self.move_by_displacement(arm_tag=hang_arm_tag, z=0.1, move_axis="world"))
+        self.move(self.move_by_displacement(arm_tag=grasp_arm_tag, z=0.1))
+
         self.info["info"] = {"{A}": f"039_mug/base{self.mug_id}", "{B}": "040_rack/base0"}
         if getattr(self, "skip_success_check", False):
             self.plan_success = True
         return self.info
 
     def check_success(self):
-        """Mug is on the table (not on rack), gripper is open."""
+        """Mug is on the table at target pose; gripper of the arm that did final place (grasp_arm) is open."""
         if getattr(self, "skip_success_check", False):
             return True
         mug_pos = self.mug.get_pose().p
@@ -179,5 +205,6 @@ class unhanging_mug(Base_Task):
             np.all(np.abs(mug_pos[:2] - np.array(self.mug_target_pose[:2])) < eps_xy)
             and np.abs(mug_pos[2] - target_z) < eps_z
         )
-        gripper_open = self.is_right_gripper_open() if getattr(self, "_hang_arm_tag", ArmTag("right")) == ArmTag("right") else self.is_left_gripper_open()
+        grasp_arm = getattr(self, "_grasp_arm_tag", ArmTag("left"))
+        gripper_open = self.is_left_gripper_open() if grasp_arm == ArmTag("left") else self.is_right_gripper_open()
         return on_table and gripper_open

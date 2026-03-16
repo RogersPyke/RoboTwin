@@ -8,7 +8,8 @@ from ._GLOBAL_CONFIGS import *
 # When True: skip all robot planning/IK and movement; record env-only video (only way to block planning raises).
 SKIP_ROBOT_MOVEMENT = False
 # When True: force episode as success so the script records/saves video (does not block planning raises).
-SKIP_SUCCESS_CHECK = True
+SKIP_SUCCESS_CHECK = False
+# !!! Above two args should always be False for formal data collection. !!!
 # Number of frames to record when skipping robot movement (env-only video).
 SKIP_SUCCESS_CHECK_VIDEO_FRAMES = 100
 
@@ -44,14 +45,14 @@ class unmove_pillbottle_pad(Base_Task):
             )
 
         # Pad pose: same sampling as move (target_rand_pose); xlim/ylim/distance rule unchanged.
-        pad_tgt_pose = rand_pose(
+        pad_init_pose = rand_pose(
             xlim=[0.05, 0.25] if pillbottle_tgt_pose.p[0] > 0 else [-0.25, -0.05],
             ylim=[-0.2, 0.1],
             qpos=[1, 0, 0, 0],
             rotate_rand=False,
         )
-        while (np.sqrt((pad_tgt_pose.p[0] - pillbottle_tgt_pose.p[0]) ** 2 + (pad_tgt_pose.p[1] - pillbottle_tgt_pose.p[1]) ** 2) < 0.1):
-            pad_tgt_pose = rand_pose(
+        while (np.sqrt((pad_init_pose.p[0] - pillbottle_tgt_pose.p[0]) ** 2 + (pad_init_pose.p[1] - pillbottle_tgt_pose.p[1]) ** 2) < 0.1):
+            pad_init_pose = rand_pose(
                 xlim=[0.05, 0.25] if pillbottle_tgt_pose.p[0] > 0 else [-0.25, -0.05],
                 ylim=[-0.2, 0.1],
                 qpos=[1, 0, 0, 0],
@@ -60,7 +61,7 @@ class unmove_pillbottle_pad(Base_Task):
         half_size = [0.04, 0.04, 0.0005]
         self.pad = create_box(
             scene=self,
-            pose=pad_tgt_pose,
+            pose=pad_init_pose,
             half_size=half_size,
             color=(0, 0, 1),
             name="box",
