@@ -164,6 +164,14 @@ class Base_Task(gym.Env):
 
         self.stage_success_tag = False
 
+        # ========== CUSTOM MODIFICATION ==========
+        # Apply end-reset wrapper once per instance (config from kwags); no change needed in collect_data/eval scripts.
+        if not getattr(self, "_end_reset_wrapped", False):
+            from ._end_reset_wrapper import with_end_reset, get_force_end_reset_to_init
+            with_end_reset(self, get_force_end_reset_to_init(kwags))
+            self._end_reset_wrapped = True
+        # =========================================
+        
     def check_stable(self):
         actors_list, actors_pose_list = [], []
         for actor in self.scene.get_all_actors():
