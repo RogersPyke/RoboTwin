@@ -79,7 +79,7 @@ def _do_reset_to_init(task_env, logger):
             task_env._eval_reset_completed = getattr(task_env, "plan_success", False)
             if not task_env._eval_reset_completed:
                 task_env.plan_success = False
-        logger.info("\033[92m[end_reset_wrapper] SUCCESS: robot reset to init state at episode end.\033[0m")
+        logger.debug("\033[92m[end_reset_wrapper] SUCCESS: robot reset to init state at episode end.\033[0m")
     except Exception as e:
         logger.error("\033[91m[end_reset_wrapper] ERR: end reset failed: %s\033[0m", e, exc_info=True)
         if getattr(task_env, "eval_mode", False):

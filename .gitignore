@@ -35,3 +35,6 @@ docs/
 # logs
 logs/
 *.log
+
+# nohup
+nohup.out
