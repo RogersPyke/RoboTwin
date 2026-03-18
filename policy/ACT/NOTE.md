@@ -29,4 +29,11 @@ The task_config field refers to the evaluation environment configuration, while 
 
 ---
 
-Experiment 1: test if reverse task data can transfer to forward task.
+Experiment 1: test if fake forward task data can benefit to forward task.
+
+
+
+Experiment 2: test if reverse task data can benefit to forward task.
+
+
+Experiment 3: test if reverse task data can benefit to forward task.

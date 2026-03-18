@@ -3,7 +3,7 @@
 Batch data collection launcher: Cartesian product of task list x config list,
 run via collect_data.sh in parallel. Config is passed via env vars from collect_data_flow.sh.
 
-Dependencies: Python 3.6+, standard library only (subprocess, itertools, logging, multiprocessing).
+Dependencies: Python 3.6+, standard library only (subprocess, logging, multiprocessing).
 Usage: invoked by collect_data_flow.sh; expects env TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL
   (comma-separated; GPU_PARALLEL values are integers).
 
@@ -13,13 +13,15 @@ Call-chain note (from this script as caller):
       when left and right curobo config paths are equal; otherwise it uses subprocess+pipe and does
       not set left_planner. Later update_world_pcd() always accesses left_planner, so that path
       triggers AttributeError. Caller cannot fix this without changing robot.py.
-  (2) Ctrl+C not aborting: This script uses a multiprocessing Pool; the main process blocks on
-      pool.starmap() so SIGINT is not handled until a worker returns. Workers can also receive
-      SIGINT. Mitigation here: starmap_async + get(timeout) loop and worker initializer to ignore
-      SIGINT, so only the main process handles Ctrl+C and terminates the pool.
+  (2) Process groups and shutdown: Parent must not exit until all children are terminated;
+      otherwise subprocesses become orphans. This script uses process groups: main process is
+      the group leader; each Pool worker becomes its own process group leader. Subprocesses
+      (Popen) are started without start_new_session so they stay in the worker's group. On
+      SIGINT/SIGTERM the main process first terminates the pool (workers get SIGTERM); each
+      worker's SIGTERM handler kills its entire process group (worker + subprocesses), then
+      main joins the pool and exits.
 """
 
-import itertools
 import logging
 import multiprocessing as mp
 import os
@@ -36,6 +38,47 @@ from typing import Optional
 def _worker_ignore_sigint():
     """Ignore SIGINT in pool workers so only the main process handles Ctrl+C."""
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+def _worker_init():
+    """
+    Pool worker initializer: ignore SIGINT, create own process group, install SIGTERM
+    handler to kill entire group (worker + Popen children) so no orphans on shutdown.
+    """
+    _worker_ignore_sigint()
+    _worker_process_group_and_sigterm()
+
+
+def _worker_process_group_and_sigterm():
+    """
+    Make this worker the leader of its own process group and install SIGTERM handler
+    that kills the whole group (worker + any Popen children). Ensures no orphan subprocesses
+    when the main process requests shutdown.
+    """
+    try:
+        os.setpgid(0, 0)
+    except OSError:
+        pass
+    def _kill_process_group(_signum, _frame):
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        try:
+            os.killpg(os.getpgrp(), signal.SIGTERM)
+        except OSError:
+            pass
+    signal.signal(signal.SIGTERM, _kill_process_group)
+
+
+def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging.Logger):
+    """
+    Install SIGTERM handler so that on external kill (e.g. systemd, kill <pid>), the main
+    process sets shutdown_event and then the main loop will terminate the pool and exit.
+    Does not run cleanup inside the handler (not signal-safe); only sets the flag.
+    """
+
+    def _handler(_signum, _frame):
+        shutdown_event.set()
+
+    signal.signal(signal.SIGTERM, _handler)
 
 # ---------------------------------------------------------------------------
 # Config from env (set by collect_data_flow.sh)
@@ -195,15 +238,25 @@ def _wrapper_progress_message(line: str, state: dict) -> Optional[str]:
     return None
 
 
-def _read_stdout_and_log_wrapper(proc: subprocess.Popen, state: dict, log: logging.Logger) -> None:
+def _run_tag(task: str, cfg: str, use_color: bool = True) -> str:
+    """Return a consistent prefix for log lines: [task][cfg]. use_color adds ANSI for console."""
+    if use_color:
+        return f"{BLUE}[{task}][{cfg}]{RESET}"
+    return f"[{task}][{cfg}]"
+
+
+def _read_stdout_and_log_wrapper(
+    proc: subprocess.Popen, state: dict, log: logging.Logger, task: str, cfg: str
+) -> None:
     """Read subprocess stdout line by line and log wrapper progress messages. Used when SUBPROCESS_PRINT is False."""
+    tag = _run_tag(task, cfg)
     while True:
         line = proc.stdout.readline()
         if not line:
             break
         msg = _wrapper_progress_message(line, state)
         if msg:
-            log.info("[wrapper] %s", msg)
+            log.info("%s wrapper: %s", tag, msg)
 
 
 def run_collect_data_sh(
@@ -216,8 +269,9 @@ def run_collect_data_sh(
     When subprocess_print is False, only wrapper progress (seed test, result, saving video) is printed.
     """
     log = logging.getLogger("run_collect")
+    tag = _run_tag(task, cfg)
     cmd = ["bash", str(script_dir / "collect_data.sh"), task, cfg, str(gpu_id)]
-    log.info("[run_collect] %s %s GPU%s", task, cfg, gpu_id)
+    log.info("%s START GPU%s", tag, gpu_id)
     try:
         if subprocess_print:
             result = subprocess.run(
@@ -229,6 +283,8 @@ def run_collect_data_sh(
             )
             out, err = None, None
         else:
+            # Do not use start_new_session: keep subprocess in worker's process group
+            # so that worker's SIGTERM handler (killpg) terminates this child too.
             proc = subprocess.Popen(
                 cmd,
                 cwd=str(script_dir),
@@ -240,7 +296,7 @@ def run_collect_data_sh(
             state = {"in_data_collection": False, "data_collection_episode_index": 0}
             reader = threading.Thread(
                 target=_read_stdout_and_log_wrapper,
-                args=(proc, state, log),
+                args=(proc, state, log, task, cfg),
                 daemon=True,
             )
             reader.start()
@@ -254,15 +310,15 @@ def run_collect_data_sh(
             result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
 
         if result.returncode != 0:
-            log.error("[run_collect] FAILED %s %s stderr: %s", task, cfg, result.stderr or result.stdout)
+            log.error("%s FAILED stderr: %s", tag, result.stderr or result.stdout)
             return False
-        log.success("[run_collect] OK %s %s", task, cfg)
+        log.success("%s OK", tag)
         return True
     except subprocess.TimeoutExpired:
-        log.error("[run_collect] TIMEOUT %s %s", task, cfg)
+        log.error("%s TIMEOUT", tag)
         return False
     except Exception as e:
-        log.exception("[run_collect] ERR %s %s: %s", task, cfg, e)
+        log.exception("%s ERR: %s", tag, e)
         return False
 
 
@@ -281,10 +337,12 @@ def worker(jobs: list, gpu_id: int, script_dir: Path, subprocess_print: bool) ->
 
 def main() -> int:
     """
-    Load config from env, build Cartesian product TASK_TO_COLL x CFG_TO_COLL,
-    assign jobs to workers by len(GPU_PARALLEL), run workers in parallel.
-    Exit 0 if all OK, 1 if any failed.
+    Load config from env, build job list with strict order, assign to workers by len(GPU_PARALLEL).
+    Order: (1) TASK order = TASK_TO_COLL order; (2) for each CFG, collect all TASKs then next CFG
+    (i.e. outer loop CFG, inner loop TASK); (3) GPU parallel preserves this order, processing
+    multiple jobs simultaneously. Exit 0 if all OK, 1 if any failed.
     When SUBPROCESS_PRINT is False, only wrapper progress (seed test, result, saving video) is printed.
+    Each run_collect line is prefixed with [task][cfg] so parallel workers' output can be distinguished.
     """
     task_to_coll, cfg_to_coll, gpu_parallel = load_config()
     subprocess_print = _parse_subprocess_print()
@@ -295,7 +353,8 @@ def main() -> int:
     log.info("[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
              task_to_coll, cfg_to_coll, gpu_parallel, subprocess_print)
 
-    product = list(itertools.product(task_to_coll, cfg_to_coll))
+    # Order: for each CFG, all TASKs (CFG outer, TASK inner); pair (task, cfg) for run_collect_data_sh.
+    product = [(task, cfg) for cfg in cfg_to_coll for task in task_to_coll]
     if not product:
         log.warning("[main] Empty Cartesian product; nothing to run.")
         return 0
@@ -309,20 +368,35 @@ def main() -> int:
         (worker_jobs[i], gpu_parallel[i], SCRIPT_DIR, subprocess_print)
         for i in range(n_workers)
     ]
-    pool = mp.Pool(processes=n_workers, initializer=_worker_ignore_sigint)
+    # Process group: main is group leader so we control shutdown; workers get own group in initializer.
+    try:
+        os.setpgid(0, 0)
+    except OSError:
+        pass
+    shutdown_event = threading.Event()
+    _main_install_shutdown_handler(shutdown_event, log)
+
+    def _terminate_pool_and_exit(exit_code: int) -> None:
+        """Kill all child processes (workers and their subprocesses) then exit. No return."""
+        log.warning("[main] Shutdown requested; terminating all workers and exiting.")
+        pool.terminate()
+        pool.join()
+        os._exit(exit_code)
+
+    pool = mp.Pool(processes=n_workers, initializer=_worker_init)
     try:
         results_obj = pool.starmap_async(worker, args_list)
+        results = None
         while True:
+            if shutdown_event.is_set():
+                _terminate_pool_and_exit(143)
             try:
                 results = results_obj.get(timeout=1.0)
                 break
             except mp.TimeoutError:
                 continue
     except KeyboardInterrupt:
-        log.warning("[main] Interrupted (Ctrl+C); terminating workers.")
-        pool.terminate()
-        pool.join()
-        return 130
+        _terminate_pool_and_exit(130)
     finally:
         pool.close()
         pool.join()
