@@ -59,8 +59,12 @@ def main(task_name=None, task_config=None):
         return robot_file
 
     if len(embodiment_type) == 1:
-        args["left_robot_file"] = get_embodiment_file(embodiment_type[0])
-        args["right_robot_file"] = get_embodiment_file(embodiment_type[0])
+        # Use a single canonical path so Robot.set_planner sees equal left/right curobo paths
+        # and sets left_planner/right_planner (avoids "no attribute left_planner" when
+        # communication_flag would otherwise be True due to path string differences).
+        canonical = os.path.normpath(os.path.abspath(get_embodiment_file(embodiment_type[0])))
+        args["left_robot_file"] = canonical
+        args["right_robot_file"] = canonical
         args["dual_arm_embodied"] = True
     elif len(embodiment_type) == 3:
         args["left_robot_file"] = get_embodiment_file(embodiment_type[0])

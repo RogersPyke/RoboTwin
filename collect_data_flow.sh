@@ -14,7 +14,9 @@ CFG_TO_COLL="demo_clean,demo_randomized"
 # Example: "0,0" = 2 processes on GPU 0; "0,1" = 2 processes on GPU 0 and 1.
 GPU_PARALLEL="0,0"
 
-export TASK_TO_COLL CFG_TO_COLL GPU_PARALLEL
+SUBPROCESS_PRINT=False
+
+export TASK_TO_COLL CFG_TO_COLL GPU_PARALLEL SUBPROCESS_PRINT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1

@@ -5,9 +5,6 @@ to process data for training, run:
 bash process_data.sh ${task_name} ${task_config} ${expert_data_num}
 # bash process_data.sh beat_block_hammer demo_clean 50
 # bash process_data.sh stack_blocks_three demo_clean 100
-# bash process_data.sh stack_blocks_three demo_randomized 100
-# bash process_data.sh hanging_mug demo_clean 100
-```
 in path .../ACT/
 ---
 to train, run:
@@ -29,3 +26,7 @@ bash eval.sh ${task_name} ${task_config} ${ckpt_setting} ${expert_data_num} ${se
 ```
 ---
 The task_config field refers to the evaluation environment configuration, while the ckpt_setting field refers to the training data configuration used during policy learning.
+
+---
+
+Experiment 1: test if reverse task data can transfer to forward task.
