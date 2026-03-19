@@ -18,5 +18,15 @@
             "cam_right_wrist",
             "cam_left_wrist"
         ]
+    },
+    "sim-move_pillbottle_pad-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-move_pillbottle_pad/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
     }
 }

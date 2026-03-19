@@ -2,6 +2,16 @@
 
 # == keep unchanged ==
 policy_name=ACT
+
+# ====== Wrapper Modification ======
+# Multi-task eval: must use --config <name>; config file under _ev_cfg/
+if [[ "$1" == "--config" && -n "${2:-}" ]]; then
+    cd "$(dirname "$0")"
+    python3 ./_ev_wrapper.py --config "$2"
+    exit 0
+fi
+# ==================
+
 task_name=${1}
 task_config=${2}
 ckpt_setting=${3}
