@@ -9,6 +9,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import traceback
@@ -42,10 +43,46 @@ def _setup_logger(act_dir: str) -> logging.Logger:
     return logger
 
 
-def _load_tr_cfg(act_dir: str, name: str) -> dict:
+def _parse_train_tasks_rows(cfg: dict) -> tuple:
+    """
+    @input: [dict, raw YAML cfg with TRAIN_TASKS or legacy TASK_* keys]
+    @output: [tuple, (task_names, task_configs, expert_counts) lists]
+    @scenario: [Support TRAIN_TASKS list of [name, cfg, num] and legacy parallel lists]
+    """
+    if "TRAIN_TASKS" in cfg:
+        rows = cfg["TRAIN_TASKS"]
+        if not rows or len(rows) < 2:
+            raise ValueError("TRAIN_TASKS must list at least 2 rows [task_name, task_config, expert_num].")
+        names, cfgs, nums = [], [], []
+        for i, row in enumerate(rows):
+            if not isinstance(row, (list, tuple)) or len(row) != 3:
+                raise ValueError(f"TRAIN_TASKS[{i}] must be [task_name, task_config, expert_num], got {row!r}")
+            names.append(str(row[0]).strip())
+            cfgs.append(str(row[1]).strip())
+            nums.append(int(row[2]))
+        if len(names) < 2:
+            raise ValueError("TRAIN_TASKS must list at least 2 tasks for multi-task training.")
+        return names, cfgs, nums
+    legacy = ("TASK_TO_TRAIN", "TASK_CFG_TO_TRAIN", "TASK_NUM_TO_TRAIN")
+    for k in legacy:
+        if k not in cfg:
+            raise ValueError(
+                "Config must define TRAIN_TASKS or legacy TASK_TO_TRAIN / TASK_CFG_TO_TRAIN / TASK_NUM_TO_TRAIN."
+            )
+    task_names = [str(x).strip() for x in cfg["TASK_TO_TRAIN"]]
+    task_configs = [str(x).strip() for x in cfg["TASK_CFG_TO_TRAIN"]]
+    expert_counts = [int(x) for x in cfg["TASK_NUM_TO_TRAIN"]]
+    if len(task_names) < 2:
+        raise ValueError("Must list at least 2 tasks for multi-task training.")
+    if not (len(task_names) == len(task_configs) == len(expert_counts)):
+        raise ValueError("TASK_TO_TRAIN, TASK_CFG_TO_TRAIN, TASK_NUM_TO_TRAIN must have same length.")
+    return task_names, task_configs, expert_counts
+
+
+def _load_tr_cfg(act_dir: str, name: str) -> tuple:
     """
     @input: [str, act_dir], [str, config name without .yaml]
-    @output: [dict, keys TASK_TO_TRAIN, TASK_CFG_TO_TRAIN, TASK_NUM_TO_TRAIN, TRAIN_SEED, TRAIN_GPU_ID]
+    @output: [tuple, (dict cfg, str absolute path to yaml file)]
     @scenario: [Load _tr_cfg/<name>.yaml for multi-task training]
     """
     base = name if name.endswith(".yaml") else f"{name}.yaml"
@@ -56,10 +93,11 @@ def _load_tr_cfg(act_dir: str, name: str) -> dict:
         cfg = yaml.safe_load(f)
     if not cfg:
         raise ValueError("Config file is empty.")
-    for k in ("TASK_TO_TRAIN", "TASK_CFG_TO_TRAIN", "TASK_NUM_TO_TRAIN", "TRAIN_SEED", "TRAIN_GPU_ID"):
+    for k in ("TRAIN_SEED", "TRAIN_GPU_ID"):
         if k not in cfg:
             raise ValueError(f"Missing required key in config: {k}")
-    return cfg
+    _parse_train_tasks_rows(cfg)
+    return cfg, os.path.abspath(path)
 
 
 def _mk_ckpt_eval_aliases(
@@ -107,17 +145,10 @@ def main(argv: list) -> int:
     logger = _setup_logger(act_dir)
 
     try:
-        cfg = _load_tr_cfg(act_dir, args.config)
-        task_names = [str(x).strip() for x in cfg["TASK_TO_TRAIN"]]
-        task_configs = [str(x).strip() for x in cfg["TASK_CFG_TO_TRAIN"]]
-        expert_counts = [int(x) for x in cfg["TASK_NUM_TO_TRAIN"]]
+        cfg, cfg_src_abspath = _load_tr_cfg(act_dir, args.config)
+        task_names, task_configs, expert_counts = _parse_train_tasks_rows(cfg)
         global_seed = int(cfg["TRAIN_SEED"])
         gpu_id = str(cfg["TRAIN_GPU_ID"])
-
-        if len(task_names) < 2:
-            raise ValueError("Config must list at least 2 tasks in TASK_TO_TRAIN.")
-        if not (len(task_names) == len(task_configs) == len(expert_counts)):
-            raise ValueError("TASK_TO_TRAIN, TASK_CFG_TO_TRAIN, TASK_NUM_TO_TRAIN must have same length.")
 
         combined_task_slug = "__".join(task_names)
         combined_config_slug = "__".join(task_configs)
@@ -196,6 +227,20 @@ def main(argv: list) -> int:
             json.dump(sim_task_configs, f, indent=4)
 
         ckpt_dir = f"./act_ckpt/act-{combined_task_slug}/{combined_config_slug}-{combined_total_episodes}"
+        os.makedirs(ckpt_dir, exist_ok=True)
+        cfg_basename = os.path.basename(cfg_src_abspath)
+        dst_cfg = os.path.join(ckpt_dir, cfg_basename)
+        shutil.copy2(cfg_src_abspath, dst_cfg)
+        manifest_path = os.path.join(ckpt_dir, "training_run_manifest.txt")
+        with open(manifest_path, "w", encoding="ascii") as mf:
+            mf.write("training_config_source=%s\n" % cfg_src_abspath)
+            mf.write("act_policy_dir=%s\n" % act_dir)
+            mf.write("combined_task_slug=%s\n" % combined_task_slug)
+            mf.write("combined_config_slug=%s\n" % combined_config_slug)
+            mf.write("combined_total_episodes=%s\n" % combined_total_episodes)
+            mf.write("copied_yaml=%s\n" % cfg_basename)
+        logger.info("Saved training config copy to %s and %s", dst_cfg, manifest_path)
+
         _mk_ckpt_eval_aliases(
             act_dir=act_dir,
             base_tasks=task_names,
@@ -207,6 +252,7 @@ def main(argv: list) -> int:
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        env["PYTHONNOUSERSITE"] = "1"
         cmd = [
             "python3",
             "imitate_episodes.py",

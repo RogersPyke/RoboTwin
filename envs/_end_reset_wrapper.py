@@ -11,6 +11,7 @@
 import os
 import logging
 from datetime import datetime, timezone, timedelta
+from types import MethodType
 
 from .utils import ArmTag
 
@@ -122,6 +123,8 @@ def with_end_reset(task_env, force_end_reset_to_init):
         _do_reset_to_init(task_env, logger)
 
     task_env.play_once = _play_once
-    task_env.take_action = _take_action
+    # Bind as instance method; plain function assignment would make take_action(action) pass
+    # action as self and raise "missing 1 required positional argument: 'action'".
+    task_env.take_action = MethodType(_take_action, task_env)
     task_env.eval_reset_to_init = _eval_reset_to_init
     return task_env

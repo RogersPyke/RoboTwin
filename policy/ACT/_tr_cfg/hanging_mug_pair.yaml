@@ -2,14 +2,8 @@
 # Run: bash train.sh --config example
 # Run process_data.sh for each task first.
 
-TASK_TO_TRAIN:
-  - hanging_mug
-  - unhanging_mug
-TASK_CFG_TO_TRAIN:
-  - demo_clean
-  - demo_randomized
-TASK_NUM_TO_TRAIN:
-  - 50
-  - 100
+TRAIN_TASKS:
+  - [hanging_mug, demo_clean, 100]
+  - [unhanging_mug, demo_clean, 100]
 TRAIN_SEED: 0
 TRAIN_GPU_ID: 0

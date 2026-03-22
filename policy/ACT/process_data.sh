@@ -1,3 +1,5 @@
+export PYTHONNOUSERSITE=1
+
 task_name=${1}
 task_config=${2}
 expert_data_num=${3}

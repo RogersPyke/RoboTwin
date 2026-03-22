@@ -1,0 +1,11 @@
+# Multi-task eval config (example)
+# Run: bash eval.sh --config example
+# Identifies which combined ckpt to load and on which task/config to evaluate.
+
+TRAIN_TASKS:
+  - [hanging_mug, demo_clean, 100]
+  - [unhanging_mug, demo_clean, 100]
+EVAL_TASKS:
+  - [hanging_mug, demo_clean, 100]
+EVAL_SEED: 0
+EVAL_GPU_ID: 0

@@ -109,10 +109,27 @@ bash process_data.sh move_pillbottle_pad demo_clean 100
 bash train.sh move_pillbottle_pad demo_clean 100 0 0
 bash eval.sh move_pillbottle_pad demo_clean demo_clean 100 0 0
 ```
-## Experiment 2:
+## **Experiment 2**:
 
 - test if reverse task data can benefit to forward task.
 
+- hanging_mug, demo_clean:
+- Baseline train on hanging_mug, 100.
+- Reverse train on unhanging_mug, 100.
+- Diff train on hanging_mug, 100; unhanging_mug, 100
+- Eval on task: hanging_mug.
+```
+# === Process data ===
+bash process_data.sh hanging_mug demo_clean 100
+bash process_data.sh unhanging_mug demo_clean 100
+
+# === Train and eval baseline ===
+bash train.sh hanging_mug demo_clean 100 0 0
+bash eval.sh hanging_mug demo_clean demo_clean 100 0 0
+
+# 
+bash train.sh --config example
+```
 
 ## Experiment 3:
 

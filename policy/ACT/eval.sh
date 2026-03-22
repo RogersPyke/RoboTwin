@@ -1,4 +1,5 @@
 #!/bin/bash
+export PYTHONNOUSERSITE=1
 
 # == keep unchanged ==
 policy_name=ACT

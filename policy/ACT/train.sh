@@ -1,6 +1,9 @@
 #!/bin/bash
+export PYTHONNOUSERSITE=1
 # ====== Wrapper Modification ======
 # Multi-task: must use --config <name>; config file under _tr_cfg/
+# On start, _tr_wrapper.py copies that YAML plus training_run_manifest.txt into ckpt_dir
+# so each checkpoint tree records which config and paths were used (not only folder names).
 if [[ "$1" == "--config" && -n "${2:-}" ]]; then
     cd "$(dirname "$0")"
     python3 ./_tr_wrapper.py --config "$2"
