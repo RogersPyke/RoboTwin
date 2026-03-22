@@ -1,0 +1,3 @@
+[submodule "script/curobo"]
+	path = script/curobo
+	url = https://github.com/NVlabs/curobo.git
