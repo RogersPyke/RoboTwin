@@ -45,38 +45,23 @@ def _setup_logger(act_dir: str) -> logging.Logger:
 
 def _parse_train_tasks_rows(cfg: dict) -> tuple:
     """
-    @input: [dict, raw YAML cfg with TRAIN_TASKS or legacy TASK_* keys]
+    @input: [dict, raw YAML cfg with TRAIN_TASKS]
     @output: [tuple, (task_names, task_configs, expert_counts) lists]
-    @scenario: [Support TRAIN_TASKS list of [name, cfg, num] and legacy parallel lists]
+    @scenario: [Parse TRAIN_TASKS list of [name, cfg, num] for multi-task training]
     """
-    if "TRAIN_TASKS" in cfg:
-        rows = cfg["TRAIN_TASKS"]
-        if not rows or len(rows) < 2:
-            raise ValueError("TRAIN_TASKS must list at least 2 rows [task_name, task_config, expert_num].")
-        names, cfgs, nums = [], [], []
-        for i, row in enumerate(rows):
-            if not isinstance(row, (list, tuple)) or len(row) != 3:
-                raise ValueError(f"TRAIN_TASKS[{i}] must be [task_name, task_config, expert_num], got {row!r}")
-            names.append(str(row[0]).strip())
-            cfgs.append(str(row[1]).strip())
-            nums.append(int(row[2]))
-        if len(names) < 2:
-            raise ValueError("TRAIN_TASKS must list at least 2 tasks for multi-task training.")
-        return names, cfgs, nums
-    legacy = ("TASK_TO_TRAIN", "TASK_CFG_TO_TRAIN", "TASK_NUM_TO_TRAIN")
-    for k in legacy:
-        if k not in cfg:
-            raise ValueError(
-                "Config must define TRAIN_TASKS or legacy TASK_TO_TRAIN / TASK_CFG_TO_TRAIN / TASK_NUM_TO_TRAIN."
-            )
-    task_names = [str(x).strip() for x in cfg["TASK_TO_TRAIN"]]
-    task_configs = [str(x).strip() for x in cfg["TASK_CFG_TO_TRAIN"]]
-    expert_counts = [int(x) for x in cfg["TASK_NUM_TO_TRAIN"]]
-    if len(task_names) < 2:
-        raise ValueError("Must list at least 2 tasks for multi-task training.")
-    if not (len(task_names) == len(task_configs) == len(expert_counts)):
-        raise ValueError("TASK_TO_TRAIN, TASK_CFG_TO_TRAIN, TASK_NUM_TO_TRAIN must have same length.")
-    return task_names, task_configs, expert_counts
+    if "TRAIN_TASKS" not in cfg:
+        raise ValueError("Config must define TRAIN_TASKS as a list of [task_name, task_config, expert_num].")
+    rows = cfg["TRAIN_TASKS"]
+    if not rows or len(rows) < 2:
+        raise ValueError("TRAIN_TASKS must list at least 2 rows [task_name, task_config, expert_num].")
+    names, cfgs, nums = [], [], []
+    for i, row in enumerate(rows):
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            raise ValueError(f"TRAIN_TASKS[{i}] must be [task_name, task_config, expert_num], got {row!r}")
+        names.append(str(row[0]).strip())
+        cfgs.append(str(row[1]).strip())
+        nums.append(int(row[2]))
+    return names, cfgs, nums
 
 
 def _load_tr_cfg(act_dir: str, name: str) -> tuple:
@@ -100,41 +85,11 @@ def _load_tr_cfg(act_dir: str, name: str) -> tuple:
     return cfg, os.path.abspath(path)
 
 
-def _mk_ckpt_eval_aliases(
-    act_dir: str,
-    base_tasks: list,
-    combined_task_slug: str,
-    combined_config_slug: str,
-    combined_total_episodes: int,
-    logger: logging.Logger,
-) -> None:
-    """
-    @input: [str, act_dir], [List[str], base_tasks], [str], [str], [int], [logging.Logger]
-    @output: [None]
-    @scenario: [Create eval alias symlinks so eval.sh can load combined ckpt with real task_name]
-    """
-    combined_rel_target = os.path.join(
-        "..",
-        f"act-{combined_task_slug}",
-        f"{combined_config_slug}-{combined_total_episodes}",
-    )
-    for t in base_tasks:
-        alias_dir = os.path.join(act_dir, "act_ckpt", f"act-{t}")
-        os.makedirs(alias_dir, exist_ok=True)
-        alias_link = os.path.join(alias_dir, f"{combined_config_slug}-{combined_total_episodes}")
-        if os.path.lexists(alias_link):
-            if os.path.islink(alias_link):
-                continue
-            raise FileExistsError(f"Eval alias path exists and is not a symlink: {alias_link}")
-        os.symlink(combined_rel_target, alias_link)
-        logger.info("Created eval alias: %s -> %s", alias_link, combined_rel_target)
-
-
 def main(argv: list) -> int:
     """
     @input: [List[str], argv with --config <name>]
     @output: [int, 0 on success else non-zero]
-    @scenario: [Load _tr_cfg config, symlink combined dataset, update SIM_TASK_CONFIGS, train from scratch]
+    @scenario: [Load _tr_cfg config, link combined dataset episodes, update SIM_TASK_CONFIGS, train from scratch]
     """
     parser = argparse.ArgumentParser(description="Multi-task train wrapper (config under _tr_cfg/*.yaml)")
     parser.add_argument("--config", type=str, required=True, help="Config name (file: _tr_cfg/<name>.yaml)")
@@ -240,15 +195,6 @@ def main(argv: list) -> int:
             mf.write("combined_total_episodes=%s\n" % combined_total_episodes)
             mf.write("copied_yaml=%s\n" % cfg_basename)
         logger.info("Saved training config copy to %s and %s", dst_cfg, manifest_path)
-
-        _mk_ckpt_eval_aliases(
-            act_dir=act_dir,
-            base_tasks=task_names,
-            combined_task_slug=combined_task_slug,
-            combined_config_slug=combined_config_slug,
-            combined_total_episodes=combined_total_episodes,
-            logger=logger,
-        )
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)

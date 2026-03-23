@@ -5,7 +5,8 @@ export PYTHONNOUSERSITE=1
 policy_name=ACT
 
 # ====== Wrapper Modification ======
-# Multi-task eval: must use --config <name>; config file under _ev_cfg/
+# Joint (multi-task) checkpoint eval: MUST use --config <name> with _ev_cfg/<name>.yaml.
+# Positional-args eval below is for single-task checkpoints only (act-<one_task>/...).
 if [[ "$1" == "--config" && -n "${2:-}" ]]; then
     cd "$(dirname "$0")"
     python3 ./_ev_wrapper.py --config "$2"

@@ -1,5 +1,6 @@
-# Multi-task training config (example)
-# Run: bash train.sh --config example
+# Joint training: checkpoint path is
+#   act_ckpt/act-hanging_mug__unhanging_mug/demo_clean__demo_clean-<sum_episodes>/
+# Run: bash train.sh --config hanging_mug_pair
 # Run process_data.sh for each task first.
 
 TRAIN_TASKS:

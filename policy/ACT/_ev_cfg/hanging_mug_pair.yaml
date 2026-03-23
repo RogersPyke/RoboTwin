@@ -1,6 +1,6 @@
-# Multi-task eval config (example)
-# Run: bash eval.sh --config example
-# Identifies which combined ckpt to load and on which task/config to evaluate.
+# Joint eval: loads weights only from
+#   policy/ACT/act_ckpt/act-hanging_mug__unhanging_mug/demo_clean__demo_clean-<sum_episodes>/
+# TRAIN_TASKS must match the joint train run. Run: bash eval.sh --config hanging_mug_pair
 
 TRAIN_TASKS:
   - [hanging_mug, demo_clean, 100]
