@@ -3,6 +3,7 @@
 """
 Multi-task eval wrapper: reads _ev_cfg/<name>.yaml, loads the joint checkpoint under
 act_ckpt/act-<task1>__<task2>/... (from TRAIN_TASKS), runs eval on each EVAL_TASKS row.
+Each eval_result/.../<timestamp>/ receives _ev_cfg_<name>.yaml (copy via eval_policy.py).
 Usage: python3 _ev_wrapper.py --config <name>
 Config name is without extension; file must be _ev_cfg/<name>.yaml.
 Joint models are never addressed by single-task act_ckpt paths; use this wrapper only.
@@ -123,6 +124,12 @@ def main(argv: list) -> int:
         env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env["PYTHONWARNINGS"] = "ignore::UserWarning"
         env["PYTHONNOUSERSITE"] = "1"
+        # eval_policy.py copies this into each eval_result/<...>/<timestamp>/ so runs are
+        # labeled by config name, not only by act_ckpt folder slugs.
+        base = args.config if args.config.endswith(".yaml") else f"{args.config}.yaml"
+        ev_cfg_path = os.path.abspath(os.path.join(act_dir, "_ev_cfg", base))
+        env["ACT_EV_CFG_SNAPSHOT_SRC"] = ev_cfg_path
+        logger.info("Eval snapshot: ACT_EV_CFG_SNAPSHOT_SRC=%s", ev_cfg_path)
 
         ckpt_dir = (
             f"policy/ACT/act_ckpt/act-{combined_task_slug}/{ckpt_setting}-{expert_data_num}"

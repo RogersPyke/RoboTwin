@@ -1,5 +1,6 @@
 import sys
 import os
+import shutil
 import subprocess
 
 sys.path.append("./")
@@ -123,6 +124,13 @@ def main(usr_args):
 
     save_dir = Path(f"eval_result/{task_name}/{policy_name}/{task_config}/{ckpt_setting}/{current_time}")
     save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Multi-task eval: _ev_wrapper sets ACT_EV_CFG_SNAPSHOT_SRC so each eval_result folder
+    # records which _ev_cfg/*.yaml was used (joint ckpt dirs alone are ambiguous).
+    _ev_cfg_src = os.environ.get("ACT_EV_CFG_SNAPSHOT_SRC", "").strip()
+    if _ev_cfg_src and os.path.isfile(_ev_cfg_src):
+        dst = save_dir / f"_ev_cfg_{os.path.basename(_ev_cfg_src)}"
+        shutil.copy2(_ev_cfg_src, dst)
 
     if args["eval_video_log"]:
         video_save_dir = save_dir

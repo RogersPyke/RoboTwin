@@ -6,6 +6,7 @@ policy_name=ACT
 
 # ====== Wrapper Modification ======
 # Joint (multi-task) checkpoint eval: MUST use --config <name> with _ev_cfg/<name>.yaml.
+# Each eval_result/.../run folder gets a copy _ev_cfg_<name>.yaml via ACT_EV_CFG_SNAPSHOT_SRC.
 # Positional-args eval below is for single-task checkpoints only (act-<one_task>/...).
 if [[ "$1" == "--config" && -n "${2:-}" ]]; then
     cd "$(dirname "$0")"
