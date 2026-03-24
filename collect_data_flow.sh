@@ -59,11 +59,14 @@ trap on_signal SIGINT SIGTERM
 #   (2) For each CFG, collect all TASKs first, then next CFG.
 #   (3) GPU parallel: same order, multiple jobs at a time.
 # Task names to collect (comma-separated).
-TASK_TO_COLL="grab_roller, handover_block, 
-handover_mic, hanging_mug, 
-pick_dual_bottles, place_bread_basket, 
-place_bread_skillet, place_burger_fries, 
-place_cans_plasticbox"
+TASK_TO_COLL="stack_bowls_two, stack_blocks_two"
+
+# "grab_roller, handover_block, 
+# handover_mic, hanging_mug, 
+# pick_dual_bottles, place_bread_basket, 
+# place_bread_skillet, place_burger_fries, 
+# place_cans_plasticbox"
+
 # Task config names to collect (comma-separated).
 CFG_TO_COLL="franka_clean"
 # GPU IDs for parallel workers: length = number of processes; each value = Vulkan/CUDA GPU ID.
