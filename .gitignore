@@ -28,3 +28,8 @@ envs/curobo/*
 
 /*.json*
 /*.txt
+
+# Docs and logs
+docs/*
+logs/*
+nohup.out
