@@ -43,8 +43,9 @@ def main(args):
     batch_size_train = args["batch_size"]
     batch_size_val = args["batch_size"]
     num_epochs = args["num_epochs"]
-    early_stop_patience_epochs = args.get("early_stop_patience_epochs", 0)
+    early_stop_patience_evals = args.get("early_stop_patience_evals", 0)
     early_stop_rel_tol = args.get("early_stop_rel_tol", 0.0)
+    eval_steps_for_early_stop = args.get("eval_steps_for_early_stop", 100)
 
     # get task parameters
     is_sim = task_name[:4] == "sim-"
@@ -108,8 +109,9 @@ def main(args):
         "camera_names": camera_names,
         "real_robot": not is_sim,
         "save_freq": args["save_freq"],
-        "early_stop_patience_epochs": early_stop_patience_epochs,
+        "early_stop_patience_evals": early_stop_patience_evals,
         "early_stop_rel_tol": early_stop_rel_tol,
+        "eval_steps_for_early_stop": eval_steps_for_early_stop,
     }
 
     if is_eval:
@@ -134,18 +136,18 @@ def main(args):
     with open(stats_path, "wb") as f:
         pickle.dump(stats, f)
     best_ckpt_info = train_bc(train_dataloader, val_dataloader, config)
-    best_epoch, min_val_loss, best_state_dict, train_meta = best_ckpt_info
+    best_eval_step, min_val_loss, best_state_dict, train_meta = best_ckpt_info
 
     # save best checkpoint
     ckpt_path = os.path.join(ckpt_dir, f"policy_best.ckpt")
     torch.save(best_state_dict, ckpt_path)
-    print(f"Best ckpt, val loss {min_val_loss:.6f} @ epoch{best_epoch}")
+    print(f"Best ckpt, val loss {min_val_loss:.6f} @ step{best_eval_step}")
     _write_steps_txt(ckpt_dir, train_meta)
 
 
 def _write_steps_txt(ckpt_dir: str, meta: dict) -> None:
     """
-    @input: [str, ckpt_dir], [dict, meta keys: total_train_steps,total_epochs_run,stop_reason,best_epoch,min_val_loss]
+    @input: [str, ckpt_dir], [dict, meta keys: total_train_steps,total_evals_run,stop_reason,best_eval_step,min_val_loss,early_stop_patience_evals,early_stop_rel_tol]
     @output: [None]
     @scenario: [Persist final training step/stop info next to checkpoints]
     """
@@ -159,15 +161,15 @@ def _write_steps_txt(ckpt_dir: str, meta: dict) -> None:
         print(f"[WARN] Failed to write steps.txt: {exc}")
 
 
-def _is_early_stop_disabled(patience_epochs: int, rel_tol: float) -> bool:
+def _is_early_stop_disabled(patience_evals: int, rel_tol: float) -> bool:
     """
-    @input: [int, patience_epochs >= 0], [float, rel_tol >= 0.0]
+    @input: [int, patience_evals >= 0], [float, rel_tol >= 0.0]
     @output: [bool, True if disabled]
     @scenario: [Decide whether early stopping is disabled by default values]
     """
     # Early stopping is considered enabled only when BOTH are set to positive values.
     # Default (0, 0.0) means disabled.
-    return int(patience_epochs) <= 0 or float(rel_tol) <= 0.0
+    return int(patience_evals) <= 0 or float(rel_tol) <= 0.0
 
 
 def _is_relative_improvement(curr: float, best: float, rel_tol: float) -> bool:
@@ -404,8 +406,9 @@ def train_bc(train_dataloader, val_dataloader, config):
     seed = config["seed"]
     policy_class = config["policy_class"]
     policy_config = config["policy_config"]
-    early_stop_patience_epochs = int(config.get("early_stop_patience_epochs", 0))
+    early_stop_patience_evals = int(config.get("early_stop_patience_evals", 0))
     early_stop_rel_tol = float(config.get("early_stop_rel_tol", 0.0))
+    eval_steps_for_early_stop = int(config.get("eval_steps_for_early_stop", 100))
 
     set_seed(seed)
 
@@ -417,69 +420,33 @@ def train_bc(train_dataloader, val_dataloader, config):
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
-    epochs_no_improve = 0
+    evals_no_improve = 0
     total_train_steps = 0
+    total_evals_run = 0
 
-    if _is_early_stop_disabled(early_stop_patience_epochs, early_stop_rel_tol):
+    early_stop_enabled = not _is_early_stop_disabled(early_stop_patience_evals, early_stop_rel_tol)
+    if not early_stop_enabled:
         print(
-            "[WARN] Early stopping is disabled (patience=0 and rel_tol=0.0). "
+            "[WARN] Early stopping is disabled (patience_evals=0 and/or rel_tol<=0.0). "
             "Training will run for the full num_epochs."
         )
     else:
         print(
-            f"Early stopping enabled: patience_epochs={early_stop_patience_epochs}, rel_tol={early_stop_rel_tol}"
+            f"Early stopping enabled: patience_evals={early_stop_patience_evals}, "
+            f"rel_tol={early_stop_rel_tol}, eval_steps_for_early_stop={eval_steps_for_early_stop}"
         )
 
-    stop_reason = "reached_num_epochs"
+    stop_reason = "reached_training_end"
     epochs_run = 0
+    best_eval_step = -1
     for epoch in tqdm(range(num_epochs)):
         epochs_run = epoch + 1
         print(f"\nEpoch {epoch}")
-        # validation
-        with torch.inference_mode():
-            policy.eval()
-            epoch_dicts = []
-            for batch_idx, data in enumerate(val_dataloader):
-                forward_dict = forward_pass(data, policy)
-                epoch_dicts.append(forward_dict)
-            epoch_summary = compute_dict_mean(epoch_dicts)
-            validation_history.append(epoch_summary)
-
-            epoch_val_loss = epoch_summary["loss"]
-            epoch_val_loss_f = float(epoch_val_loss.item()) if hasattr(epoch_val_loss, "item") else float(epoch_val_loss)
-            if np.isinf(min_val_loss):
-                # first epoch always sets baseline best
-                min_val_loss = epoch_val_loss_f
-                best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
-                epochs_no_improve = 0
-            else:
-                improved = _is_relative_improvement(epoch_val_loss_f, float(min_val_loss), early_stop_rel_tol)
-                if improved:
-                    min_val_loss = epoch_val_loss_f
-                    best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
-                    epochs_no_improve = 0
-                else:
-                    epochs_no_improve += 1
-        print(f"Val loss:   {epoch_val_loss:.5f}")
-        summary_string = ""
-        for k, v in epoch_summary.items():
-            summary_string += f"{k}: {v.item():.3f} "
-
-        # early stop check (epoch-level, after validation)
-        if not _is_early_stop_disabled(early_stop_patience_epochs, early_stop_rel_tol):
-            if epochs_no_improve >= early_stop_patience_epochs:
-                stop_reason = (
-                    f"early_stop(patience={early_stop_patience_epochs}, rel_tol={early_stop_rel_tol})"
-                )
-                print(
-                    f"[WARN] Early stopping triggered at epoch={epoch} "
-                    f"(epochs_no_improve={epochs_no_improve})."
-                )
-                break
-
-        # training
+        # training (NOTE: step-based early-stop validation happens during training).
         policy.train()
         optimizer.zero_grad()
+        epoch_train_dicts = []
+        early_stop_triggered = False
         for batch_idx, data in enumerate(train_dataloader):
             forward_dict = forward_pass(data, policy)
             # backward
@@ -488,14 +455,95 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.step()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
+            epoch_train_dicts.append(forward_dict)
             total_train_steps += 1
-        epoch_summary = compute_dict_mean(train_history[(batch_idx + 1) * epoch:(batch_idx + 1) * (epoch + 1)])
-        epoch_train_loss = epoch_summary["loss"]
-        print(f"Train loss: {epoch_train_loss:.5f}")
-        summary_string = ""
-        for k, v in epoch_summary.items():
-            summary_string += f"{k}: {v.item():.3f} "
 
+            # Early-stop driven evaluation cadence: every K optimizer steps.
+            if early_stop_enabled and eval_steps_for_early_stop > 0:
+                if total_train_steps % eval_steps_for_early_stop == 0:
+                    with torch.inference_mode():
+                        policy.eval()
+                        eval_dicts = []
+                        for _, val_data in enumerate(val_dataloader):
+                            eval_dicts.append(forward_pass(val_data, policy))
+                        eval_summary = compute_dict_mean(eval_dicts)
+
+                    # Restore train mode for subsequent optimizer steps.
+                    policy.train()
+
+                    total_evals_run += 1
+                    validation_history.append(eval_summary)
+
+                    curr_val_loss = eval_summary["loss"]
+                    curr_val_loss_f = float(curr_val_loss.item()) if hasattr(curr_val_loss, "item") else float(curr_val_loss)
+
+                    if np.isinf(min_val_loss):
+                        # First evaluation sets baseline best.
+                        min_val_loss = curr_val_loss_f
+                        best_eval_step = int(total_train_steps)
+                        best_ckpt_info = (best_eval_step, min_val_loss, deepcopy(policy.state_dict()))
+                        evals_no_improve = 0
+                        print(f"Val loss @ step{best_eval_step}: {min_val_loss:.5f}")
+                    else:
+                        improved = _is_relative_improvement(curr_val_loss_f, float(min_val_loss), early_stop_rel_tol)
+                        if improved:
+                            min_val_loss = curr_val_loss_f
+                            best_eval_step = int(total_train_steps)
+                            best_ckpt_info = (best_eval_step, min_val_loss, deepcopy(policy.state_dict()))
+                            evals_no_improve = 0
+                            print(f"Val loss @ step{best_eval_step}: {min_val_loss:.5f} (improved)")
+                        else:
+                            evals_no_improve += 1
+                            print(f"Val loss @ step{total_train_steps}: {curr_val_loss_f:.5f} (no improve #{evals_no_improve})")
+
+                        if evals_no_improve >= early_stop_patience_evals:
+                            stop_reason = f"early_stop(patience={early_stop_patience_evals}, rel_tol={early_stop_rel_tol})"
+                            print(
+                                f"[WARN] Early stopping triggered at step={total_train_steps} "
+                                f"(evals_no_improve={evals_no_improve})."
+                            )
+                            early_stop_triggered = True
+                            break
+
+            if early_stop_triggered:
+                break
+
+        # End-of-epoch train loss for printing.
+        if epoch_train_dicts:
+            epoch_summary = compute_dict_mean([detach_dict(d) for d in epoch_train_dicts])
+            epoch_train_loss = epoch_summary["loss"]
+            epoch_train_loss_f = float(epoch_train_loss.item()) if hasattr(epoch_train_loss, "item") else float(epoch_train_loss)
+            print(f"Train loss: {epoch_train_loss_f:.5f}")
+
+        # When early stopping is disabled, still validate at epoch end (train -> validate).
+        if (not early_stop_enabled) and (epoch_train_dicts is not None):
+            with torch.inference_mode():
+                policy.eval()
+                epoch_dicts = []
+                for _, val_data in enumerate(val_dataloader):
+                    epoch_dicts.append(forward_pass(val_data, policy))
+                epoch_summary = compute_dict_mean(epoch_dicts)
+            total_evals_run += 1
+            validation_history.append(epoch_summary)
+
+            epoch_val_loss = epoch_summary["loss"]
+            epoch_val_loss_f = float(epoch_val_loss.item()) if hasattr(epoch_val_loss, "item") else float(epoch_val_loss)
+            if np.isinf(min_val_loss):
+                min_val_loss = epoch_val_loss_f
+                best_eval_step = int(total_train_steps)
+                best_ckpt_info = (best_eval_step, min_val_loss, deepcopy(policy.state_dict()))
+                evals_no_improve = 0
+            else:
+                improved = _is_relative_improvement(epoch_val_loss_f, float(min_val_loss), early_stop_rel_tol)
+                if improved:
+                    min_val_loss = epoch_val_loss_f
+                    best_eval_step = int(total_train_steps)
+                    best_ckpt_info = (best_eval_step, min_val_loss, deepcopy(policy.state_dict()))
+                    evals_no_improve = 0
+            print(f"Val loss:   {epoch_val_loss_f:.5f}")
+
+        if early_stop_triggered:
+            break
         if (epoch + 1) % config["save_freq"] == 0:
             ckpt_path = os.path.join(ckpt_dir, f"policy_epoch_{epoch + 1}_seed_{seed}.ckpt")
             torch.save(policy.state_dict(), ckpt_path)
@@ -504,24 +552,41 @@ def train_bc(train_dataloader, val_dataloader, config):
     ckpt_path = os.path.join(ckpt_dir, f"policy_last.ckpt")
     torch.save(policy.state_dict(), ckpt_path)
 
-    best_epoch, min_val_loss, best_state_dict = best_ckpt_info
-    ckpt_path = os.path.join(ckpt_dir, f"policy_epoch_{best_epoch}_seed_{seed}.ckpt")
+    if best_ckpt_info is None:
+        # If no evaluation ever ran (e.g., eval cadence > total steps),
+        # run one final validation to populate best_ckpt_info.
+        with torch.inference_mode():
+            policy.eval()
+            epoch_dicts = []
+            for _, val_data in enumerate(val_dataloader):
+                epoch_dicts.append(forward_pass(val_data, policy))
+            epoch_summary = compute_dict_mean(epoch_dicts)
+        total_evals_run += 1
+        validation_history.append(epoch_summary)
+
+        best_eval_step = int(total_train_steps)
+        min_val_loss = float(epoch_summary["loss"].item()) if hasattr(epoch_summary["loss"], "item") else float(epoch_summary["loss"])
+        best_state_dict = deepcopy(policy.state_dict())
+    else:
+        best_eval_step, min_val_loss, best_state_dict = best_ckpt_info
+
+    ckpt_path = os.path.join(ckpt_dir, f"policy_best_step_{best_eval_step}_seed_{seed}.ckpt")
     torch.save(best_state_dict, ckpt_path)
-    print(f"Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}")
+    print(f"Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at step {best_eval_step}")
 
     # save training curves
     plot_history(train_history, validation_history, epochs_run, ckpt_dir, seed)
 
     train_meta = {
         "total_train_steps": int(total_train_steps),
-        "total_epochs_run": int(epochs_run),
         "stop_reason": str(stop_reason),
-        "best_epoch": int(best_epoch),
+        "total_evals_run": int(total_evals_run),
+        "best_eval_step": int(best_eval_step),
         "min_val_loss": float(min_val_loss),
-        "early_stop_patience_epochs": int(early_stop_patience_epochs),
+        "early_stop_patience_evals": int(early_stop_patience_evals),
         "early_stop_rel_tol": float(early_stop_rel_tol),
     }
-    return best_epoch, min_val_loss, best_state_dict, train_meta
+    return best_eval_step, min_val_loss, best_state_dict, train_meta
 
 
 def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
@@ -577,10 +642,10 @@ if __name__ == "__main__":
     parser.add_argument("--state_dim", action="store", type=int, help="state dim", required=True)
     parser.add_argument("--save_freq", action="store", type=int, help="save ckpt frequency", required=False, default=6000)
     parser.add_argument(
-        "--early_stop_patience_epochs",
+        "--early_stop_patience_evals",
         action="store",
         type=int,
-        help="early stop: patience epochs without sufficient relative val-loss improvement (0 disables)",
+        help="early stop: patience eval calls without sufficient relative val-loss improvement (0 disables)",
         required=False,
         default=0,
     )
@@ -591,6 +656,14 @@ if __name__ == "__main__":
         help="early stop: required relative val-loss improvement to reset patience (0.0 disables when patience=0)",
         required=False,
         default=0.0,
+    )
+    parser.add_argument(
+        "--eval_steps_for_early_stop",
+        action="store",
+        type=int,
+        help="eval cadence for early stop: run validation every K train optimizer steps",
+        required=False,
+        default=100,
     )
     parser.add_argument(
         "--dim_feedforward",

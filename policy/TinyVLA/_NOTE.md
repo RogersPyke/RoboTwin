@@ -2,7 +2,7 @@
 ## Install
 To guarantee clean isolation between training and evaluation environments for both DexVLA and TinyVLA, we provide two distinct, self-contained setups.The training and testing environment can be used for both DexVLA and TinyVLA.
 
-Training Environment：
+Training Environment： dexvla-robo
 ```bash
 cd policy/TinyVLA
 conda env create -f Train_Tiny_DexVLA_train.yml
@@ -10,7 +10,7 @@ conda activate dexvla-robo
 cd policy_heads
 pip install -e .
 ```
-Evaluation Environment:
+Evaluation Environment: robotwin-tinyvla-eval
 
 Follow the RoboTwin 2.0 documentation to set up the RoboTwin environment. Once the environment is activated, run the following commands to install the required packages:
 ```bash
@@ -77,6 +77,21 @@ TASK=your_task # Set the Task
 ROOT=.../robotiwin/policy/TinyVLA # Set Root Path
 mnop=.../robotiwin/policy/TinyVLA/model_param/InternVL3-1B/ # Set The Path of base VLM
 ```
+
+### Early stopping (TinyVLA)
+TinyVLA supports an ACT-aligned early stopping mechanism driven by `eval_loss` during HF `Trainer` evaluation.
+
+By default it is disabled (`--early_stop_patience_evals=0` and `--early_stop_rel_tol=0.0`).
+To enable it (example):
+```bash
+--early_stop_patience_evals 3 \
+--early_stop_rel_tol 0.01 \
+--eval_steps_for_early_stop 100
+```
+
+When enabled, evaluations run every `eval_steps_for_early_stop` steps, and the best checkpoint is saved by coverage into:
+`$OUTPUT/policy_best/`
+
 ## Eval Policy
 You need to modify the corresponding path in the `deploy_policy.yml` file:
 1. **model_path** : Path to the trained model, in the OUTPUT path.

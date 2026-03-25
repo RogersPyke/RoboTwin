@@ -140,8 +140,9 @@ def main(argv: list) -> int:
         act_dim_feedforward = int(_get_cfg_opt(cfg, "ACT_DIM_FEEDFORWARD", 3200))
 
         # Early stopping: preferred via YAML. If None/null, do not pass and use script defaults (disabled).
-        early_stop_patience = cfg.get("EARLY_STOP_PATIENCE_EPOCHS", None)
+        early_stop_patience_evals = cfg.get("EARLY_STOP_PATIENCE_EVALS", None)
         early_stop_rel_tol = cfg.get("EARLY_STOP_REL_TOL", None)
+        eval_steps_for_early_stop = cfg.get("EVAL_STEPS_FOR_EARLY_STOP", None)
 
         combined_task_slug = "__".join(task_names)
         combined_config_slug = "__".join(task_configs)
@@ -163,8 +164,9 @@ def main(argv: list) -> int:
         logger.info("ACT chunk_size: %s", act_chunk_size)
         logger.info("ACT hidden_dim: %s", act_hidden_dim)
         logger.info("ACT dim_feedforward: %s", act_dim_feedforward)
-        logger.info("Early-stop patience: %s", early_stop_patience)
+        logger.info("Early-stop patience_evals: %s", early_stop_patience_evals)
         logger.info("Early-stop rel_tol: %s", early_stop_rel_tol)
+        logger.info("Early-stop eval_steps_for_early_stop: %s", eval_steps_for_early_stop)
 
         sim_cfg_path = "./SIM_TASK_CONFIGS.json"
         if not os.path.isfile(sim_cfg_path):
@@ -265,8 +267,9 @@ def main(argv: list) -> int:
             "--state_dim", str(train_state_dim),
             "--seed", str(global_seed),
         ]
-        _maybe_add_arg(cmd, "--early_stop_patience_epochs", early_stop_patience)
         _maybe_add_arg(cmd, "--early_stop_rel_tol", early_stop_rel_tol)
+        _maybe_add_arg(cmd, "--early_stop_patience_evals", early_stop_patience_evals)
+        _maybe_add_arg(cmd, "--eval_steps_for_early_stop", eval_steps_for_early_stop)
         logger.info("Launching training: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env)
         return 0

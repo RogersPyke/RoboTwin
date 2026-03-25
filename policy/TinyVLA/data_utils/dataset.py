@@ -257,29 +257,32 @@ def load_data(dataset_dir_l, camera_names, chunk_size, config, rank0_print=print
     if type(dataset_dir_l) == str:
         dataset_dir_l = [dataset_dir_l]
     dataset_path_list_list = [find_all_hdf5(dataset_dir, skip_mirrored_data, rank0_print=rank0_print) for dataset_dir in dataset_dir_l]
-    num_episodes_0 = len(dataset_path_list_list[0])
     dataset_path_list = flatten_list(dataset_path_list_list)
-    num_episodes_l = [len(dataset_path_list) for dataset_path_list in dataset_path_list_list]
-    num_episodes_cumsum = np.cumsum(num_episodes_l)
+    num_episodes_total = len(dataset_path_list)
 
-    # obtain train test split on dataset_dir_l[0]
-    shuffled_episode_ids_0 = np.random.permutation(num_episodes_0)
-    train_episode_ids_0 = shuffled_episode_ids_0[:int(1 * num_episodes_0)]
-    train_episode_ids_l = [train_episode_ids_0] + [np.arange(num_episodes) + num_episodes_cumsum[idx] for idx, num_episodes in enumerate(num_episodes_l[1:])]
-
-    train_episode_ids = np.concatenate(train_episode_ids_l)
-    rank0_print(f'\n\nData from: {dataset_dir_l}\n- Train on {[len(x) for x in train_episode_ids_l]} episodes\n\n')
+    # Global episode-level split (0.8/0.2), aligned with ACT split semantics:
+    # - shuffle episode indices using training_args.seed
+    # - first part is train, remaining is val
+    train_ratio = 0.8
+    seed = int(config['training_args'].seed) if 'training_args' in config and config['training_args'] is not None else 0
+    rng = np.random.default_rng(seed)
+    shuffled_episode_ids = rng.permutation(num_episodes_total)
+    train_size = int(train_ratio * num_episodes_total)
+    train_episode_ids = shuffled_episode_ids[:train_size]
+    val_episode_ids = shuffled_episode_ids[train_size:]
+    rank0_print(
+        f"\n\nData from: {dataset_dir_l}\n- Train on {len(train_episode_ids)} episodes\n- Val on {len(val_episode_ids)} episodes\n\n"
+    )
 
     norm_stats, all_episode_len = get_norm_stats(dataset_path_list)
     rank0_print(f"{RED}All images: {sum(all_episode_len)}, Trajectories: {len(all_episode_len)} {RESET}")
-    train_episode_len_l = [[all_episode_len[i] for i in train_episode_ids] for train_episode_ids in train_episode_ids_l]
-    train_episode_len = flatten_list(train_episode_len_l)
+    train_episode_len = [all_episode_len[i] for i in train_episode_ids]
+    val_episode_len = [all_episode_len[i] for i in val_episode_ids]
 
     rank0_print(f'Norm stats from: {[each.split("/")[-1] for each in dataset_dir_l]}')
-    rank0_print(f'train_episode_len_l: {train_episode_len_l}')
 
     robot = 'aloha' if config['action_head_args'].action_dim == 14 or ('aloha' in config['training_args'].output_dir) else 'franka'
-    # construct dataset and dataloader
+    # construct train/val dataset
     train_dataset = EpisodicDataset(
         dataset_path_list=dataset_path_list,
         camera_names=camera_names,
@@ -293,7 +296,20 @@ def load_data(dataset_dir_l, camera_names, chunk_size, config, rank0_print=print
         data_args=config['data_args']
     )
 
-    return train_dataset, norm_stats
+    val_dataset = EpisodicDataset(
+        dataset_path_list=dataset_path_list,
+        camera_names=camera_names,
+        norm_stats=norm_stats,
+        episode_ids=val_episode_ids,
+        episode_len=val_episode_len,
+        chunk_size=chunk_size,
+        policy_class=policy_class,
+        robot=robot,
+        vla_data_post_process=vla_data_post_process,
+        data_args=config['data_args']
+    )
+
+    return train_dataset, val_dataset, norm_stats
 
 
 def calibrate_linear_vel(base_action, c=None):

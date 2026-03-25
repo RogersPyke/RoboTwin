@@ -7,15 +7,17 @@ ACT is always trained on scratch.
 
 ## 训练早停（防止过拟合，推荐开启）
 
-当前 ACT 训练默认会跑固定的 `num_epochs`。为防止过拟合，我们新增了 **epoch-level 的 early stopping**，监控 **validation loss**，并使用“相对提升”判定是否有进步：
+当前 ACT 训练默认会跑固定的 `num_epochs`。为防止过拟合，我们新增了 **Step-level 的 early stopping**，在训练过程中以固定间隔对 **validation loss** 做评估，并使用“相对提升”判定是否有进步：
 
 - **相对提升**：当新的 `val_loss` 相比历史最优 `best_val_loss` 的相对下降幅度超过 `rel_tol`，才算“有提升”并重置耐心计数。
   - 直观形式：`(best_val_loss - val_loss) / max(abs(best_val_loss), eps) > rel_tol`
-- **触发停止**：当连续 `patience_epochs` 个 epoch 都没有达到上述相对提升，则提前 `break` 结束训练，并照常保存 best/last checkpoint。
+- **触发停止**：当连续 `patience_evals` 次 `eval_loss` 评估都未达到上述相对提升（即“改进幅度不超过 `rel_tol`”），则提前 `break` 结束训练，并照常保存 best/last checkpoint。
+
+评估顺序：与先验证再训练不同，本实现会在执行完一段训练后（每隔 `eval_steps_for_early_stop=K` 步）再进行验证，使“验证对象”始终是“已训练之后的模型”。
 
 ### 默认行为（重要）
 
-- 默认 `patience_epochs=0` 且 `rel_tol=0.0`，表示 **不启用早停**。
+- 默认 `early_stop_patience_evals=0` 且 `rel_tol=0.0`，表示 **不启用早停**。
 - 当早停未启用时，训练会继续使用原本的固定训练步数/epoch，并打印警告：
   - `[WARN] Early stopping is disabled ... Training will run for the full num_epochs.`
 
@@ -24,9 +26,10 @@ ACT is always trained on scratch.
 训练结束后（无论是否早停），会在 checkpoint 目录写入一个 `steps.txt`，记录：
 
 - `total_train_steps`：实际执行的 optimizer step 总数（遍历 train_dataloader 的累计 batch 数）
-- `total_epochs_run`：实际运行的 epoch 数（可能小于 `TRAIN_NUM_EPOCHS/--num_epochs`）
-- `stop_reason`：停止原因（到达 num_epochs 或 early_stop）
-- `best_epoch / min_val_loss`：best checkpoint 对应的 epoch 与指标
+- `total_evals_run`：实际运行的 eval 次数（驱动 best/early stop 的评估次数）
+- `stop_reason`：停止原因（`reached_training_end` 或 `early_stop(patience=..., rel_tol=...)`）
+- `best_eval_step / min_val_loss`：best checkpoint 对应的评估 step 与指标
+- `early_stop_patience_evals`、`early_stop_rel_tol`：早停的关键参数取值
 
 ## Basic commands
 
@@ -93,8 +96,9 @@ TRAIN_SEED: 0
 TRAIN_GPU_ID: 0
 
 # Optional (recommended) early stopping settings (set null to disable and use defaults):
-EARLY_STOP_PATIENCE_EPOCHS: 30
+EARLY_STOP_PATIENCE_EVALS: 30
 EARLY_STOP_REL_TOL: 0.01
+EVAL_STEPS_FOR_EARLY_STOP: 100
 ```
 
 **Eval (multi-task / joint checkpoint) [Recommended]**  

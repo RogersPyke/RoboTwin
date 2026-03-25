@@ -17,8 +17,9 @@ task_config=${2}
 expert_data_num=${3}
 seed=${4}
 gpu_id=${5}
-early_stop_patience_epochs=${6:-}
+early_stop_patience_evals=${6:-}
 early_stop_rel_tol=${7:-}
+eval_steps_for_early_stop=${8:-}
 
 DEBUG=False
 save_ckpt=True
@@ -39,5 +40,6 @@ python3 imitate_episodes.py \
     --save_freq 2000 \
     --state_dim 14 \
     --seed ${seed} \
-    ${early_stop_patience_epochs:+--early_stop_patience_epochs ${early_stop_patience_epochs}} \
-    ${early_stop_rel_tol:+--early_stop_rel_tol ${early_stop_rel_tol}}
+    ${early_stop_patience_evals:+--early_stop_patience_evals ${early_stop_patience_evals}} \
+    ${early_stop_rel_tol:+--early_stop_rel_tol ${early_stop_rel_tol}} \
+    ${eval_steps_for_early_stop:+--eval_steps_for_early_stop ${eval_steps_for_early_stop}}

@@ -39,3 +39,4 @@ nohup.out
 # data
 **/training_data/**
 **/processed_data/**
+**/data/**
