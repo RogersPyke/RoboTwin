@@ -1,22 +1,24 @@
 #!/bin/bash
 export PYTHONNOUSERSITE=1
-# ====== Wrapper Modification ======
-# Multi-task: must use --config <name>; config file under _tr_cfg/
-# _tr_wrapper.py writes checkpoints only under:
-#   ./act_ckpt/act-<task1>__<task2>/.../<cfg1>__<cfg2>-<total_eps>/
-# (copies the YAML and training_run_manifest.txt there). No per-subtask ckpt aliases.
-if [[ "$1" == "--config" && -n "${2:-}" ]]; then
-    cd "$(dirname "$0")"
-    python3 ./_tr_wrapper.py --config "$2"
-    exit 0
+
+# Deprecated:
+#   bash train.sh --config <name>
+#
+# Use:
+#   bash _train.sh <name>
+if [[ "${1:-}" == "--config" ]]; then
+    echo -e "\033[31m[ERROR] Deprecated: bash train.sh --config <name>\033[0m"
+    echo -e "\033[33mUse: bash _train.sh <name>\033[0m"
+    exit 2
 fi
-# ==================
 
 task_name=${1}
 task_config=${2}
 expert_data_num=${3}
 seed=${4}
 gpu_id=${5}
+early_stop_patience_epochs=${6:-}
+early_stop_rel_tol=${7:-}
 
 DEBUG=False
 save_ckpt=True
@@ -36,4 +38,6 @@ python3 imitate_episodes.py \
     --lr 1e-5 \
     --save_freq 2000 \
     --state_dim 14 \
-    --seed ${seed}
+    --seed ${seed} \
+    ${early_stop_patience_epochs:+--early_stop_patience_epochs ${early_stop_patience_epochs}} \
+    ${early_stop_rel_tol:+--early_stop_rel_tol ${early_stop_rel_tol}}

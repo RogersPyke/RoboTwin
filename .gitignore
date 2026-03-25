@@ -2,6 +2,7 @@ models/
 data/*
 !data/process_stuck.py
 __pycache__/
+**.pyc
 **/checkpoints/
 result/
 envs/curobo
@@ -9,6 +10,7 @@ envs/curobo
 viewer_show.*
 eval_video/
 task_config/
+!task_config/franka_clean.yml
 **/.DS_Store
 
 # eval result
@@ -29,12 +31,11 @@ envs/curobo/*
 /*.json*
 /*.txt
 
-# Documentations
-docs/
-
-# logs
-logs/
-*.log
-
-# nohup
+# Docs and logs
+docs/*
+logs/*
 nohup.out
+
+# data
+**/training_data/**
+**/processed_data/**

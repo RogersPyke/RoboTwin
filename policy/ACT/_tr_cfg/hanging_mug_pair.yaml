@@ -1,10 +1,35 @@
 # Joint training: checkpoint path is
 #   act_ckpt/act-hanging_mug__unhanging_mug/demo_clean__demo_clean-<sum_episodes>/
-# Run: bash train.sh --config hanging_mug_pair
+#
+# Recommended entry:
+#   bash _train.sh hanging_mug_pair
+#
 # Run process_data.sh for each task first.
 
+# --- dataset composition ---
 TRAIN_TASKS:
   - [hanging_mug, demo_clean, 100]
   - [unhanging_mug, demo_clean, 100]
+
+# --- run control ---
 TRAIN_SEED: 0
 TRAIN_GPU_ID: 0
+
+# --- training hyper-parameters (defaults match historical hard-coded values) ---
+TRAIN_NUM_EPOCHS: 6000
+TRAIN_SAVE_FREQ: 2000
+TRAIN_BATCH_SIZE: 8
+TRAIN_LR: 1.0e-5
+TRAIN_STATE_DIM: 14
+
+# --- ACT model hyper-parameters (defaults match historical hard-coded values) ---
+ACT_KL_WEIGHT: 10
+ACT_CHUNK_SIZE: 50
+ACT_HIDDEN_DIM: 512
+ACT_DIM_FEEDFORWARD: 3200
+
+# --- early stopping (recommended to set in this YAML) ---
+# If either value is null/None, the wrapper will NOT pass it, and imitate_episodes.py will fall back to defaults:
+#   patience=0, rel_tol=0.0 => early stopping disabled (and a warning will be printed).
+EARLY_STOP_PATIENCE_EPOCHS: null
+EARLY_STOP_REL_TOL: null

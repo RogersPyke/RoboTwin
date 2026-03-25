@@ -43,6 +43,8 @@ def main(args):
     batch_size_train = args["batch_size"]
     batch_size_val = args["batch_size"]
     num_epochs = args["num_epochs"]
+    early_stop_patience_epochs = args.get("early_stop_patience_epochs", 0)
+    early_stop_rel_tol = args.get("early_stop_rel_tol", 0.0)
 
     # get task parameters
     is_sim = task_name[:4] == "sim-"
@@ -105,7 +107,9 @@ def main(args):
         "temporal_agg": args["temporal_agg"],
         "camera_names": camera_names,
         "real_robot": not is_sim,
-        "save_freq": args['save_freq']
+        "save_freq": args["save_freq"],
+        "early_stop_patience_epochs": early_stop_patience_epochs,
+        "early_stop_rel_tol": early_stop_rel_tol,
     }
 
     if is_eval:
@@ -130,12 +134,52 @@ def main(args):
     with open(stats_path, "wb") as f:
         pickle.dump(stats, f)
     best_ckpt_info = train_bc(train_dataloader, val_dataloader, config)
-    best_epoch, min_val_loss, best_state_dict = best_ckpt_info
+    best_epoch, min_val_loss, best_state_dict, train_meta = best_ckpt_info
 
     # save best checkpoint
     ckpt_path = os.path.join(ckpt_dir, f"policy_best.ckpt")
     torch.save(best_state_dict, ckpt_path)
     print(f"Best ckpt, val loss {min_val_loss:.6f} @ epoch{best_epoch}")
+    _write_steps_txt(ckpt_dir, train_meta)
+
+
+def _write_steps_txt(ckpt_dir: str, meta: dict) -> None:
+    """
+    @input: [str, ckpt_dir], [dict, meta keys: total_train_steps,total_epochs_run,stop_reason,best_epoch,min_val_loss]
+    @output: [None]
+    @scenario: [Persist final training step/stop info next to checkpoints]
+    """
+    try:
+        path = os.path.join(ckpt_dir, "steps.txt")
+        with open(path, "w", encoding="ascii") as f:
+            for k in sorted(meta.keys()):
+                f.write(f"{k}={meta[k]}\n")
+        print(f"Wrote training steps summary: {path}")
+    except Exception as exc:
+        print(f"[WARN] Failed to write steps.txt: {exc}")
+
+
+def _is_early_stop_disabled(patience_epochs: int, rel_tol: float) -> bool:
+    """
+    @input: [int, patience_epochs >= 0], [float, rel_tol >= 0.0]
+    @output: [bool, True if disabled]
+    @scenario: [Decide whether early stopping is disabled by default values]
+    """
+    # Early stopping is considered enabled only when BOTH are set to positive values.
+    # Default (0, 0.0) means disabled.
+    return int(patience_epochs) <= 0 or float(rel_tol) <= 0.0
+
+
+def _is_relative_improvement(curr: float, best: float, rel_tol: float) -> bool:
+    """
+    @input: [float, curr loss], [float, best loss], [float, rel_tol in [0,1) typically]
+    @output: [bool, True if curr improves best by at least rel_tol]
+    @scenario: [Relative improvement rule for early stopping]
+    """
+    eps = 1e-12
+    denom = max(abs(best), eps)
+    rel_improve = (best - curr) / denom
+    return rel_improve > float(rel_tol)
 
 
 def make_policy(policy_class, policy_config):
@@ -360,6 +404,8 @@ def train_bc(train_dataloader, val_dataloader, config):
     seed = config["seed"]
     policy_class = config["policy_class"]
     policy_config = config["policy_config"]
+    early_stop_patience_epochs = int(config.get("early_stop_patience_epochs", 0))
+    early_stop_rel_tol = float(config.get("early_stop_rel_tol", 0.0))
 
     set_seed(seed)
 
@@ -371,8 +417,23 @@ def train_bc(train_dataloader, val_dataloader, config):
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
+    epochs_no_improve = 0
+    total_train_steps = 0
 
+    if _is_early_stop_disabled(early_stop_patience_epochs, early_stop_rel_tol):
+        print(
+            "[WARN] Early stopping is disabled (patience=0 and rel_tol=0.0). "
+            "Training will run for the full num_epochs."
+        )
+    else:
+        print(
+            f"Early stopping enabled: patience_epochs={early_stop_patience_epochs}, rel_tol={early_stop_rel_tol}"
+        )
+
+    stop_reason = "reached_num_epochs"
+    epochs_run = 0
     for epoch in tqdm(range(num_epochs)):
+        epochs_run = epoch + 1
         print(f"\nEpoch {epoch}")
         # validation
         with torch.inference_mode():
@@ -385,13 +446,36 @@ def train_bc(train_dataloader, val_dataloader, config):
             validation_history.append(epoch_summary)
 
             epoch_val_loss = epoch_summary["loss"]
-            if epoch_val_loss < min_val_loss:
-                min_val_loss = epoch_val_loss
+            epoch_val_loss_f = float(epoch_val_loss.item()) if hasattr(epoch_val_loss, "item") else float(epoch_val_loss)
+            if np.isinf(min_val_loss):
+                # first epoch always sets baseline best
+                min_val_loss = epoch_val_loss_f
                 best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
+                epochs_no_improve = 0
+            else:
+                improved = _is_relative_improvement(epoch_val_loss_f, float(min_val_loss), early_stop_rel_tol)
+                if improved:
+                    min_val_loss = epoch_val_loss_f
+                    best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
+                    epochs_no_improve = 0
+                else:
+                    epochs_no_improve += 1
         print(f"Val loss:   {epoch_val_loss:.5f}")
         summary_string = ""
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "
+
+        # early stop check (epoch-level, after validation)
+        if not _is_early_stop_disabled(early_stop_patience_epochs, early_stop_rel_tol):
+            if epochs_no_improve >= early_stop_patience_epochs:
+                stop_reason = (
+                    f"early_stop(patience={early_stop_patience_epochs}, rel_tol={early_stop_rel_tol})"
+                )
+                print(
+                    f"[WARN] Early stopping triggered at epoch={epoch} "
+                    f"(epochs_no_improve={epochs_no_improve})."
+                )
+                break
 
         # training
         policy.train()
@@ -404,6 +488,7 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.step()
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
+            total_train_steps += 1
         epoch_summary = compute_dict_mean(train_history[(batch_idx + 1) * epoch:(batch_idx + 1) * (epoch + 1)])
         epoch_train_loss = epoch_summary["loss"]
         print(f"Train loss: {epoch_train_loss:.5f}")
@@ -411,10 +496,10 @@ def train_bc(train_dataloader, val_dataloader, config):
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "
 
-        if (epoch + 1) % config['save_freq'] == 0:
+        if (epoch + 1) % config["save_freq"] == 0:
             ckpt_path = os.path.join(ckpt_dir, f"policy_epoch_{epoch + 1}_seed_{seed}.ckpt")
             torch.save(policy.state_dict(), ckpt_path)
-            plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
+            plot_history(train_history, validation_history, epoch + 1, ckpt_dir, seed)
 
     ckpt_path = os.path.join(ckpt_dir, f"policy_last.ckpt")
     torch.save(policy.state_dict(), ckpt_path)
@@ -425,13 +510,25 @@ def train_bc(train_dataloader, val_dataloader, config):
     print(f"Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at epoch {best_epoch}")
 
     # save training curves
-    plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed)
+    plot_history(train_history, validation_history, epochs_run, ckpt_dir, seed)
 
-    return best_ckpt_info
+    train_meta = {
+        "total_train_steps": int(total_train_steps),
+        "total_epochs_run": int(epochs_run),
+        "stop_reason": str(stop_reason),
+        "best_epoch": int(best_epoch),
+        "min_val_loss": float(min_val_loss),
+        "early_stop_patience_epochs": int(early_stop_patience_epochs),
+        "early_stop_rel_tol": float(early_stop_rel_tol),
+    }
+    return best_epoch, min_val_loss, best_state_dict, train_meta
 
 
 def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
     # save training curves
+    if not train_history or not validation_history:
+        print("[WARN] Empty history; skipping plot_history().")
+        return
     for key in train_history[0]:
         plot_path = os.path.join(ckpt_dir, f"train_val_{key}_seed_{seed}.png")
         plt.figure()
@@ -479,6 +576,22 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_dim", action="store", type=int, help="hidden_dim", required=False)
     parser.add_argument("--state_dim", action="store", type=int, help="state dim", required=True)
     parser.add_argument("--save_freq", action="store", type=int, help="save ckpt frequency", required=False, default=6000)
+    parser.add_argument(
+        "--early_stop_patience_epochs",
+        action="store",
+        type=int,
+        help="early stop: patience epochs without sufficient relative val-loss improvement (0 disables)",
+        required=False,
+        default=0,
+    )
+    parser.add_argument(
+        "--early_stop_rel_tol",
+        action="store",
+        type=float,
+        help="early stop: required relative val-loss improvement to reset patience (0.0 disables when patience=0)",
+        required=False,
+        default=0.0,
+    )
     parser.add_argument(
         "--dim_feedforward",
         action="store",

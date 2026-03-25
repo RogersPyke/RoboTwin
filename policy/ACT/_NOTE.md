@@ -5,6 +5,29 @@ All should be done in ACT/ folder.
 
 ACT is always trained on scratch.
 
+## 训练早停（防止过拟合，推荐开启）
+
+当前 ACT 训练默认会跑固定的 `num_epochs`。为防止过拟合，我们新增了 **epoch-level 的 early stopping**，监控 **validation loss**，并使用“相对提升”判定是否有进步：
+
+- **相对提升**：当新的 `val_loss` 相比历史最优 `best_val_loss` 的相对下降幅度超过 `rel_tol`，才算“有提升”并重置耐心计数。
+  - 直观形式：`(best_val_loss - val_loss) / max(abs(best_val_loss), eps) > rel_tol`
+- **触发停止**：当连续 `patience_epochs` 个 epoch 都没有达到上述相对提升，则提前 `break` 结束训练，并照常保存 best/last checkpoint。
+
+### 默认行为（重要）
+
+- 默认 `patience_epochs=0` 且 `rel_tol=0.0`，表示 **不启用早停**。
+- 当早停未启用时，训练会继续使用原本的固定训练步数/epoch，并打印警告：
+  - `[WARN] Early stopping is disabled ... Training will run for the full num_epochs.`
+
+### 训练步数记录（steps.txt）
+
+训练结束后（无论是否早停），会在 checkpoint 目录写入一个 `steps.txt`，记录：
+
+- `total_train_steps`：实际执行的 optimizer step 总数（遍历 train_dataloader 的累计 batch 数）
+- `total_epochs_run`：实际运行的 epoch 数（可能小于 `TRAIN_NUM_EPOCHS/--num_epochs`）
+- `stop_reason`：停止原因（到达 num_epochs 或 early_stop）
+- `best_epoch / min_val_loss`：best checkpoint 对应的 epoch 与指标
+
 ## Basic commands
 
 to process data for training, run:
@@ -22,7 +45,7 @@ bash train.sh ${task_name} ${task_config} ${expert_data_num} ${seed} ${gpu_id}
 
 Seed controls training randomness: model initialization RNG (torch/numpy), dataloader shuffle, and random start-timestep sampling. It also appears in checkpoint/plot filenames. It does not affect process_data dataset generation.
 
-By default, the model is trained for 6,000 steps.
+By default, the model is trained for 6,000 epochs (historical setting). If early stopping is disabled, it will run the full num_epochs.
 
 to eval ACT (single-task checkpoint), run:
 ```
@@ -46,15 +69,19 @@ Two modes:
 
   `act_ckpt/act-<task1>__<task2>/.../<cfg1>__<cfg2>-<total_episodes>/`
 
-  Do **not** expect a joint model under `act_ckpt/act-<single_task>/...`; evaluating a joint policy **must** use `bash eval.sh --config <name>` so `_ev_wrapper.py` resolves that path from `TRAIN_TASKS` in `_ev_cfg/<name>.yaml`.
+  Do **not** expect a joint model under `act_ckpt/act-<single_task>/...`; evaluating a joint policy must use `bash _eval.sh <name>` so `_ev_wrapper.py` resolves that path from `TRAIN_TASKS` in `_ev_cfg/<name>.yaml`.
 
-**Train (multi-task)**  
-Config: `_tr_cfg/<name>.yaml` (requires `TRAIN_TASKS`, `TRAIN_SEED`, `TRAIN_GPU_ID`).
+**Train (multi-task) [Recommended]**  
+Config: `_tr_cfg/<name>.yaml`
+
+Recommended entrypoint:
 
 ```
-bash train.sh --config <name>
-# Example: bash train.sh --config hanging_mug_pair
+bash _train.sh <name>
+# Example: bash _train.sh hanging_mug_pair
 ```
+
+The wrapper will copy the YAML into the checkpoint folder (so every ckpt has a config snapshot), and `steps.txt` will record the actual training steps/epochs.
 
 Example `_tr_cfg/hanging_mug_pair.yaml`:
 
@@ -64,14 +91,20 @@ TRAIN_TASKS:
   - [unhanging_mug, demo_clean, 100]
 TRAIN_SEED: 0
 TRAIN_GPU_ID: 0
+
+# Optional (recommended) early stopping settings (set null to disable and use defaults):
+EARLY_STOP_PATIENCE_EPOCHS: 30
+EARLY_STOP_REL_TOL: 0.01
 ```
 
-**Eval (multi-task / joint checkpoint)**  
+**Eval (multi-task / joint checkpoint) [Recommended]**  
 Config: `_ev_cfg/<name>.yaml` (`TRAIN_TASKS` must match the joint training run; `EVAL_TASKS` lists sim settings to evaluate; plus `EVAL_SEED`, `EVAL_GPU_ID`).
 
+Recommended entrypoint:
+
 ```
-bash eval.sh --config <name>
-# Example: bash eval.sh --config hanging_mug_pair
+bash _eval.sh <name>
+# Example: bash _eval.sh hanging_mug_pair
 ```
 
 Run `process_data.sh` for each subtask before multi-task training.
@@ -95,7 +128,7 @@ bash eval.sh ${task_name} ${task_config} ${ckpt_setting} ${expert_data_num} ${se
 bash process_data.sh hanging_mug demo_clean 100
 bash train.sh hanging_mug demo_clean 100 0 0
 bash eval.sh hanging_mug demo_clean demo_clean 100 0 0
-bash train.sh --config hanging_mug_pair
+bash _train.sh hanging_mug_pair
 ```
 - move_pillbottle_pad, demo_clean:
 ```
@@ -122,8 +155,8 @@ bash train.sh hanging_mug demo_clean 100 0 0
 bash eval.sh hanging_mug demo_clean demo_clean 100 0 0
 
 # Joint train / joint eval (example)
-bash train.sh --config hanging_mug_pair
-bash eval.sh --config hanging_mug_pair
+bash _train.sh hanging_mug_pair
+bash _eval.sh hanging_mug_pair
 ```
 
 ## Experiment 3:

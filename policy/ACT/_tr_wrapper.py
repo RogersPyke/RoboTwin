@@ -43,6 +43,28 @@ def _setup_logger(act_dir: str) -> logging.Logger:
     return logger
 
 
+def _get_cfg_opt(cfg: dict, key: str, default):
+    """
+    @input: [dict, cfg], [str, key], [Any, default]
+    @output: [Any, value or default]
+    @scenario: [Fetch optional config keys with backward-compatible defaults]
+    """
+    if key not in cfg:
+        return default
+    return cfg.get(key, default)
+
+
+def _maybe_add_arg(cmd: list, flag: str, value) -> None:
+    """
+    @input: [list, cmd argv list], [str, flag like '--x'], [Any, value]
+    @output: [None]
+    @scenario: [Append optional CLI flag when value is not None]
+    """
+    if value is None:
+        return
+    cmd.extend([flag, str(value)])
+
+
 def _parse_train_tasks_rows(cfg: dict) -> tuple:
     """
     @input: [dict, raw YAML cfg with TRAIN_TASKS]
@@ -105,6 +127,22 @@ def main(argv: list) -> int:
         global_seed = int(cfg["TRAIN_SEED"])
         gpu_id = str(cfg["TRAIN_GPU_ID"])
 
+        # Backward-compatible defaults (match historical hard-coded values in this wrapper).
+        train_num_epochs = int(_get_cfg_opt(cfg, "TRAIN_NUM_EPOCHS", 6000))
+        train_save_freq = int(_get_cfg_opt(cfg, "TRAIN_SAVE_FREQ", 2000))
+        train_batch_size = int(_get_cfg_opt(cfg, "TRAIN_BATCH_SIZE", 8))
+        train_lr = float(_get_cfg_opt(cfg, "TRAIN_LR", 1.0e-5))
+        train_state_dim = int(_get_cfg_opt(cfg, "TRAIN_STATE_DIM", 14))
+
+        act_kl_weight = int(_get_cfg_opt(cfg, "ACT_KL_WEIGHT", 10))
+        act_chunk_size = int(_get_cfg_opt(cfg, "ACT_CHUNK_SIZE", 50))
+        act_hidden_dim = int(_get_cfg_opt(cfg, "ACT_HIDDEN_DIM", 512))
+        act_dim_feedforward = int(_get_cfg_opt(cfg, "ACT_DIM_FEEDFORWARD", 3200))
+
+        # Early stopping: preferred via YAML. If None/null, do not pass and use script defaults (disabled).
+        early_stop_patience = cfg.get("EARLY_STOP_PATIENCE_EPOCHS", None)
+        early_stop_rel_tol = cfg.get("EARLY_STOP_REL_TOL", None)
+
         combined_task_slug = "__".join(task_names)
         combined_config_slug = "__".join(task_configs)
         combined_total_episodes = int(sum(expert_counts))
@@ -116,6 +154,17 @@ def main(argv: list) -> int:
         logger.info("Counts: %s", expert_counts)
         logger.info("Combined key: %s", combined_key)
         logger.info("Global training seed: %s", global_seed)
+        logger.info("Train num_epochs: %s", train_num_epochs)
+        logger.info("Train save_freq: %s", train_save_freq)
+        logger.info("Train batch_size: %s", train_batch_size)
+        logger.info("Train lr: %s", train_lr)
+        logger.info("Train state_dim: %s", train_state_dim)
+        logger.info("ACT kl_weight: %s", act_kl_weight)
+        logger.info("ACT chunk_size: %s", act_chunk_size)
+        logger.info("ACT hidden_dim: %s", act_hidden_dim)
+        logger.info("ACT dim_feedforward: %s", act_dim_feedforward)
+        logger.info("Early-stop patience: %s", early_stop_patience)
+        logger.info("Early-stop rel_tol: %s", early_stop_rel_tol)
 
         sim_cfg_path = "./SIM_TASK_CONFIGS.json"
         if not os.path.isfile(sim_cfg_path):
@@ -205,17 +254,19 @@ def main(argv: list) -> int:
             "--task_name", combined_key,
             "--ckpt_dir", ckpt_dir,
             "--policy_class", "ACT",
-            "--kl_weight", "10",
-            "--chunk_size", "50",
-            "--hidden_dim", "512",
-            "--batch_size", "8",
-            "--dim_feedforward", "3200",
-            "--num_epochs", "6000",
-            "--lr", "1e-5",
-            "--save_freq", "2000",
-            "--state_dim", "14",
+            "--kl_weight", str(act_kl_weight),
+            "--chunk_size", str(act_chunk_size),
+            "--hidden_dim", str(act_hidden_dim),
+            "--batch_size", str(train_batch_size),
+            "--dim_feedforward", str(act_dim_feedforward),
+            "--num_epochs", str(train_num_epochs),
+            "--lr", str(train_lr),
+            "--save_freq", str(train_save_freq),
+            "--state_dim", str(train_state_dim),
             "--seed", str(global_seed),
         ]
+        _maybe_add_arg(cmd, "--early_stop_patience_epochs", early_stop_patience)
+        _maybe_add_arg(cmd, "--early_stop_rel_tol", early_stop_rel_tol)
         logger.info("Launching training: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env)
         return 0
