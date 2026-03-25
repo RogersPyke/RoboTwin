@@ -1,0 +1,42 @@
+# flow_meta kind=eval stem=flow_single_move_pillbottle_pad slot=0 gpu=1 queue_idx=0 ts_utc8=20260407033837
+# child_pid=3141645
+[Wrapper] [INFO] Resolved eval runtime: seed=0 (FLOW_ENV:TVLA_FLOW_SEED), gpu_id=1 (FLOW_ENV:TVLA_FLOW_GPU), test_num=50 (FLOW_ENV:TVLA_FLOW_TEST_NUM)
+[Wrapper] [INFO] Launching eval with config=flow_single_move_pillbottle_pad
+[Wrapper] [INFO] Resolved output_dir=/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100
+[Wrapper] [INFO] Resolved model_path=/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100
+[Wrapper] [INFO] Eval run: task_name=move_pillbottle_pad task_config=demo_clean expert_num=100 ckpt_setting=demo_clean
+[Wrapper] [INFO] Command: /home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3 script/eval_policy.py --config policy/TinyVLA/deploy_policy.yml --overrides --task_name move_pillbottle_pad --task_config demo_clean --ckpt_setting demo_clean --expert_data_num 100 --seed 0 --model_base policy/TinyVLA/model_param/InternVL3-1B/ --model_path /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100 --state_path /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl --enable_lore False --test_num 50 --END_RESET_TO_INIT true
+[32mRender Well[0m
+============= Config =============
+
+[95mMessy Table:[0m False
+[95mRandom Background:[0m False
+[95mRandom Light:[0m False
+[95mRandom Table Height:[0m 0
+[95mRandom Head Camera Distance:[0m 0
+[94mHead Camera Config:[0m D435, True
+[94mWrist Camera Config:[0m D435, True
+[94mEmbodiment Config:[0m aloha-agilex
+
+==================================
+Start Load the Model
+load /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100!!!
+[load_model_for_eval] resolved weights dir: /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/checkpoint-54000
+number of parameters: 7.886350e+07
+[34mTask Name: move_pillbottle_pad[0m
+[34mPolicy Name: TinyVLA[0m
+Warp CUDA error: Failed to get driver entry point 'cuDeviceGetUuid' (CUDA error 1)
+Warp CUDA error: Function cuDeviceGetUuid_f: a suitable driver entry point was not found
+Warp CUDA error 36: API call is not supported in the installed CUDA driver (in function cuda_init, /builds/omniverse/warp/warp/native/warp.cu:284)
+[Wrapper] [ERROR] Wrapper failed: Command '['/home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3', 'script/eval_policy.py', '--config', 'policy/TinyVLA/deploy_policy.yml', '--overrides', '--task_name', 'move_pillbottle_pad', '--task_config', 'demo_clean', '--ckpt_setting', 'demo_clean', '--expert_data_num', '100', '--seed', '0', '--model_base', 'policy/TinyVLA/model_param/InternVL3-1B/', '--model_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100', '--state_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl', '--enable_lore', 'False', '--test_num', '50', '--END_RESET_TO_INIT', 'true']' died with <Signals.SIGSEGV: 11>.
+[Wrapper] [ERROR] Stack trace:
+Traceback (most recent call last):
+  File "/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/./_ev_wrapper.py", line 39, in _wrapped
+    return func(*args, **kwargs)
+  File "/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/./_ev_wrapper.py", line 414, in _run_eval
+    subprocess.run(cmd, check=True, env=env, cwd=repo_root)
+  File "/home/rogerspyke/miniforge3/envs/tvla-ev/lib/python3.10/subprocess.py", line 526, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3', 'script/eval_policy.py', '--config', 'policy/TinyVLA/deploy_policy.yml', '--overrides', '--task_name', 'move_pillbottle_pad', '--task_config', 'demo_clean', '--ckpt_setting', 'demo_clean', '--expert_data_num', '100', '--seed', '0', '--model_base', 'policy/TinyVLA/model_param/InternVL3-1B/', '--model_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100', '--state_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl', '--enable_lore', 'False', '--test_num', '50', '--END_RESET_TO_INIT', 'true']' died with <Signals.SIGSEGV: 11>.
+
+[Wrapper] [ERROR] Top-level wrapper exit due to failure.

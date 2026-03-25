@@ -1,0 +1,18 @@
+[Wrapper] [INFO] Resolved eval runtime: seed=0 (FLOW_ENV:TVLA_FLOW_SEED), gpu_id=1 (FLOW_ENV:TVLA_FLOW_GPU), test_num=50 (FLOW_ENV:TVLA_FLOW_TEST_NUM)
+[Wrapper] [INFO] Launching eval with config=flow_single_move_pillbottle_pad
+[Wrapper] [INFO] Resolved output_dir=/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100
+[Wrapper] [INFO] Resolved model_path=/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100
+[Wrapper] [INFO] Eval run: task_name=move_pillbottle_pad task_config=demo_clean expert_num=100 ckpt_setting=demo_clean
+[Wrapper] [INFO] Command: /home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3 script/eval_policy.py --config policy/TinyVLA/deploy_policy.yml --overrides --task_name move_pillbottle_pad --task_config demo_clean --ckpt_setting demo_clean --expert_data_num 100 --seed 0 --model_base policy/TinyVLA/model_param/InternVL3-1B/ --model_path /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100 --state_path /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl --enable_lore False --test_num 50 --END_RESET_TO_INIT true
+[Wrapper] [ERROR] Wrapper failed: Command '['/home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3', 'script/eval_policy.py', '--config', 'policy/TinyVLA/deploy_policy.yml', '--overrides', '--task_name', 'move_pillbottle_pad', '--task_config', 'demo_clean', '--ckpt_setting', 'demo_clean', '--expert_data_num', '100', '--seed', '0', '--model_base', 'policy/TinyVLA/model_param/InternVL3-1B/', '--model_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100', '--state_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl', '--enable_lore', 'False', '--test_num', '50', '--END_RESET_TO_INIT', 'true']' died with <Signals.SIGSEGV: 11>.
+[Wrapper] [ERROR] Stack trace:
+Traceback (most recent call last):
+  File "/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/./_ev_wrapper.py", line 39, in _wrapped
+    return func(*args, **kwargs)
+  File "/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/./_ev_wrapper.py", line 414, in _run_eval
+    subprocess.run(cmd, check=True, env=env, cwd=repo_root)
+  File "/home/rogerspyke/miniforge3/envs/tvla-ev/lib/python3.10/subprocess.py", line 526, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/rogerspyke/miniforge3/envs/tvla-ev/bin/python3', 'script/eval_policy.py', '--config', 'policy/TinyVLA/deploy_policy.yml', '--overrides', '--task_name', 'move_pillbottle_pad', '--task_config', 'demo_clean', '--ckpt_setting', 'demo_clean', '--expert_data_num', '100', '--seed', '0', '--model_base', 'policy/TinyVLA/model_param/InternVL3-1B/', '--model_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100', '--state_path', '/home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/tinyvla_ckpt/tinyvla-move_pillbottle_pad/demo_clean-100/dataset_stats.pkl', '--enable_lore', 'False', '--test_num', '50', '--END_RESET_TO_INIT', 'true']' died with <Signals.SIGSEGV: 11>.
+
+[Wrapper] [ERROR] Top-level wrapper exit due to failure.

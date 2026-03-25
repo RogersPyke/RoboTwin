@@ -43,6 +43,7 @@ def create_empty_dataset(
     has_effort: bool = False,
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
 ) -> LeRobotDataset:
+<<<<<<< HEAD
     """
     @input: repo_id: str, robot_type: str, mode: str, has_velocity: bool, has_effort: bool, dataset_config: DatasetConfig
     @output: LeRobotDataset instance
@@ -66,6 +67,32 @@ def create_empty_dataset(
         "right_joint_7",
         "right_gripper",
     ]
+=======
+    # Joint/gripper axis names for observation.state, action, velocity, and effort.
+    #
+    # RATIONALE (RoboTwin / Franka dual-arm HDF5):
+    # - The upstream Aloha conversion used 14 human-readable ALOHA motor IDs (waist,
+    #   shoulder, elbow, ...). Those labels describe the *physical* ALOHA chain, not
+    #   the RoboTwin simulation export.
+    # - RoboTwin episodes store `/observations/qpos` and `/action` as length-16 vectors:
+    #   seven Franka arm joints + one gripper command per side, concatenated as
+    #   [left_arm(7), left_gripper(1), right_arm(7), right_gripper(1)].
+    # - LeRobot validates every frame: tensor shapes must match `features["..."]["shape"]`
+    #   and semantic `names` must align with the HDF5 column order so trainers, viewers,
+    #   and debugging tools interpret dimensions consistently.
+    # - We therefore rename the generic "motors" list to explicit
+    #   left_joint_1..7 / left_gripper / right_joint_1..7 / right_gripper, which mirrors
+    #   common URDF/MuJoCo joint indexing and matches the 16-D vectors in disk.
+    #
+    # If your HDF5 uses a different layout, update this list (and any reordering logic)
+    # together; otherwise `add_frame` will fail shape checks or silently mis-label axes.
+    motors = (
+        [f"left_joint_{i}" for i in range(1, 8)]
+        + ["left_gripper"]
+        + [f"right_joint_{i}" for i in range(1, 8)]
+        + ["right_gripper"]
+    )
+>>>>>>> 87a85ff (- FIX: converter to lerobot to enable the data collected on franka_clean succ convert(err:dim 14 to dim 16). - ADD: add franka-policy for eval pi0.)
 
     cameras = [
         "cam_high",
