@@ -43,31 +43,11 @@ def create_empty_dataset(
     has_effort: bool = False,
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
 ) -> LeRobotDataset:
-<<<<<<< HEAD
     """
     @input: repo_id: str, robot_type: str, mode: str, has_velocity: bool, has_effort: bool, dataset_config: DatasetConfig
     @output: LeRobotDataset instance
     @scenario: Initialize a new LeRobot dataset with the specified configuration and features.
     """
-    motors = [
-        "left_joint_1",
-        "left_joint_2",
-        "left_joint_3",
-        "left_joint_4",
-        "left_joint_5",
-        "left_joint_6",
-        "left_joint_7",
-        "left_gripper",
-        "right_joint_1",
-        "right_joint_2",
-        "right_joint_3",
-        "right_joint_4",
-        "right_joint_5",
-        "right_joint_6",
-        "right_joint_7",
-        "right_gripper",
-    ]
-=======
     # Joint/gripper axis names for observation.state, action, velocity, and effort.
     #
     # RATIONALE (RoboTwin / Franka dual-arm HDF5):
@@ -92,7 +72,6 @@ def create_empty_dataset(
         + [f"right_joint_{i}" for i in range(1, 8)]
         + ["right_gripper"]
     )
->>>>>>> 87a85ff (- FIX: converter to lerobot to enable the data collected on franka_clean succ convert(err:dim 14 to dim 16). - ADD: add franka-policy for eval pi0.)
 
     cameras = [
         "cam_high",
