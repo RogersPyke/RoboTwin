@@ -79,11 +79,25 @@ class EpisodicDataset(torch.utils.data.Dataset):
         return image_data, qpos_data, action_data, is_pad
 
 
-def get_norm_stats(dataset_dir, num_episodes):
-    all_qpos_data = []
-    all_action_data = []
+def get_max_action_len(dataset_dir, num_episodes):
+    """Max action length over all episodes (for padding train and val)."""
+    max_len = 0
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f"episode_{episode_idx}.hdf5")
+        with h5py.File(dataset_path, "r") as root:
+            max_len = max(max_len, int(root["/action"].shape[0]))
+    return max_len
+
+
+def get_norm_stats(dataset_dir, episode_indices):
+    """
+    Mean/std (and qpos stats) from the given episode indices only.
+    Used so normalization matches training-visible data only (no val leakage).
+    """
+    all_qpos_data = []
+    all_action_data = []
+    for episode_idx in episode_indices:
+        dataset_path = os.path.join(dataset_dir, f"episode_{int(episode_idx)}.hdf5")
         with h5py.File(dataset_path, "r") as root:
             qpos = root["/observations/qpos"][()]  # Assuming this is a numpy array
             action = root["/action"][()]
@@ -133,7 +147,8 @@ def get_norm_stats(dataset_dir, num_episodes):
         "example_qpos": qpos,
     }
 
-    return stats, max_action_len
+    # max_action_len among stat episodes (caller uses get_max_action_len for dataset padding).
+    return stats, int(max_action_len)
 
 
 def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val):
@@ -144,8 +159,10 @@ def load_data(dataset_dir, num_episodes, camera_names, batch_size_train, batch_s
     train_indices = shuffled_indices[:int(train_ratio * num_episodes)]
     val_indices = shuffled_indices[int(train_ratio * num_episodes):]
 
-    # obtain normalization stats for qpos and action
-    norm_stats, max_action_len = get_norm_stats(dataset_dir, num_episodes)
+    # Padding length must cover every episode (train + val).
+    max_action_len = get_max_action_len(dataset_dir, num_episodes)
+    # Normalization stats from training episodes only (single pooled policy, no eval-conditional stats).
+    norm_stats, _ = get_norm_stats(dataset_dir, train_indices)
 
     # construct dataset and dataloader
     train_dataset = EpisodicDataset(train_indices, dataset_dir, camera_names, norm_stats, max_action_len)

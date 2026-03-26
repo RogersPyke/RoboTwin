@@ -1,3 +1,4 @@
+import json
 import pickle
 import os
 
@@ -49,6 +50,7 @@ class DataArguments:
     task_name: str = field(default="stack_cube_2024_6_2")
     skip_mirrored_data: bool = field(default=False)
     chunk_size: int = field(default=16)
+    joint_task_spec: Optional[str] = field(default=None)
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
@@ -132,6 +134,41 @@ def parse_param():
         setattr(config, k, v)
 
     return model_args, data_args, training_args, action_head_args, early_stop_args, config
+
+
+def _parse_joint_task_spec(raw_spec):
+    if raw_spec is None:
+        return None
+    if not isinstance(raw_spec, str) or not raw_spec.strip():
+        raise ValueError("joint_task_spec must be a non-empty JSON string.")
+    spec = json.loads(raw_spec)
+    if not isinstance(spec, dict):
+        raise ValueError("joint_task_spec must decode to a JSON object.")
+    return spec
+
+
+def _resolve_task_config(data_args):
+    joint_task_spec = _parse_joint_task_spec(data_args.joint_task_spec)
+    if joint_task_spec is not None:
+        dataset_dir = joint_task_spec.get("dataset_dir")
+        camera_names = joint_task_spec.get("camera_names")
+        if not isinstance(dataset_dir, list) or not dataset_dir:
+            raise ValueError("joint_task_spec.dataset_dir must be a non-empty list.")
+        if not isinstance(camera_names, list) or not camera_names:
+            raise ValueError("joint_task_spec.camera_names must be a non-empty list.")
+        return {
+            "task_name": str(joint_task_spec.get("task_name", data_args.task_name)),
+            "dataset_dir": dataset_dir,
+            "camera_names": camera_names,
+            "episode_len": int(joint_task_spec.get("episode_len", 0)),
+            "sample_weights": joint_task_spec.get("sample_weights", [1 for _ in dataset_dir]),
+        }
+
+    if data_args.task_name not in TASK_CONFIGS:
+        raise KeyError(
+            f"Task '{data_args.task_name}' is missing from TASK_CONFIGS and no joint_task_spec was provided."
+        )
+    return TASK_CONFIGS[data_args.task_name]
 
 def train_bc(train_dataset=None, val_dataset=None, model=None, config=None, tokenizer=None):
 
@@ -230,7 +267,7 @@ def main(all_config, model_config):
     set_seed(all_config["training_args"].seed)
 
     # get task parameters
-    task_config = TASK_CONFIGS[all_config['data_args'].task_name]
+    task_config = _resolve_task_config(all_config['data_args'])
     camera_names = task_config['camera_names']
     dataset_dir = task_config['dataset_dir']
 

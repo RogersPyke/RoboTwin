@@ -2,21 +2,18 @@
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 
-# Recommended entrypoint for ACT training (multi-task via YAML config).
+# Recommended entrypoint for TinyVLA training (config under _tr_cfg/<cfg_name>.yaml).
 #
 # Usage:
 #   bash _train.sh <cfg_name>
 #
-# Example:
-#   bash _train.sh hanging_mug_pair
-#
 # Notes:
-# - This script must be run inside the ACT/ folder or from anywhere; it cd's to its own directory.
+# - This script runs from TinyVLA/ directory (it cd's to its own folder).
 # - The config file must exist at: _tr_cfg/<cfg_name>.yaml
 
 if [[ $# -lt 1 || -z "${1:-}" ]]; then
   echo "Usage: bash _train.sh <cfg_name>"
-  echo "Example: bash _train.sh hanging_mug_pair"
+  echo "Example: bash _train.sh tinyvla_single_task_example"
   exit 2
 fi
 

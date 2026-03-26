@@ -2,6 +2,7 @@ models/
 data/*
 !data/process_stuck.py
 __pycache__/
+**/__pycache__/**
 **.pyc
 **/checkpoints/
 result/
@@ -12,6 +13,7 @@ eval_video/
 task_config/
 !task_config/franka_clean.yml
 **/.DS_Store
+*.log
 
 # eval result
 eval_result/
@@ -40,3 +42,13 @@ nohup.out
 **/training_data/**
 **/processed_data/**
 **/data/**
+
+# ckpt
+**/checkpoints/**
+**/*ckpt*/*
+
+# backbone
+policy/TinyVLA/model_param/*
+
+# dependencies
+script/curobo/

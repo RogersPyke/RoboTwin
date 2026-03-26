@@ -286,26 +286,6 @@ def load_data(camera_names, chunk_size, config, rank0_print=print, policy_class=
 
     return train_dataset, None, norm_stats
 
-def get_norm_stats_by_tasks(dataset_path_list,args):
-    data_tasks_dict = dict(
-        fold_shirt=[],
-        clean_table=[],
-        others=[],
-    )
-    for dataset_path in dataset_path_list:
-        if 'fold' in dataset_path or 'shirt' in dataset_path:
-            key = 'fold_shirt'
-        elif 'clean_table' in dataset_path and 'pick' not in dataset_path:
-            key = 'clean_table'
-        else:
-            key = 'others'
-            base_action = preprocess_base_action(base_action)
-        data_tasks_dict[key].append(dataset_path)
-    norm_stats_tasks = {k: None for k in data_tasks_dict.keys()}
-    for k, v in data_tasks_dict.items():
-        if len(v) > 0:
-            norm_stats_tasks[k], _ = get_norm_stats(v)
-    return norm_stats_tasks
 
 def smooth_base_action(base_action):
     return np.stack([

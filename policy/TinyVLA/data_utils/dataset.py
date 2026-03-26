@@ -201,30 +201,18 @@ def get_norm_stats(dataset_path_list, rank0_print=print):
 
     return stats, all_episode_len
 
-# calculating the norm stats corresponding to each kind of task (e.g. folding shirt, clean table....)
-def get_norm_stats_by_tasks(dataset_path_list):
 
-    data_tasks_dict = dict(
-        fold_shirt=[],
-        clean_table=[],
-        others=[],
-    )
+def collect_episode_lengths(dataset_path_list, rank0_print=print):
+    """Per-file trajectory lengths without building normalization statistics."""
+    lens = []
     for dataset_path in dataset_path_list:
-        if 'fold' in dataset_path or 'shirt' in dataset_path:
-            key = 'fold_shirt'
-        elif 'clean_table' in dataset_path and 'pick' not in dataset_path:
-            key = 'clean_table'
-        else:
-            key = 'others'
-        data_tasks_dict[key].append(dataset_path)
-
-    norm_stats_tasks = {k : None for k in data_tasks_dict.keys()}
-
-    for k,v in data_tasks_dict.items():
-        if len(v) > 0:
-            norm_stats_tasks[k], _ = get_norm_stats(v)
-
-    return norm_stats_tasks
+        try:
+            with h5py.File(dataset_path, "r") as root:
+                lens.append(int(len(root["/observations/qpos"])))
+        except Exception as e:
+            rank0_print(f"Error reading length from {dataset_path}: {e}")
+            quit()
+    return lens
 
 
 def find_all_hdf5(dataset_dir, skip_mirrored_data, rank0_print=print):
@@ -274,12 +262,18 @@ def load_data(dataset_dir_l, camera_names, chunk_size, config, rank0_print=print
         f"\n\nData from: {dataset_dir_l}\n- Train on {len(train_episode_ids)} episodes\n- Val on {len(val_episode_ids)} episodes\n\n"
     )
 
-    norm_stats, all_episode_len = get_norm_stats(dataset_path_list)
+    # Episode lengths for all trajectories (cheap); stats only from training episodes (fair pooled policy).
+    all_episode_len = collect_episode_lengths(dataset_path_list, rank0_print=rank0_print)
+    train_paths = [dataset_path_list[i] for i in train_episode_ids]
+    norm_stats, _ = get_norm_stats(train_paths, rank0_print=rank0_print)
     rank0_print(f"{RED}All images: {sum(all_episode_len)}, Trajectories: {len(all_episode_len)} {RESET}")
     train_episode_len = [all_episode_len[i] for i in train_episode_ids]
     val_episode_len = [all_episode_len[i] for i in val_episode_ids]
 
-    rank0_print(f'Norm stats from: {[each.split("/")[-1] for each in dataset_dir_l]}')
+    rank0_print(
+        f"Norm stats pooled from {len(train_paths)} training episodes only "
+        f"(datasets: {[each.split('/')[-1] for each in dataset_dir_l]})"
+    )
 
     robot = 'aloha' if config['action_head_args'].action_dim == 14 or ('aloha' in config['training_args'].output_dir) else 'franka'
     # construct train/val dataset

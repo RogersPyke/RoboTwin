@@ -15,6 +15,12 @@ TASK_CONFIGS = {
         'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
         "sample_weights": [1],
     },
+    "unhanging_mug": {
+        'dataset_dir': [DATA_DIR + "/sim-unhanging_mug/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
 }
 
 ### ALOHA fixed constants

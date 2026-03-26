@@ -4,7 +4,8 @@
 Multi-task eval wrapper: reads _ev_cfg/<name>.yaml, loads the joint checkpoint under
 act_ckpt/act-<task1>__<task2>/... (from TRAIN_TASKS), runs eval on each EVAL_TASKS row.
 Each eval_result/.../<timestamp>/ receives _ev_cfg_<name>.yaml (copy via eval_policy.py).
-Usage: python3 _ev_wrapper.py --config <name>
+Usage: python3 _ev_wrapper.py <cfg_name>
+       python3 _ev_wrapper.py --config <cfg_name>   # (legacy)
 Config name is without extension; file must be _ev_cfg/<name>.yaml.
 Joint models are never addressed by single-task act_ckpt paths; use this wrapper only.
 """
@@ -106,14 +107,30 @@ def _load_ev_cfg(act_dir: str, name: str) -> dict:
 
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="Multi-task eval wrapper (config under _ev_cfg/*.yaml)")
-    parser.add_argument("--config", type=str, required=True, help="Config name (file: _ev_cfg/<name>.yaml)")
+    parser.add_argument(
+        "cfg_name",
+        nargs="?",
+        type=str,
+        help="Config name (file: _ev_cfg/<name>.yaml).",
+    )
+    parser.add_argument(
+        "--config",
+        dest="config",
+        type=str,
+        required=False,
+        help="(legacy) Config name (file: _ev_cfg/<name>.yaml).",
+    )
     args = parser.parse_args(argv[1:])
 
     act_dir = os.path.dirname(os.path.abspath(__file__))
     logger = _setup_logger(act_dir)
 
+    cfg_name = args.config if args.config is not None else args.cfg_name
+    if not cfg_name:
+        parser.error("Missing cfg_name. Use: python3 _ev_wrapper.py <cfg_name> (or --config <cfg_name>)")
+
     try:
-        cfg = _load_ev_cfg(act_dir, args.config)
+        cfg = _load_ev_cfg(act_dir, cfg_name)
         combined_task_slug, ckpt_setting, expert_data_num = _parse_joint_ckpt_dir_parts(cfg)
         eval_runs = _parse_eval_runs(cfg)
         seed = str(cfg["EVAL_SEED"]).strip()
@@ -126,7 +143,7 @@ def main(argv: list) -> int:
         env["PYTHONNOUSERSITE"] = "1"
         # eval_policy.py copies this into each eval_result/<...>/<timestamp>/ so runs are
         # labeled by config name, not only by act_ckpt folder slugs.
-        base = args.config if args.config.endswith(".yaml") else f"{args.config}.yaml"
+        base = cfg_name if cfg_name.endswith(".yaml") else f"{cfg_name}.yaml"
         ev_cfg_path = os.path.abspath(os.path.join(act_dir, "_ev_cfg", base))
         env["ACT_EV_CFG_SNAPSHOT_SRC"] = ev_cfg_path
         logger.info("Eval snapshot: ACT_EV_CFG_SNAPSHOT_SRC=%s", ev_cfg_path)

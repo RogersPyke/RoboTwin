@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """
 Multi-task train wrapper: reads _tr_cfg/<name>.yaml, builds combined dataset, trains from scratch.
-Usage: python3 _tr_wrapper.py --config <name>
+Usage: python3 _tr_wrapper.py <cfg_name>
+       python3 _tr_wrapper.py --config <cfg_name>   # (legacy)
 Config name is without extension; file must be _tr_cfg/<name>.yaml.
 """
 import argparse
@@ -109,20 +110,36 @@ def _load_tr_cfg(act_dir: str, name: str) -> tuple:
 
 def main(argv: list) -> int:
     """
-    @input: [List[str], argv with --config <name>]
+    @input: [List[str], argv with <cfg_name> or --config <cfg_name>]
     @output: [int, 0 on success else non-zero]
     @scenario: [Load _tr_cfg config, link combined dataset episodes, update SIM_TASK_CONFIGS, train from scratch]
     """
     parser = argparse.ArgumentParser(description="Multi-task train wrapper (config under _tr_cfg/*.yaml)")
-    parser.add_argument("--config", type=str, required=True, help="Config name (file: _tr_cfg/<name>.yaml)")
+    parser.add_argument(
+        "cfg_name",
+        nargs="?",
+        type=str,
+        help="Config name (file: _tr_cfg/<name>.yaml).",
+    )
+    parser.add_argument(
+        "--config",
+        dest="config",
+        type=str,
+        required=False,
+        help="(legacy) Config name (file: _tr_cfg/<name>.yaml).",
+    )
     args = parser.parse_args(argv[1:])
 
     act_dir = os.path.dirname(os.path.abspath(__file__))
     os.chdir(act_dir)
     logger = _setup_logger(act_dir)
 
+    cfg_name = args.config if args.config is not None else args.cfg_name
+    if not cfg_name:
+        parser.error("Missing cfg_name. Use: python3 _tr_wrapper.py <cfg_name> (or --config <cfg_name>)")
+
     try:
-        cfg, cfg_src_abspath = _load_tr_cfg(act_dir, args.config)
+        cfg, cfg_src_abspath = _load_tr_cfg(act_dir, cfg_name)
         task_names, task_configs, expert_counts = _parse_train_tasks_rows(cfg)
         global_seed = int(cfg["TRAIN_SEED"])
         gpu_id = str(cfg["TRAIN_GPU_ID"])

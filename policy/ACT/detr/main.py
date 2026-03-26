@@ -118,6 +118,34 @@ def get_args_parser():
     # parser.add_argument('--num_queries',type=int, required=True)
     # parser.add_argument('--actionsByQuery',type=int, required=True)
 
+    # Early-stop args are passed through imitate_episodes.py, but ACTPolicy/build_ACT_model_and_optimizer
+    # internally calls DETR's parser.parse_args() on the same sys.argv. We include these args here solely
+    # to avoid "unrecognized arguments" failures; DETR does not use them.
+    parser.add_argument(
+        "--early_stop_patience_evals",
+        action="store",
+        type=int,
+        help="(unused by DETR) early stop: patience eval calls without sufficient relative val-loss improvement",
+        required=False,
+        default=0,
+    )
+    parser.add_argument(
+        "--early_stop_rel_tol",
+        action="store",
+        type=float,
+        help="(unused by DETR) early stop: required relative val-loss improvement to reset patience",
+        required=False,
+        default=0.0,
+    )
+    parser.add_argument(
+        "--eval_steps_for_early_stop",
+        action="store",
+        type=int,
+        help="(unused by DETR) early stop: eval cadence for early stop",
+        required=False,
+        default=100,
+    )
+
     return parser
 
 

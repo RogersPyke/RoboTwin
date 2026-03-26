@@ -55,7 +55,7 @@ First, download the VLM model InternVL3-1B ([huggingface](https://huggingface.co
     ...
 }
 ```
-Then add an task config item in `.../policy/TinyVLA/aloha_scripts/constants.py`
+Then add a base-task config item in `.../policy/TinyVLA/aloha_scripts/constants.py`
 ```python
 TASK_CONFIGS = {
     ...
@@ -67,10 +67,54 @@ TASK_CONFIGS = {
     }
 }
 ```
+Only the base task must be registered here. For joint training, the wrapper will synthesize the combined task spec automatically, so you do not need to add a joint `task_name` entry such as `task_a__task_b`.
+
 Then begin the training
 ```bash
 bash ./scripts/franks/train_robotwin_aloha.sh
 ```
+### Multi-run (YAML configs, wrappers)
+TinyVLA supports ACT-aligned YAML wrappers for joint training and joint-checkpoint evaluation:
+- Train: `bash _train.sh <cfg_name>` (config: `_tr_cfg/<cfg_name>.yaml`)
+- Eval:  `bash _eval.sh <cfg_name>` (config: `_ev_cfg/<cfg_name>.yaml`)
+
+Notes:
+- `_train.sh/_eval.sh` take `<cfg_name>` directly. Do not add an extra top-level `--config`.
+- Joint training output directories are auto-derived as:
+  `policy/TinyVLA/tinyvla_ckpt/tinyvla-<task1>__<task2>/<cfg1>__<cfg2>-<sum_expert_num>/`
+- Use `_eval.sh` for joint checkpoints. The wrapper resolves the shared checkpoint from `TRAIN_TASKS` and expands `EVAL_TASKS` into one eval run per row.
+
+Recommended joint-train YAML shape:
+```yaml
+TRAIN_TASKS:
+  - [task_name_a, demo_clean, 100]
+  - [task_name_b, demo_clean, 100]
+TRAIN_SEED: 0
+TRAIN_GPU_ID: "0"
+EARLY_STOP_PATIENCE_EVALS: 3
+EARLY_STOP_REL_TOL: 0.01
+EVAL_STEPS_FOR_EARLY_STOP: 100
+VLA_TRAIN_ARGS:
+  model_name_or_path: /path/to/InternVL3-1B
+  max_steps: 5000
+  per_device_train_batch_size: 64
+  # output_dir is wrapper-owned in joint mode
+```
+
+Recommended joint-eval YAML shape:
+```yaml
+TRAIN_TASKS:
+  - [task_name_a, demo_clean, 100]
+  - [task_name_b, demo_clean, 100]
+EVAL_TASKS:
+  - [task_name_a, demo_clean, 100]
+  - [task_name_b, demo_clean, 100]
+EVAL_SEED: 0
+EVAL_GPU_ID: "0"
+MODEL_BASE: /path/to/InternVL3-1B
+USE_POLICY_BEST: true
+```
+
 Configure the training by modifying the following items in the `train_robotwin_aloha.sh` file.
 ```
 TASK=your_task # Set the Task
@@ -81,19 +125,20 @@ mnop=.../robotiwin/policy/TinyVLA/model_param/InternVL3-1B/ # Set The Path of ba
 ### Early stopping (TinyVLA)
 TinyVLA supports an ACT-aligned early stopping mechanism driven by `eval_loss` during HF `Trainer` evaluation.
 
-By default it is disabled (`--early_stop_patience_evals=0` and `--early_stop_rel_tol=0.0`).
-To enable it (example):
-```bash
---early_stop_patience_evals 3 \
---early_stop_rel_tol 0.01 \
---eval_steps_for_early_stop 100
+It is now recommended to configure early stopping in the wrapper YAML, not inside `VLA_TRAIN_ARGS`:
+```yaml
+EARLY_STOP_PATIENCE_EVALS: 3
+EARLY_STOP_REL_TOL: 0.01
+EVAL_STEPS_FOR_EARLY_STOP: 100
 ```
+
+By default it is disabled when `EARLY_STOP_PATIENCE_EVALS <= 0` or `EARLY_STOP_REL_TOL <= 0.0`.
 
 When enabled, evaluations run every `eval_steps_for_early_stop` steps, and the best checkpoint is saved by coverage into:
 `$OUTPUT/policy_best/`
 
 ## Eval Policy
-You need to modify the corresponding path in the `deploy_policy.yml` file:
+For direct `eval.sh` usage, you still need to modify the corresponding path in the `deploy_policy.yml` file:
 1. **model_path** : Path to the trained model, in the OUTPUT path.
 2. **state_path** : Path to `dataset_stats.pkl`, in the OUTPUT path.
 3. **model_base** : Path to InternVL3-1B.
@@ -103,6 +148,15 @@ Then execute:
 bash eval.sh ${task_name} ${task_config} ${ckpt_setting} ${expert_data_num} ${seed} ${gpu_id}
 # bash eval.sh beat_block_hammer demo_randomized 0 50 0 0
 ```
+
+For joint checkpoints produced by `_train.sh`, prefer:
+```bash
+bash _eval.sh <cfg_name>
+```
+The wrapper will:
+- infer the joint checkpoint directory from `TRAIN_TASKS`
+- set `model_path` / `state_path` automatically
+- run one evaluation per `EVAL_TASKS` row against the same joint checkpoint
 
 ## Citation
 
