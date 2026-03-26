@@ -3,9 +3,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ROBOTWIN_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 LOCK_FILE="${SCRIPT_DIR}/dexvla-robo.conda-lock.yml"
 ENV_NAME="dexvla-robo"
 POLICY_HEADS_DIR="${POLICY_DIR}/policy_heads"
+ENV_DIR="${ROBOTWIN_ROOT}/envs"
+CUROBO_DIR="${ENV_DIR}/curobo"
 
 if [[ ! -f "${LOCK_FILE}" ]]; then
   echo "[ERROR] Missing lock file: ${LOCK_FILE}"
@@ -24,6 +27,13 @@ if conda env list | awk -v env_name="${ENV_NAME}" '$1 == env_name {found=1} END{
   conda env remove -n "${ENV_NAME}" -y
 fi
 "${CONDA_LOCK_CMD[@]}" install -n "${ENV_NAME}" "${LOCK_FILE}"
+
+echo "[INFO] Install curobo from source"
+mkdir -p "${ENV_DIR}"
+if [[ ! -d "${CUROBO_DIR}" ]]; then
+  git clone "https://github.com/NVlabs/curobo.git" "${CUROBO_DIR}"
+fi
+conda run -n "${ENV_NAME}" pip install -e "${CUROBO_DIR}" --no-build-isolation
 
 if [[ -d "${POLICY_HEADS_DIR}" ]]; then
   echo "[INFO] Install policy_heads in editable mode"

@@ -19,4 +19,7 @@
 
 1) 确认 lock 文件存在。  
 2) 运行对应 `rebuild_*.sh`。  
-3) 脚本仅执行 `conda-lock install` 重建环境，不再动态求解。
+3) 脚本先执行 `conda-lock install` 重建环境，不再动态求解。
+4) 环境重建后统一补装 `curobo`：
+   - 源码目录：`RoboTwin/envs/curobo`
+   - 安装方式：`pip install -e <repo>/envs/curobo --no-build-isolation`
