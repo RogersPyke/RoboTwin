@@ -16,7 +16,11 @@ def encode_obs(observation):
 
 
 def get_model(usr_args):
-    ckpt_file = f"./policy/DP/checkpoints/{usr_args['task_name']}-{usr_args['ckpt_setting']}-{usr_args['expert_data_num']}-{usr_args['seed']}/{usr_args['checkpoint_num']}.ckpt"
+    train_task_name = usr_args.get("train_task_name", usr_args["task_name"])
+    ckpt_file = (
+        f"./policy/DP/checkpoints/{train_task_name}-{usr_args['ckpt_setting']}-"
+        f"{usr_args['expert_data_num']}-{usr_args['seed']}/{usr_args['checkpoint_num']}.ckpt"
+    )
     action_dim = usr_args['left_arm_dim'] + usr_args['right_arm_dim'] + 2 # 2 gripper
     
     load_config_path = f'./policy/DP/diffusion_policy/config/robot_dp_{action_dim}.yaml'

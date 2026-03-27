@@ -5,6 +5,29 @@
 - 训练环境：`dexvla-robo`
 - 推理环境：`robotwin-tinyvla-evla`
 
+## 官方构建流程
+
+训练环境：
+```
+cd policy/TinyVLA
+conda env create -f Train_Tiny_DexVLA_train.yml
+conda activate dexvla-robo
+cd policy_heads
+pip install -e .
+```
+
+推理环境：
+
+```
+conda activate your_RoboTwin_env
+pip install -r Eval_Tiny_DexVLA_requirements.txt 
+```
+
+为保证隔离建议使用复制而不是直接在 robotwin 环境安装。
+lock 构建失败时，可以尝试上述方法。但需要注意的是原始项目里的 txt 和 yaml 均不可用，因为其中包含了大量本地路径和不可解析的路径，以及被修改过的本地版本代码(+ dirty)，因此最推荐的方法还是直接使用复原脚本。
+
+## lock 构建
+
 复原脚本：
 
 - `rebuild_dexvla_robo.sh`

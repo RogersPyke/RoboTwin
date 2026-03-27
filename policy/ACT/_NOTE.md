@@ -1,45 +1,5 @@
 # ACT
 
-## 环境
-
-conda env: robotwin-act
-All should be done in ACT/ folder.
-ACT is always trained on scratch.
-
-### 环境一键重建（推荐）
-
-`env_requ/env.yml` 用于生成 lock 并重建 `robotwin-act`。  
-`pytorch3d` 和 `curobo` 不写入 lock 解析流程（避免 `conda-lock` / PyPI 求解失败），改为在重建完成后单独补装。
-
-先确保当前环境可用 `conda-lock`：
-
-```
-conda install -c conda-forge conda-lock
-```
-
-如果在远程机器首次使用，建议先检查：
-
-```
-conda-lock --version
-```
-
-在 `ACT/` 目录下执行：
-
-```
-bash env_requ/rebuild_env.sh
-```
-
-脚本固定行为：
-
-1. 读取 `env_requ/env.yml` 生成 lock，并据此重建环境 `robotwin-act`
-2. 若 `env_requ/env.yml` 不存在，直接报错退出
-3. 环境重建后自动补装 `pytorch3d`：
-   `pip install "git+https://github.com/facebookresearch/pytorch3d.git"`
-4. 环境重建后自动补装 `curobo`（对齐 `script/_install.sh`）：
-   - 源码目录：`RoboTwin/envs/curobo`
-   - 安装方式：`pip install -e <repo>/envs/curobo --no-build-isolation`
-
-
 ## 训练早停（防止过拟合，推荐开启）
 
 当前 ACT 训练默认会跑固定的 `num_epochs`。为防止过拟合，我们新增了 **Step-level 的 early stopping**，在训练过程中以固定间隔对 **validation loss** 做评估，并使用“相对提升”判定是否有进步：

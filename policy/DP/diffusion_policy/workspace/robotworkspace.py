@@ -59,6 +59,13 @@ class RobotWorkspace(BaseWorkspace):
         cfg = copy.deepcopy(self.cfg)
         seed = cfg.training.seed
         head_camera_type = cfg.head_camera_type
+        early_stop_patience_evals = int(getattr(cfg.training, "early_stop_patience_evals", 0))
+        early_stop_rel_tol = float(getattr(cfg.training, "early_stop_rel_tol", 0.0))
+        eval_steps_for_early_stop = int(getattr(cfg.training, "eval_steps_for_early_stop", 1))
+        early_stop_enabled = early_stop_patience_evals > 0 and early_stop_rel_tol > 0.0
+        best_val_loss = float("inf")
+        best_eval_epoch = -1
+        no_improve_evals = 0
 
         # resume training
         if cfg.training.resume:
@@ -218,7 +225,12 @@ class RobotWorkspace(BaseWorkspace):
                 #     step_log.update(runner_log)
 
                 # run validation
-                if (self.epoch % cfg.training.val_every) == 0:
+                val_loss = None
+                should_run_val = (self.epoch % cfg.training.val_every) == 0
+                if early_stop_enabled:
+                    should_run_val = (self.epoch % eval_steps_for_early_stop) == 0
+
+                if should_run_val:
                     with torch.no_grad():
                         val_losses = list()
                         with tqdm.tqdm(
@@ -238,6 +250,27 @@ class RobotWorkspace(BaseWorkspace):
                             val_loss = torch.mean(torch.tensor(val_losses)).item()
                             # log epoch average validation loss
                             step_log["val_loss"] = val_loss
+                            if early_stop_enabled:
+                                if np.isinf(best_val_loss):
+                                    best_val_loss = float(val_loss)
+                                    best_eval_epoch = int(self.epoch)
+                                    no_improve_evals = 0
+                                else:
+                                    rel_improve = (best_val_loss - float(val_loss)) / max(abs(best_val_loss), 1e-12)
+                                    if rel_improve > early_stop_rel_tol:
+                                        best_val_loss = float(val_loss)
+                                        best_eval_epoch = int(self.epoch)
+                                        no_improve_evals = 0
+                                    else:
+                                        no_improve_evals += 1
+                                        if no_improve_evals >= early_stop_patience_evals:
+                                            step_log["early_stop"] = True
+                                            step_log["early_stop_best_eval_epoch"] = best_eval_epoch
+                                            step_log["early_stop_best_val_loss"] = best_val_loss
+                                            json_logger.log(step_log)
+                                            self.global_step += 1
+                                            self.epoch += 1
+                                            return
 
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:

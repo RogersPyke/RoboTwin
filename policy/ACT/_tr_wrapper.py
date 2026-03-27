@@ -66,6 +66,27 @@ def _maybe_add_arg(cmd: list, flag: str, value) -> None:
     cmd.extend([flag, str(value)])
 
 
+def _has_only_symlink_files_recursive(path: str) -> bool:
+    """
+    @input: [str, path]
+    @output: [bool, True if all files in tree are symlinks]
+    @scenario: [Safety check before recursively removing wrapper-managed sim-* directory]
+    """
+    if not os.path.isdir(path):
+        return False
+    for root, dir_names, file_names in os.walk(path, followlinks=False):
+        for file_name in file_names:
+            file_path = os.path.join(root, file_name)
+            if not os.path.islink(file_path):
+                return False
+        for dir_name in dir_names:
+            dir_path = os.path.join(root, dir_name)
+            if os.path.islink(dir_path):
+                # Symlinked directories count as symlink entries.
+                continue
+    return True
+
+
 def _parse_train_tasks_rows(cfg: dict) -> tuple:
     """
     @input: [dict, raw YAML cfg with TRAIN_TASKS]
@@ -288,7 +309,15 @@ def main(argv: list) -> int:
         _maybe_add_arg(cmd, "--early_stop_patience_evals", early_stop_patience_evals)
         _maybe_add_arg(cmd, "--eval_steps_for_early_stop", eval_steps_for_early_stop)
         logger.info("Launching training: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True, env=env)
+        sim_task_root_dir = os.path.join("./processed_data", f"sim-{combined_task_slug}")
+        try:
+            subprocess.run(cmd, check=True, env=env)
+        finally:
+            if os.path.isdir(sim_task_root_dir) and _has_only_symlink_files_recursive(sim_task_root_dir):
+                shutil.rmtree(sim_task_root_dir)
+                logger.info("Removed symlink-only dataset directory: %s", sim_task_root_dir)
+            elif os.path.isdir(sim_task_root_dir):
+                logger.warning("Skip removing directory with non-symlink files: %s", sim_task_root_dir)
         return 0
     except Exception as exc:
         logger.error("Wrapper failed: %s", str(exc))

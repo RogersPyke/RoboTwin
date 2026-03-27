@@ -1,11 +1,11 @@
-data/*
+/data/*
 !data/process_stuck.py
 __pycache__/
 **/__pycache__/**
 **.pyc
 **/checkpoints/
 result/
-envs/curobo
+/envs/curobo
 *.zip
 viewer_show.*
 eval_video/
@@ -14,16 +14,16 @@ eval_video/
 *.log
 
 # eval result
-eval_result/
+/eval_result/
 
 # Code Generation
-assets/*
+/assets/*
 !assets/_download.py
 !assets/files
 
 policy/weights/*
 
-envs/curobo/*
+/envs/curobo/*
 
 .vscode
 /config.json
@@ -39,14 +39,14 @@ nohup.out
 # data
 **/training_data/**
 **/processed_data/**
-policy/TinyVLA/data
+/policy/TinyVLA/data
 
 # ckpt
 **/checkpoints/**
 **/*ckpt*/*
 
 # backbone
-policy/TinyVLA/model_param/*
+/policy/TinyVLA/model_param/*
 
 # dependencies
-script/curobo/
+/script/curobo/
