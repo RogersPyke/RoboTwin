@@ -3,20 +3,17 @@
 #   bash _train.sh hanging_mug_pair_dryrun
 
 TRAIN_TASKS:
-  - [hanging_mug, demo_clean, 2]
-  - [unhanging_mug, demo_clean, 2]
+  - [hanging_mug, demo_clean, 100]
+  - [unhanging_mug, demo_clean, 100]
 
 TRAIN_SEED: 0
 TRAIN_GPU_ID: "0"
-TRAIN_DEVICE: "cpu"
 TRAIN_ACTION_DIM: 14
 TRAIN_HEAD_CAMERA_TYPE: D435
 
-TRAIN_BATCH_SIZE: 2
-TRAIN_NUM_EPOCHS: 1
+TRAIN_BATCH_SIZE: 8
+TRAIN_NUM_EPOCHS: 2
 TRAIN_CHECKPOINT_EVERY: 1
-TRAIN_MAX_TRAIN_STEPS: 1
-TRAIN_MAX_VAL_STEPS: 1
 TRAIN_VAL_RATIO: 0.02
 TRAIN_LR: 1.0e-4
 TRAIN_DELETE_COMBINED_ZARR_AFTER_TRAIN: true

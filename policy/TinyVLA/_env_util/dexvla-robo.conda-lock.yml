@@ -574,16 +574,6 @@ package:
     sha256: 99b87a485a5820b23b879f04c2305b44b951b502fd64be915879d77a7e8fc6f1
   category: main
   optional: false
-- name: av
-  version: 14.4.0
-  manager: pip
-  platform: linux-64
-  dependencies: {}
-  url: https://files.pythonhosted.org/packages/86/f6/0b473dab52dfdea05f28f3578b1c56b6c796ce85e76951bab7c4e38d5a74/av-14.4.0.tar.gz
-  hash:
-    sha256: 3ecbf803a7fdf67229c0edada0830d6bfaea4d10bfb24f0c3f4e607cd1064b42
-  category: main
-  optional: false
 - name: bitsandbytes
   version: 0.41.0
   manager: pip
@@ -879,18 +869,6 @@ package:
   url: https://files.pythonhosted.org/packages/41/24/0b023b6537dfc9bae2c779353998e3e99ac7dfff4222fc6126650e93c3f3/filelock-3.14.0-py3-none-any.whl
   hash:
     sha256: 43339835842f110ca7ae60f1e1c160714c5a6afd15a2873419ab185334975c0f
-  category: main
-  optional: false
-- name: flash-attn
-  version: 2.7.4.post1
-  manager: pip
-  platform: linux-64
-  dependencies:
-    einops: '*'
-    torch: '*'
-  url: https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz
-  hash:
-    sha256: f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765
   category: main
   optional: false
 - name: fonttools

@@ -60,9 +60,8 @@ class RobotImageDataset(BaseImageDataset):
             for k, v in self.sampler.replay_buffer.items()
         }
         self.buffers_torch = {k: torch.from_numpy(v) for k, v in self.buffers.items()}
-        if torch.cuda.is_available():
-            for v in self.buffers_torch.values():
-                v.pin_memory()
+        for v in self.buffers_torch.values():
+            v.pin_memory()
 
     def get_validation_dataset(self):
         val_set = copy.copy(self)

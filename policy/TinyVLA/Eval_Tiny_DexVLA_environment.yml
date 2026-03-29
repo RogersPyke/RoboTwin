@@ -19,12 +19,12 @@ dependencies:
   - ca-certificates=2025.6.15=hbd8a1cb_0
   - certifi=2025.6.15=pyhd8ed1ab_0
   - cffi=1.17.1=py310h1fdaa30_1
-  - cuda-cudart=11.8.89=0
-  - cuda-cupti=11.8.87=0
-  - cuda-libraries=11.8.0=0
-  - cuda-nvrtc=11.8.89=0
-  - cuda-nvtx=11.8.86=0
-  - cuda-runtime=11.8.0=0
+  - cuda-cudart=12.1
+  - cuda-cupti=12.1
+  - cuda-libraries=12.1
+  - cuda-nvrtc=12.1
+  - cuda-nvtx=12.1
+  - cuda-runtime=12.1
   - cuda-version=12.9=3
   - expat=2.7.1=h6a678d5_0
   - ffmpeg=4.4.2=gpl_hdf48244_113
@@ -61,7 +61,7 @@ dependencies:
   - libiconv=1.16=h5eee18b_3
   - libidn2=2.3.4=h5eee18b_0
   - libjpeg-turbo=2.0.0=h9bf148f_0
-  - libnpp=11.8.0.86=0
+  - libnpp
   - libnsl=2.0.1=hb9d3cd8_1
   - libnvjpeg=11.9.0.86=0
   - libpciaccess=0.18=hb9d3cd8_0
@@ -99,8 +99,8 @@ dependencies:
   - pthread-stubs=0.3=h0ce48e5_1
   - pysocks=1.7.1=py310h06a4308_0
   - python=3.10.13=hd12c33a_1_cpython
-  - pytorch=2.4.1=py3.10_cuda11.8_cudnn9.1.0_0
-  - pytorch-cuda=11.8=h7e8668a_6
+  - pytorch=2.4.1=py3.10_cuda12.1_cudnn9.1.0_0
+  - pytorch-cuda=12.1
   - pytorch-mutex=1.0=cuda
   - pyyaml=6.0.2=py310h5eee18b_0
   - readline=8.2=h5eee18b_0
@@ -110,9 +110,9 @@ dependencies:
   - svt-av1=1.4.1=hcb278e6_0
   - tbb-devel=2022.0.0=hdb19cb5_0
   - tk=8.6.14=h993c535_1
-  - torchaudio=2.4.1=py310_cu118
+  - torchaudio=2.4.1=py310_cu121
   - torchtriton=3.0.0=py310
-  - torchvision=0.19.1=py310_cu118
+  - torchvision=0.19.1=py310_cu121
   - typing_extensions=4.12.2=py310h06a4308_0
   - urllib3=2.5.0=py310h06a4308_0
   - wheel=0.45.1=py310h06a4308_0
@@ -137,7 +137,7 @@ dependencies:
       - asciitree==0.3.3
       - asttokens==3.0.0
       - attrs==25.3.0
-      - av==14.4.0
+      - av==13.1.0
       - azure==4.0.0
       - azure-ai-inference==1.0.0b9
       - azure-applicationinsights==0.1.1

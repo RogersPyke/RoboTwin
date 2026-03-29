@@ -177,7 +177,6 @@ def main(argv: list) -> int:
         rows = _parse_task_rows(cfg, "TRAIN_TASKS")
         seed = int(cfg["TRAIN_SEED"])
         gpu_id = str(cfg["TRAIN_GPU_ID"])
-        train_device = str(cfg.get("TRAIN_DEVICE", "cuda:0"))
         action_dim = int(cfg["TRAIN_ACTION_DIM"])
         head_camera_type = str(cfg.get("TRAIN_HEAD_CAMERA_TYPE", "D435"))
         batch_size = int(cfg.get("TRAIN_BATCH_SIZE", 128))
@@ -185,8 +184,6 @@ def main(argv: list) -> int:
         checkpoint_every = int(cfg.get("TRAIN_CHECKPOINT_EVERY", 300))
         val_ratio = float(cfg.get("TRAIN_VAL_RATIO", 0.02))
         learning_rate = float(cfg.get("TRAIN_LR", 1.0e-4))
-        max_train_steps = int(cfg.get("TRAIN_MAX_TRAIN_STEPS", 0))
-        max_val_steps = int(cfg.get("TRAIN_MAX_VAL_STEPS", 0))
         early_stop_patience_evals = int(cfg.get("EARLY_STOP_PATIENCE_EVALS", 0))
         early_stop_rel_tol = float(cfg.get("EARLY_STOP_REL_TOL", 0.0))
         eval_steps_for_early_stop = int(cfg.get("EVAL_STEPS_FOR_EARLY_STOP", 1))
@@ -216,11 +213,7 @@ def main(argv: list) -> int:
             mf.write(f"copied_yaml={cfg_basename}\n")
 
         env = os.environ.copy()
-        if train_device.startswith("cuda"):
-            env["CUDA_VISIBLE_DEVICES"] = gpu_id
-        else:
-            # Avoid CUDA initialization on CPU dry-runs.
-            env.pop("CUDA_VISIBLE_DEVICES", None)
+        env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env["PYTHONNOUSERSITE"] = "1"
 
         cmd = [
@@ -231,7 +224,7 @@ def main(argv: list) -> int:
             f"task.dataset.zarr_path={combined_rel_path}",
             "training.debug=False",
             f"training.seed={seed}",
-            f"training.device={train_device}",
+            "training.device=cuda:0",
             f"dataloader.batch_size={batch_size}",
             f"val_dataloader.batch_size={batch_size}",
             f"task.dataset.val_ratio={val_ratio}",
@@ -241,8 +234,6 @@ def main(argv: list) -> int:
             f"training.early_stop_patience_evals={early_stop_patience_evals}",
             f"training.early_stop_rel_tol={early_stop_rel_tol}",
             f"training.eval_steps_for_early_stop={eval_steps_for_early_stop}",
-            f"training.max_train_steps={max_train_steps if max_train_steps > 0 else 'null'}",
-            f"training.max_val_steps={max_val_steps if max_val_steps > 0 else 'null'}",
             f"setting={config_slug}",
             f"expert_data_num={total_episodes}",
             f"head_camera_type={head_camera_type}",

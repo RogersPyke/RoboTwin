@@ -50,3 +50,5 @@ nohup.out
 
 # dependencies
 /script/curobo/
+/envs/curobo/
+/envs/flash-attention/

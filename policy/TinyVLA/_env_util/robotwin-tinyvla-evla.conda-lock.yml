@@ -1615,39 +1615,40 @@ package:
     mkl: '>=2018'
     networkx: ''
     python: '>=3.10,<3.11.0a0'
-    pytorch-cuda: '>=11.8,<11.9'
+    pytorch-cuda: '>=12.1,<12.2'
     pytorch-mutex: '1.0'
     pyyaml: ''
     sympy: ''
     torchtriton: 3.0.0
     typing_extensions: ''
-  url: https://conda.anaconda.org/pytorch/linux-64/pytorch-2.4.1-py3.10_cuda11.8_cudnn9.1.0_0.tar.bz2
+  url: https://conda.anaconda.org/pytorch/linux-64/pytorch-2.4.1-py3.10_cuda12.1_cudnn9.1.0_0.tar.bz2
   hash:
-    md5: 42b37d92a0afb7d67630375d3a80f4fc
-    sha256: bf2505fde010e57f590d80026154172e20f793ba298fa1861a1cbe0d0c0e647c
+    md5: f9e28927deff09d4c090242eb126cb4b
+    sha256: 014ce49f7e86804d9af896e938719cbc18f6c2c60e49789362e2db4f8608ee2b
   category: main
   optional: false
 - name: pytorch-cuda
-  version: '11.8'
+  version: '12.1'
   manager: conda
   platform: linux-64
   dependencies:
-    cuda-cudart: '>=11.8,<12.0'
-    cuda-cupti: '>=11.8,<12.0'
-    cuda-libraries: '>=11.8,<12.0'
-    cuda-nvrtc: '>=11.8,<12.0'
-    cuda-nvtx: '>=11.8,<12.0'
-    cuda-runtime: '>=11.8,<12.0'
-    libcublas: '>=11.11.3.6,<12.0.1.189'
-    libcufft: '>=10.9.0.58,<11.0.0.21'
-    libcusolver: '>=11.4.1.48,<11.4.2.57'
-    libcusparse: '>=11.7.5.86,<12.0.0.76'
-    libnpp: '>=11.8.0.86,<12.0.0.30'
-    libnvjpeg: '>=11.9.0.86,<12.0.0.28'
-  url: https://conda.anaconda.org/pytorch/linux-64/pytorch-cuda-11.8-h7e8668a_6.tar.bz2
+    cuda-cudart: '>=12.1,<12.2'
+    cuda-cupti: '>=12.1,<12.2'
+    cuda-libraries: '>=12.1,<12.2'
+    cuda-nvrtc: '>=12.1,<12.2'
+    cuda-nvtx: '>=12.1,<12.2'
+    cuda-runtime: '>=12.1,<12.2'
+    libcublas: '>=12.1.0.26,<12.1.3.1'
+    libcufft: '>=11.0.2.4,<11.0.2.54'
+    libcusolver: '>=11.4.4.55,<11.4.5.107'
+    libcusparse: '>=12.0.2.55,<12.1.0.106'
+    libnpp: '>=12.0.2.50,<12.1.0.40'
+    libnvjitlink: '>=12.1.105,<12.2.0'
+    libnvjpeg: '>=12.1.0.39,<12.2.0.2'
+  url: https://conda.anaconda.org/pytorch/linux-64/pytorch-cuda-12.1-ha16c6d3_6.tar.bz2
   hash:
-    md5: 84fb23b7a51f0f4942c33412ea19f833
-    sha256: 0debad38e24dedafecf993262639d0993201c48ff21b2447b45f15f5c3911d6b
+    md5: 0e94331f6f87bff1c229da02b0508693
+    sha256: 5207852a8591de46fcdd48d86502563f8511a9ebb52c7137831f44df43db12a7
   category: main
   optional: false
 - name: pytorch-mutex
@@ -1809,12 +1810,12 @@ package:
     numpy: ''
     python: '>=3.10,<3.11.0a0'
     pytorch: 2.4.1
-    pytorch-cuda: 11.8.*
+    pytorch-cuda: 12.1.*
     pytorch-mutex: '1.0'
-  url: https://conda.anaconda.org/pytorch/linux-64/torchaudio-2.4.1-py310_cu118.tar.bz2
+  url: https://conda.anaconda.org/pytorch/linux-64/torchaudio-2.4.1-py310_cu121.tar.bz2
   hash:
-    md5: 21aacc56710dd13af593840cc9010b7b
-    sha256: cbe88e110c9fb6745b7035b30d27489c2c3206a7c6250a3ba60336f839e7c0fc
+    md5: 12f0bb36ad849414cfba39af4f97eed7
+    sha256: 62978f9d80e1085b3dfdcc0dbdf77b0a537cd7d961809f4005c8f733c81f4f71
   category: main
   optional: false
 - name: torchtriton
@@ -1843,13 +1844,13 @@ package:
     pillow: '>=5.3.0,!=8.3.*'
     python: '>=3.10,<3.11.0a0'
     pytorch: 2.4.1
-    pytorch-cuda: 11.8.*
+    pytorch-cuda: 12.1.*
     pytorch-mutex: '1.0'
     requests: ''
-  url: https://conda.anaconda.org/pytorch/linux-64/torchvision-0.19.1-py310_cu118.tar.bz2
+  url: https://conda.anaconda.org/pytorch/linux-64/torchvision-0.19.1-py310_cu121.tar.bz2
   hash:
-    md5: 53960f939af57f4113e48e498242f3d7
-    sha256: 483385897370123cf110ce8e4b57c4b9b9cff4d2410e9291a5c0fb1cb360ad65
+    md5: 50192a54fdab595d533783c4a429beb8
+    sha256: 5115a3f09c41d357c8997133717fb5664dbaae5065ba708d0e64c8a43cf4b8b7
   category: main
   optional: false
 - name: typing_extensions
@@ -2167,13 +2168,13 @@ package:
   category: main
   optional: false
 - name: av
-  version: 14.4.0
+  version: 13.1.0
   manager: pip
   platform: linux-64
   dependencies: {}
-  url: https://files.pythonhosted.org/packages/86/f6/0b473dab52dfdea05f28f3578b1c56b6c796ce85e76951bab7c4e38d5a74/av-14.4.0.tar.gz
+  url: https://files.pythonhosted.org/packages/d7/37/faa98dca1a8f6c2e3f4ad3a935037872aff49a679b76918c5258cf5a1c70/av-13.1.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
   hash:
-    sha256: 3ecbf803a7fdf67229c0edada0830d6bfaea4d10bfb24f0c3f4e607cd1064b42
+    sha256: 1d568c4d7a36df52c0774d52e6d730148775ead16daed81c10dafc2569b5a38d
   category: main
   optional: false
 - name: azure

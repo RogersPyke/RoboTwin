@@ -86,19 +86,21 @@ def main(argv: list) -> int:
         gpu_id = str(cfg["EVAL_GPU_ID"])
         checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
         head_camera_type = str(cfg.get("EVAL_HEAD_CAMERA_TYPE", "D435"))
-        eval_test_num = int(cfg.get("EVAL_TEST_NUM", 1))
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])
         train_total_episodes = int(sum([row[2] for row in train_rows]))
+        checkpoint_expert_data_num = int(cfg.get("CHECKPOINT_EXPERT_DATA_NUM", train_total_episodes))
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu_id
         env["PYTHONWARNINGS"] = "ignore::UserWarning"
         env["PYTHONNOUSERSITE"] = "1"
-        conda_prefix = env.get("CONDA_PREFIX", "").strip()
+        conda_prefix = str(env.get("CONDA_PREFIX", "")).strip()
         if conda_prefix:
-            env["LD_LIBRARY_PATH"] = f"{conda_prefix}/lib:{env.get('LD_LIBRARY_PATH', '')}"
+            conda_lib = os.path.join(conda_prefix, "lib")
+            prev_ld = str(env.get("LD_LIBRARY_PATH", ""))
+            env["LD_LIBRARY_PATH"] = conda_lib if not prev_ld else f"{conda_lib}:{prev_ld}"
         base = cfg_name if cfg_name.endswith(".yaml") else f"{cfg_name}.yaml"
         env["ACT_EV_CFG_SNAPSHOT_SRC"] = os.path.abspath(os.path.join(dp_dir, "_ev_cfg", base))
 
@@ -116,7 +118,7 @@ def main(argv: list) -> int:
                 "--ckpt_setting",
                 train_config_slug,
                 "--expert_data_num",
-                str(train_total_episodes),
+                str(checkpoint_expert_data_num),
                 "--seed",
                 str(seed),
                 "--checkpoint_num",
@@ -127,8 +129,6 @@ def main(argv: list) -> int:
                 train_task_slug,
                 "--eval_expert_data_num",
                 str(expert_num),
-                "--test_num",
-                str(eval_test_num),
             ]
             logger.info(
                 "Eval task=%s config=%s using joint ckpt=%s/%s",
