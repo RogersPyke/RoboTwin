@@ -1,0 +1,23 @@
+# DP single-task train for __flow.sh (aligned with ACT flow_single_*).
+# Override GPU: export DP_FLOW_GPU=<id>
+
+TRAIN_TASKS:
+  - [unhanging_mug, demo_clean, 100]
+
+TRAIN_SEED: 0
+TRAIN_GPU_ID: 0
+
+TRAIN_ACTION_DIM: 14
+TRAIN_HEAD_CAMERA_TYPE: D435
+
+TRAIN_BATCH_SIZE: 8
+TRAIN_NUM_EPOCHS: 6000
+TRAIN_CHECKPOINT_EVERY: 2000
+TRAIN_VAL_RATIO: 0.02
+TRAIN_LR: 1.0e-4
+TRAIN_DELETE_COMBINED_ZARR_AFTER_TRAIN: true
+
+EVAL_STEPS_FOR_EARLY_STOP: 100
+EARLY_STOP_PATIENCE_EVALS: 40
+EARLY_STOP_REL_TOL: 1e-3
+force_end_reset_to_init: true

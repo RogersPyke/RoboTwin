@@ -2,7 +2,7 @@
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 
-# Recommended entrypoint for ACT training (multi-task via YAML config).
+# Recommended entrypoint for ACT training (single- or multi-task via YAML config).
 #
 # Usage:
 #   bash _train.sh <cfg_name>

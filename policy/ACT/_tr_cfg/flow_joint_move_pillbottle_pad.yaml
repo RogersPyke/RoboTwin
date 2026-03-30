@@ -1,0 +1,24 @@
+# Joint train for __flow.sh (pair: move_pillbottle_pad / unmove_pillbottle_pad).
+
+TRAIN_TASKS:
+  - [move_pillbottle_pad, demo_clean, 100]
+  - [unmove_pillbottle_pad, demo_clean, 100]
+
+TRAIN_SEED: 0
+TRAIN_GPU_ID: 0
+
+TRAIN_NUM_EPOCHS: 6000
+TRAIN_SAVE_FREQ: 2000
+TRAIN_BATCH_SIZE: 8
+TRAIN_LR: 1.0e-5
+TRAIN_STATE_DIM: 14
+
+ACT_KL_WEIGHT: 10
+ACT_CHUNK_SIZE: 50
+ACT_HIDDEN_DIM: 512
+ACT_DIM_FEEDFORWARD: 3200
+
+EVAL_STEPS_FOR_EARLY_STOP: 100
+EARLY_STOP_PATIENCE_EVALS: 40
+EARLY_STOP_REL_TOL: 1e-3
+force_end_reset_to_init: true

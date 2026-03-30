@@ -79,6 +79,10 @@ def main(usr_args):
     with open(f"./task_config/{task_config}.yml", "r", encoding="utf-8") as f:
         args = yaml.load(f.read(), Loader=yaml.FullLoader)
 
+    # Eval overrides (deploy_policy + CLI) may set env behavior keys not present in task yml.
+    if "force_end_reset_to_init" in usr_args and usr_args["force_end_reset_to_init"] is not None:
+        args["force_end_reset_to_init"] = usr_args["force_end_reset_to_init"]
+
     args['task_name'] = task_name
     args["task_config"] = task_config
     args["ckpt_setting"] = ckpt_setting

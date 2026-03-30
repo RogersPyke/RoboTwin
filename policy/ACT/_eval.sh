@@ -2,7 +2,7 @@
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 
-# Recommended entrypoint for ACT evaluation (joint/multi-task via YAML config).
+# Recommended entrypoint for ACT evaluation (single- or multi-task via YAML config).
 #
 # Usage:
 #   bash _eval.sh <cfg_name>

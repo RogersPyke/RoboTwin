@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Multi-task eval wrapper: reads _ev_cfg/<name>.yaml, loads the joint checkpoint under
-act_ckpt/act-<task1>__<task2>/... (from TRAIN_TASKS), runs eval on each EVAL_TASKS row.
+Eval wrapper: reads _ev_cfg/<name>.yaml, loads checkpoint under act_ckpt derived from TRAIN_TASKS
+(single task: act-<name>/...; multiple: act-<t1>__<t2>/...), runs eval on each EVAL_TASKS row.
+Optional TEST_NUM in YAML sets rollout count (passed to eval_policy as --test_num; default 100).
 Each eval_result/.../<timestamp>/ receives _ev_cfg_<name>.yaml (copy via eval_policy.py).
+
+eval_policy save path: eval_result/<task>/ACT/<task_config>/<ckpt_setting>/<timestamp>/.
+  ckpt_setting joins TRAIN_TASKS task_config values with "__" (one row -> no join).
+  So joint eval shows e.g. demo_clean__demo_clean; single-task eval shows demo_clean only.
+  The copied _ev_cfg_*.yaml in that folder identifies flow_single_* vs flow_joint_*.
+
 Usage: python3 _ev_wrapper.py <cfg_name>
        python3 _ev_wrapper.py --config <cfg_name>   # (legacy)
 Config name is without extension; file must be _ev_cfg/<name>.yaml.
-Joint models are never addressed by single-task act_ckpt paths; use this wrapper only.
 """
 import argparse
 import logging
@@ -42,15 +48,15 @@ def _setup_logger(act_dir: str) -> logging.Logger:
 
 def _parse_joint_ckpt_dir_parts(cfg: dict) -> tuple:
     """
-    @input: [dict, eval YAML with TRAIN_TASKS matching the joint training run]
+    @input: [dict, eval YAML with TRAIN_TASKS matching the training run]
     @output: [tuple, (combined_task_slug, combined_config_slug, combined_total_episodes)]
-    @scenario: [Same layout as train: act_ckpt/act-<slug1>__<slug2>/<cfg1>__<cfg2>-<total_eps>]
+    @scenario: [Same layout as train: single slug or slug1__slug2 / cfg slugs joined by __]
     """
     if "TRAIN_TASKS" not in cfg:
-        raise ValueError("Config must define TRAIN_TASKS (same rows as used for joint training).")
+        raise ValueError("Config must define TRAIN_TASKS (same rows as used for training).")
     rows = cfg["TRAIN_TASKS"]
-    if not rows or len(rows) < 2:
-        raise ValueError("TRAIN_TASKS must list at least 2 rows [task_name, task_config, expert_num].")
+    if not rows or len(rows) < 1:
+        raise ValueError("TRAIN_TASKS must list at least 1 row [task_name, task_config, expert_num].")
     names, cfgs, nums = [], [], []
     for i, row in enumerate(rows):
         if not isinstance(row, (list, tuple)) or len(row) != 3:
@@ -87,7 +93,7 @@ def _load_ev_cfg(act_dir: str, name: str) -> dict:
     """
     @input: [str, act_dir], [str, config name without .yaml]
     @output: [dict, normalized eval config fields present or derivable]
-    @scenario: [Load _ev_cfg/<name>.yaml for multi-task evaluation]
+    @scenario: [Load _ev_cfg/<name>.yaml for evaluation]
     """
     base = name if name.endswith(".yaml") else f"{name}.yaml"
     path = os.path.join(act_dir, "_ev_cfg", base)
@@ -105,8 +111,17 @@ def _load_ev_cfg(act_dir: str, name: str) -> dict:
     return cfg
 
 
+def _to_cli_bool(v) -> str:
+    """
+    Convert python truthy values to eval_policy override bool string.
+    """
+    if isinstance(v, str):
+        return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
+    return "true" if bool(v) else "false"
+
+
 def main(argv: list) -> int:
-    parser = argparse.ArgumentParser(description="Multi-task eval wrapper (config under _ev_cfg/*.yaml)")
+    parser = argparse.ArgumentParser(description="Eval wrapper (config under _ev_cfg/*.yaml); 1+ train tasks.")
     parser.add_argument(
         "cfg_name",
         nargs="?",
@@ -135,6 +150,13 @@ def main(argv: list) -> int:
         eval_runs = _parse_eval_runs(cfg)
         seed = str(cfg["EVAL_SEED"]).strip()
         gpu_id = str(cfg["EVAL_GPU_ID"]).strip()
+        test_num = int(cfg.get("TEST_NUM", 100))
+        if test_num < 1:
+            raise ValueError("TEST_NUM must be >= 1")
+        force_end_reset_to_init = _to_cli_bool(cfg.get("force_end_reset_to_init", True))
+        env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
+        if env_gpu:
+            gpu_id = env_gpu
 
         repo_root = os.path.abspath(os.path.join(act_dir, "..", ".."))
         env = os.environ.copy()
@@ -162,13 +184,17 @@ def main(argv: list) -> int:
                 "--ckpt_setting", ckpt_setting,
                 "--ckpt_dir", ckpt_dir,
                 "--seed", seed,
+                "--test_num", str(test_num),
                 "--temporal_agg", "true",
+                "--force_end_reset_to_init", force_end_reset_to_init,
             ]
             logger.info(
-                "Eval: task_name=%s task_config=%s joint_ckpt_dir=%s",
+                "Eval: task_name=%s task_config=%s ckpt_dir=%s test_num=%s force_end_reset_to_init=%s",
                 task_name,
                 task_config,
                 ckpt_dir,
+                test_num,
+                force_end_reset_to_init,
             )
             logger.info("Run: %s", " ".join(cmd))
             subprocess.run(cmd, check=True, env=env, cwd=repo_root)

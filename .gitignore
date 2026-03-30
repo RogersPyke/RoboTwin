@@ -33,8 +33,9 @@ policy/weights/*
 
 # Docs and logs
 docs/*
-logs/*
+**/logs/*
 nohup.out
+/policy/DP/logs/*
 
 # data
 **/training_data/**

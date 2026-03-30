@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Multi-task train wrapper: reads _tr_cfg/<name>.yaml, builds combined dataset, trains from scratch.
+Train wrapper: reads _tr_cfg/<name>.yaml, builds combined dataset (1+ tasks), trains from scratch.
 Usage: python3 _tr_wrapper.py <cfg_name>
        python3 _tr_wrapper.py --config <cfg_name>   # (legacy)
 Config name is without extension; file must be _tr_cfg/<name>.yaml.
@@ -91,13 +91,13 @@ def _parse_train_tasks_rows(cfg: dict) -> tuple:
     """
     @input: [dict, raw YAML cfg with TRAIN_TASKS]
     @output: [tuple, (task_names, task_configs, expert_counts) lists]
-    @scenario: [Parse TRAIN_TASKS list of [name, cfg, num] for multi-task training]
+    @scenario: [Parse TRAIN_TASKS list of [name, cfg, num] for single- or multi-task training]
     """
     if "TRAIN_TASKS" not in cfg:
         raise ValueError("Config must define TRAIN_TASKS as a list of [task_name, task_config, expert_num].")
     rows = cfg["TRAIN_TASKS"]
-    if not rows or len(rows) < 2:
-        raise ValueError("TRAIN_TASKS must list at least 2 rows [task_name, task_config, expert_num].")
+    if not rows or len(rows) < 1:
+        raise ValueError("TRAIN_TASKS must list at least 1 row [task_name, task_config, expert_num].")
     names, cfgs, nums = [], [], []
     for i, row in enumerate(rows):
         if not isinstance(row, (list, tuple)) or len(row) != 3:
@@ -112,7 +112,7 @@ def _load_tr_cfg(act_dir: str, name: str) -> tuple:
     """
     @input: [str, act_dir], [str, config name without .yaml]
     @output: [tuple, (dict cfg, str absolute path to yaml file)]
-    @scenario: [Load _tr_cfg/<name>.yaml for multi-task training]
+    @scenario: [Load _tr_cfg/<name>.yaml for training]
     """
     base = name if name.endswith(".yaml") else f"{name}.yaml"
     path = os.path.join(act_dir, "_tr_cfg", base)
@@ -135,7 +135,7 @@ def main(argv: list) -> int:
     @output: [int, 0 on success else non-zero]
     @scenario: [Load _tr_cfg config, link combined dataset episodes, update SIM_TASK_CONFIGS, train from scratch]
     """
-    parser = argparse.ArgumentParser(description="Multi-task train wrapper (config under _tr_cfg/*.yaml)")
+    parser = argparse.ArgumentParser(description="Train wrapper (config under _tr_cfg/*.yaml); 1+ tasks.")
     parser.add_argument(
         "cfg_name",
         nargs="?",
@@ -163,7 +163,10 @@ def main(argv: list) -> int:
         cfg, cfg_src_abspath = _load_tr_cfg(act_dir, cfg_name)
         task_names, task_configs, expert_counts = _parse_train_tasks_rows(cfg)
         global_seed = int(cfg["TRAIN_SEED"])
-        gpu_id = str(cfg["TRAIN_GPU_ID"])
+        gpu_id = str(cfg["TRAIN_GPU_ID"]).strip()
+        env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
+        if env_gpu:
+            gpu_id = env_gpu
 
         # Backward-compatible defaults (match historical hard-coded values in this wrapper).
         train_num_epochs = int(_get_cfg_opt(cfg, "TRAIN_NUM_EPOCHS", 6000))
@@ -237,38 +240,55 @@ def main(argv: list) -> int:
                 if not os.path.isfile(src_ep):
                     raise FileNotFoundError(f"Missing episode file: {src_ep}")
 
-        os.makedirs(combined_dataset_dir, exist_ok=True)
-        for i in range(len(task_names)):
-            sub_key = f"sim-{task_names[i]}-{task_configs[i]}-{expert_counts[i]}"
-            src_dir = sim_task_configs[sub_key]["dataset_dir"]
-            base = offsets[i]
-            for j in range(expert_counts[i]):
-                dst_idx = base + j
-                dst_ep = os.path.join(combined_dataset_dir, f"episode_{dst_idx}.hdf5")
-                src_ep = os.path.join(src_dir, f"episode_{j}.hdf5")
-                if os.path.lexists(dst_ep):
-                    if os.path.islink(dst_ep):
-                        continue
-                    raise FileExistsError(f"Destination exists and is not a symlink: {dst_ep}")
-                rel_src_ep = os.path.relpath(src_ep, start=os.path.dirname(dst_ep))
-                os.symlink(rel_src_ep, dst_ep)
-
-        existing = sim_task_configs.get(combined_key)
-        if existing is not None:
+        # Single-task: combined_* paths match process_data layout (same dir as subtask).
+        # Symlinking episode_i.hdf5 onto itself would hit FileExistsError; use existing SIM entry only.
+        if len(task_names) == 1:
+            existing_one = sim_task_configs.get(combined_key)
+            if existing_one is None:
+                raise KeyError(f"Missing SIM_TASK_CONFIGS entry for {combined_key}. Run process_data.sh first.")
             if (
-                existing.get("episode_len") != episode_len
-                or existing.get("camera_names") != camera_names
-                or existing.get("num_episodes") != combined_total_episodes
+                existing_one.get("episode_len") != episode_len
+                or existing_one.get("camera_names") != camera_names
+                or int(existing_one.get("num_episodes", -1)) != combined_total_episodes
             ):
-                raise ValueError(f"Conflicting existing SIM_TASK_CONFIGS entry for {combined_key}.")
-        sim_task_configs[combined_key] = {
-            "dataset_dir": combined_dataset_dir,
-            "num_episodes": combined_total_episodes,
-            "episode_len": episode_len,
-            "camera_names": camera_names,
-        }
-        with open(sim_cfg_path, "w") as f:
-            json.dump(sim_task_configs, f, indent=4)
+                raise ValueError(
+                    f"SIM_TASK_CONFIGS[{combined_key!r}] does not match expected "
+                    f"episode_len/camera_names/num_episodes for this run."
+                )
+            logger.info("Single-task mode: using existing dataset_dir=%s (no symlink merge).", combined_dataset_dir)
+        else:
+            os.makedirs(combined_dataset_dir, exist_ok=True)
+            for i in range(len(task_names)):
+                sub_key = f"sim-{task_names[i]}-{task_configs[i]}-{expert_counts[i]}"
+                src_dir = sim_task_configs[sub_key]["dataset_dir"]
+                base = offsets[i]
+                for j in range(expert_counts[i]):
+                    dst_idx = base + j
+                    dst_ep = os.path.join(combined_dataset_dir, f"episode_{dst_idx}.hdf5")
+                    src_ep = os.path.join(src_dir, f"episode_{j}.hdf5")
+                    if os.path.lexists(dst_ep):
+                        if os.path.islink(dst_ep):
+                            continue
+                        raise FileExistsError(f"Destination exists and is not a symlink: {dst_ep}")
+                    rel_src_ep = os.path.relpath(src_ep, start=os.path.dirname(dst_ep))
+                    os.symlink(rel_src_ep, dst_ep)
+
+            existing = sim_task_configs.get(combined_key)
+            if existing is not None:
+                if (
+                    existing.get("episode_len") != episode_len
+                    or existing.get("camera_names") != camera_names
+                    or existing.get("num_episodes") != combined_total_episodes
+                ):
+                    raise ValueError(f"Conflicting existing SIM_TASK_CONFIGS entry for {combined_key}.")
+            sim_task_configs[combined_key] = {
+                "dataset_dir": combined_dataset_dir,
+                "num_episodes": combined_total_episodes,
+                "episode_len": episode_len,
+                "camera_names": camera_names,
+            }
+            with open(sim_cfg_path, "w") as f:
+                json.dump(sim_task_configs, f, indent=4)
 
         ckpt_dir = f"./act_ckpt/act-{combined_task_slug}/{combined_config_slug}-{combined_total_episodes}"
         os.makedirs(ckpt_dir, exist_ok=True)

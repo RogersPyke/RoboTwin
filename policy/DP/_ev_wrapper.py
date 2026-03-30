@@ -53,6 +53,12 @@ def _load_ev_cfg(dp_dir: str, cfg_name: str) -> dict:
     return cfg
 
 
+def _to_cli_bool(v) -> str:
+    if isinstance(v, str):
+        return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
+    return "true" if bool(v) else "false"
+
+
 def _parse_task_rows(cfg: dict, key: str) -> list:
     rows = cfg.get(key)
     if not isinstance(rows, list) or not rows:
@@ -84,8 +90,15 @@ def main(argv: list) -> int:
         eval_rows = _parse_task_rows(cfg, "EVAL_TASKS")
         seed = int(cfg["EVAL_SEED"])
         gpu_id = str(cfg["EVAL_GPU_ID"])
+        env_gpu = os.environ.get("DP_FLOW_GPU", "").strip()
+        if env_gpu:
+            gpu_id = env_gpu
         checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
         head_camera_type = str(cfg.get("EVAL_HEAD_CAMERA_TYPE", "D435"))
+        test_num = int(cfg.get("TEST_NUM", 100))
+        if test_num < 1:
+            raise ValueError("TEST_NUM must be >= 1")
+        force_end_reset_to_init = _to_cli_bool(cfg.get("force_end_reset_to_init", True))
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])
@@ -129,13 +142,19 @@ def main(argv: list) -> int:
                 train_task_slug,
                 "--eval_expert_data_num",
                 str(expert_num),
+                "--test_num",
+                str(test_num),
+                "--force_end_reset_to_init",
+                force_end_reset_to_init,
             ]
             logger.info(
-                "Eval task=%s config=%s using joint ckpt=%s/%s",
+                "Eval task=%s config=%s ckpt=%s/%s test_num=%s force_end_reset_to_init=%s",
                 task_name,
                 task_config,
                 train_task_slug,
                 train_config_slug,
+                test_num,
+                force_end_reset_to_init,
             )
             logger.info("Run: %s", " ".join(cmd))
             subprocess.run(cmd, check=True, cwd=repo_root, env=env)

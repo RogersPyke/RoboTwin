@@ -1,36 +1,35 @@
-# Purpose: Configurable wrapper so that (1) collected data contains full trajectory
-#          init -> play_once -> reset to init; (2) evaluation requires task success AND reset to init.
-# Dependencies: envs.utils (ArmTag), envs._base_task (task env with move, back_to_origin, robot).
-# Usage:
-#   - Data collection (eval_mode=False): trajectory = init -> play_once -> reset (full, for time reversal).
-#   - Evaluation (eval_mode=True): after task success, run reset; eval success = check_success() and reset done.
-#   - Default: FORCE_END_RESET_TO_INIT = True. Override via task_config yaml "force_end_reset_to_init".
-#   - Applied automatically in Base_Task._init_task_env_() so collect_data/eval_policy/eval_policy_client
-#     need no changes; config comes from setup_demo(**args).
+# Purpose:
+#   - Keep seed filtering path (play_once + reset function) unchanged.
+#   - In policy eval, if force_end_reset_to_init=True, final success requires:
+#       task success reached first, then model actions bring robot back to init within step limit.
+#   - No hard-coded reset action is executed after policy success in eval mode.
 
-import os
 import logging
-from datetime import datetime, timezone, timedelta
+import math
+import os
+from datetime import datetime, timedelta, timezone
 from types import MethodType
+
+import numpy as np
 
 from .utils import ArmTag
 
-# Default: force robot back to init state at end of each episode (for time-reversal compatibility).
-# Overridable by task_config/<name>.yml key "force_end_reset_to_init".
 FORCE_END_RESET_TO_INIT = True
 
-# Log directory under project root; timestamp YYYYMMDDHHMMSS (UTC+8).
 LOG_DIR_NAME = "logs"
 UTC8 = timezone(timedelta(hours=8))
 
+# Model reset-to-init tolerance in eval mode.
+RESET_TO_INIT_POS_TOL_M = 0.08
+RESET_TO_INIT_ROT_TOL_DEG = 25.0
+RESET_TO_INIT_GRIPPER_TOL = 0.20
+
 
 def _timestamp_utc8():
-    """Return current timestamp string YYYYMMDDHHMMSS in UTC+8."""
     return datetime.now(UTC8).strftime("%Y%m%d%H%M%S")
 
 
 def _ensure_logger():
-    """Create or return module logger; logs to dedicated log dir with script-named file."""
     name = "end_reset_wrapper"
     logger = logging.getLogger(name)
     if logger.handlers:
@@ -47,29 +46,83 @@ def _ensure_logger():
 
 
 def get_force_end_reset_to_init(config_dict):
-    """
-    Resolve whether to force end-of-episode reset to init state.
-    Input: config_dict (dict) - typically the loaded task_config yaml plus runtime args.
-    Output: bool - True to force reset at end, False to skip.
-    Usage: Override default FORCE_END_RESET_TO_INIT when config_dict contains
-           key "force_end_reset_to_init"; otherwise use module default.
-    """
     if not isinstance(config_dict, dict):
         return FORCE_END_RESET_TO_INIT
-    return config_dict.get("force_end_reset_to_init", FORCE_END_RESET_TO_INIT)
+    v = config_dict.get("force_end_reset_to_init", FORCE_END_RESET_TO_INIT)
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(v)
+
+
+def _quat_angle_deg(q1, q2):
+    q1 = np.array(q1, dtype=np.float64)
+    q2 = np.array(q2, dtype=np.float64)
+    n1 = np.linalg.norm(q1)
+    n2 = np.linalg.norm(q2)
+    if n1 < 1e-12 or n2 < 1e-12:
+        return 180.0
+    q1 = q1 / n1
+    q2 = q2 / n2
+    dot = float(np.clip(abs(np.dot(q1, q2)), 0.0, 1.0))
+    return math.degrees(2.0 * math.acos(dot))
+
+
+def _capture_eval_init_reference(task_env, logger):
+    if getattr(task_env, "_eval_init_ref_ready", False):
+        return
+    task_env._eval_init_left_pose = np.array(task_env.robot.left_original_pose, dtype=np.float64)
+    task_env._eval_init_right_pose = np.array(task_env.robot.right_original_pose, dtype=np.float64)
+    task_env._eval_init_left_gripper = float(task_env.robot.get_left_gripper_val())
+    task_env._eval_init_right_gripper = float(task_env.robot.get_right_gripper_val())
+    task_env._eval_init_ref_ready = True
+    logger.info("[end_reset_wrapper] Captured eval init reference pose and gripper.")
+
+
+def _eval_model_reset_to_init_done(task_env, logger):
+    if not getattr(task_env, "_eval_init_ref_ready", False):
+        _capture_eval_init_reference(task_env, logger)
+    left_now = np.array(task_env.robot.get_left_ee_pose(), dtype=np.float64)
+    right_now = np.array(task_env.robot.get_right_ee_pose(), dtype=np.float64)
+    left_ref = task_env._eval_init_left_pose
+    right_ref = task_env._eval_init_right_pose
+    left_pos_err = float(np.linalg.norm(left_now[:3] - left_ref[:3]))
+    right_pos_err = float(np.linalg.norm(right_now[:3] - right_ref[:3]))
+    left_rot_err = _quat_angle_deg(left_now[3:], left_ref[3:])
+    right_rot_err = _quat_angle_deg(right_now[3:], right_ref[3:])
+    left_gripper_err = abs(float(task_env.robot.get_left_gripper_val()) - float(task_env._eval_init_left_gripper))
+    right_gripper_err = abs(float(task_env.robot.get_right_gripper_val()) - float(task_env._eval_init_right_gripper))
+
+    passed = (
+        left_pos_err <= RESET_TO_INIT_POS_TOL_M
+        and right_pos_err <= RESET_TO_INIT_POS_TOL_M
+        and left_rot_err <= RESET_TO_INIT_ROT_TOL_DEG
+        and right_rot_err <= RESET_TO_INIT_ROT_TOL_DEG
+        and left_gripper_err <= RESET_TO_INIT_GRIPPER_TOL
+        and right_gripper_err <= RESET_TO_INIT_GRIPPER_TOL
+    )
+    logger.debug(
+        (
+            "[end_reset_wrapper] Model reset check: pass=%s, "
+            "left_pos=%.4f right_pos=%.4f left_rot=%.2f right_rot=%.2f "
+            "left_gripper=%.4f right_gripper=%.4f"
+        ),
+        passed,
+        left_pos_err,
+        right_pos_err,
+        left_rot_err,
+        right_rot_err,
+        left_gripper_err,
+        right_gripper_err,
+    )
+    return passed
 
 
 def _do_reset_to_init(task_env, logger):
-    """
-    Move both arms to init pose; set task_env._eval_reset_completed when in eval_mode.
-    Input: task_env - Base_Task with move(), back_to_origin(), robot; logger for messages.
-    Output: None. Sets task_env._eval_reset_completed in eval_mode from task_env.plan_success.
-    """
     if not getattr(task_env, "robot", None):
         if getattr(task_env, "eval_mode", False):
             task_env._eval_reset_completed = False
             task_env.plan_success = False
-        logger.warning("\033[91m[end_reset_wrapper] No robot on task_env; skip end reset.\033[0m")
+        logger.warning("[end_reset_wrapper] No robot on task_env; skip expert reset.")
         return
     try:
         task_env.move(
@@ -80,30 +133,29 @@ def _do_reset_to_init(task_env, logger):
             task_env._eval_reset_completed = getattr(task_env, "plan_success", False)
             if not task_env._eval_reset_completed:
                 task_env.plan_success = False
-        logger.debug("\033[92m[end_reset_wrapper] SUCCESS: robot reset to init state at episode end.\033[0m")
+        logger.info("[end_reset_wrapper] Expert reset-to-init finished for play_once filtering.")
     except Exception as e:
-        logger.error("\033[91m[end_reset_wrapper] ERR: end reset failed: %s\033[0m", e, exc_info=True)
+        logger.error("[end_reset_wrapper] Expert reset-to-init failed: %s", e, exc_info=True)
         if getattr(task_env, "eval_mode", False):
             task_env._eval_reset_completed = False
             task_env.plan_success = False
 
 
+def _reset_eval_flags(task_env):
+    task_env._eval_task_success_reached = False
+    task_env._eval_reset_completed = False
+    task_env._eval_init_ref_ready = False
+    task_env._eval_reset_logged_success = False
+
+
 def with_end_reset(task_env, force_end_reset_to_init):
-    """
-    Wrap task_env so: (1) play_once() runs task then reset when enabled (data + eval expert path).
-    (2) Eval success = task success AND reset completed; take_action is wrapped so eval_success is
-        set only after reset in eval_mode (no changes needed in eval scripts).
-    Input: task_env - Base_Task with move(), back_to_origin(), robot, eval_mode, take_action.
-           force_end_reset_to_init (bool) - if True, after play_once() run both arms to origin.
-    Output: task_env (play_once and take_action patched; eval_reset_to_init attached for optional use).
-    """
     logger = _ensure_logger()
     original_play_once = task_env.play_once
     original_take_action = task_env.take_action
 
     def _play_once():
         if getattr(task_env, "eval_mode", False):
-            task_env._eval_reset_completed = False
+            _reset_eval_flags(task_env)
         result = original_play_once()
         if not force_end_reset_to_init:
             return result
@@ -112,19 +164,33 @@ def with_end_reset(task_env, force_end_reset_to_init):
 
     def _take_action(self, action, action_type="qpos"):
         if getattr(self, "eval_mode", False) and getattr(self, "take_action_cnt", 0) == 0:
-            self._eval_reset_completed = False
+            _reset_eval_flags(self)
+            if force_end_reset_to_init:
+                _capture_eval_init_reference(self, logger)
+
         original_take_action(action, action_type)
-        if getattr(self, "eval_mode", False) and getattr(self, "eval_success", False):
-            _do_reset_to_init(self, logger)
-            self.eval_success = getattr(self, "_eval_reset_completed", False)
+
+        if not getattr(self, "eval_mode", False):
+            return
+        if not force_end_reset_to_init:
+            return
+
+        if getattr(self, "eval_success", False) and not getattr(self, "_eval_task_success_reached", False):
+            self._eval_task_success_reached = True
+            self.eval_success = False
+            logger.info("[end_reset_wrapper] Task success reached. Waiting for model reset-to-init.")
+
+        if getattr(self, "_eval_task_success_reached", False):
+            self._eval_reset_completed = _eval_model_reset_to_init_done(self, logger)
+            self.eval_success = self._eval_reset_completed
+            if self.eval_success and not getattr(self, "_eval_reset_logged_success", False):
+                self._eval_reset_logged_success = True
+                logger.info("[end_reset_wrapper] Eval success: task success + model reset-to-init.")
 
     def _eval_reset_to_init():
-        """Optional: call from eval script to run reset; wrapper already does this inside take_action in eval_mode."""
         _do_reset_to_init(task_env, logger)
 
     task_env.play_once = _play_once
-    # Bind as instance method; plain function assignment would make take_action(action) pass
-    # action as self and raise "missing 1 required positional argument: 'action'".
     task_env.take_action = MethodType(_take_action, task_env)
     task_env.eval_reset_to_init = _eval_reset_to_init
     return task_env

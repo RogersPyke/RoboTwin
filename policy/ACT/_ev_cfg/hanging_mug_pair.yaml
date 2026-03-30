@@ -9,3 +9,5 @@ EVAL_TASKS:
   - [hanging_mug, demo_clean, 100]
 EVAL_SEED: 0
 EVAL_GPU_ID: 0
+TEST_NUM: 50
+force_end_reset_to_init: true

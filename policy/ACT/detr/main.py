@@ -118,6 +118,7 @@ def get_args_parser():
     # parser.add_argument('--num_queries',type=int, required=True)
     # parser.add_argument('--actionsByQuery',type=int, required=True)
 
+    # === start of early stop args ===
     # Early-stop args are passed through imitate_episodes.py, but ACTPolicy/build_ACT_model_and_optimizer
     # internally calls DETR's parser.parse_args() on the same sys.argv. We include these args here solely
     # to avoid "unrecognized arguments" failures; DETR does not use them.
@@ -145,6 +146,7 @@ def get_args_parser():
         required=False,
         default=100,
     )
+    # === end of early stop args ===
 
     return parser
 

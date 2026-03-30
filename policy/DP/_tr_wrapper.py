@@ -177,6 +177,9 @@ def main(argv: list) -> int:
         rows = _parse_task_rows(cfg, "TRAIN_TASKS")
         seed = int(cfg["TRAIN_SEED"])
         gpu_id = str(cfg["TRAIN_GPU_ID"])
+        env_gpu = os.environ.get("DP_FLOW_GPU", "").strip()
+        if env_gpu:
+            gpu_id = env_gpu
         action_dim = int(cfg["TRAIN_ACTION_DIM"])
         head_camera_type = str(cfg.get("TRAIN_HEAD_CAMERA_TYPE", "D435"))
         batch_size = int(cfg.get("TRAIN_BATCH_SIZE", 128))
