@@ -11,4 +11,4 @@ EVAL_TASKS:
 EVAL_SEED: 0
 EVAL_GPU_ID: 0
 TEST_NUM: 50
-force_end_reset_to_init: true
+END_RESET_TO_INIT: true

@@ -62,6 +62,12 @@ def get_embodiment_config(robot_file):
     return embodiment_args
 
 
+def _as_bool(v):
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(v)
+
+
 def main(usr_args):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     task_name = usr_args["task_name"]
@@ -170,30 +176,40 @@ def main(usr_args):
     seed = usr_args["seed"]
 
     st_seed = 100000 * (1 + seed)
-    suc_nums = []
     # Allow dry-run evaluation with smaller rollouts.
     test_num = int(usr_args.get("test_num", 100))
-    topk = 1
 
     model = get_model(usr_args)
-    st_seed, suc_num = eval_policy(task_name,
-                                   TASK_ENV,
-                                   args,
-                                   model,
-                                   st_seed,
-                                   test_num=test_num,
-                                   video_size=video_size,
-                                   instruction_type=instruction_type)
-    suc_nums.append(suc_num)
-
-    topk_success_rate = sorted(suc_nums, reverse=True)[:topk]
+    st_seed, eval_stats = eval_policy(task_name,
+                                      TASK_ENV,
+                                      args,
+                                      model,
+                                      st_seed,
+                                      test_num=test_num,
+                                      video_size=video_size,
+                                      instruction_type=instruction_type)
 
     file_path = os.path.join(save_dir, f"_result.txt")
     with open(file_path, "w") as file:
         file.write(f"Timestamp: {current_time}\n\n")
         file.write(f"Instruction Type: {instruction_type}\n\n")
-        # file.write(str(task_reward) + '\n')
-        file.write("\n".join(map(str, np.array(suc_nums) / test_num)))
+        file.write(f"Force End Reset To Init: {eval_stats['force_end_reset_to_init']}\n\n")
+        file.write(
+            f"Original Success Rate (Task Checkpoint): "
+            f"{eval_stats['task_success_count']}/{test_num} => "
+            f"{round(eval_stats['task_success_count'] / test_num * 100, 1)}%\n"
+        )
+        if eval_stats["force_end_reset_to_init"]:
+            file.write(
+                f"Full-Process Success Rate (Task + Back To Init): "
+                f"{eval_stats['full_success_count']}/{test_num} => "
+                f"{round(eval_stats['full_success_count'] / test_num * 100, 1)}%\n"
+            )
+            file.write(
+                f"Failure Stage Count: "
+                f"task_stage={eval_stats['task_stage_fail_count']}, "
+                f"reset_stage={eval_stats['reset_stage_fail_count']}\n"
+            )
 
     print(f"Data has been saved to {file_path}")
     # return task_reward
@@ -211,8 +227,13 @@ def eval_policy(task_name,
     print(f"\033[34mPolicy Name: {args['policy_name']}\033[0m")
 
     expert_check = True
+    force_end_reset_to_init = _as_bool(args.get("force_end_reset_to_init", True))
     TASK_ENV.suc = 0
     TASK_ENV.test_num = 0
+    task_success_count = 0
+    full_success_count = 0
+    task_stage_fail_count = 0
+    reset_stage_fail_count = 0
 
     now_id = 0
     succ_seed = 0
@@ -313,11 +334,28 @@ def eval_policy(task_name,
         if TASK_ENV.eval_video_path is not None:
             TASK_ENV._del_eval_video_ffmpeg()
 
+        task_success_reached = bool(getattr(TASK_ENV, "_eval_task_success_reached", False))
         if succ:
             TASK_ENV.suc += 1
-            print("\033[92mSuccess!\033[0m")
+            if force_end_reset_to_init:
+                task_success_count += 1
+                full_success_count += 1
+                print("\033[92mSuccess! (task checkpoint + back to init)\033[0m")
+            else:
+                task_success_count += 1
+                print("\033[92mSuccess! (task checkpoint)\033[0m")
         else:
-            print("\033[91mFail!\033[0m")
+            if force_end_reset_to_init:
+                if task_success_reached:
+                    task_success_count += 1
+                    reset_stage_fail_count += 1
+                    print("\033[91mFail! Stage: reset_to_init\033[0m")
+                else:
+                    task_stage_fail_count += 1
+                    print("\033[91mFail! Stage: task_checkpoint\033[0m")
+            else:
+                task_stage_fail_count += 1
+                print("\033[91mFail! Stage: task_checkpoint\033[0m")
 
         now_id += 1
         TASK_ENV.close_env(clear_cache=((succ_seed + 1) % clear_cache_freq == 0))
@@ -327,14 +365,36 @@ def eval_policy(task_name,
 
         TASK_ENV.test_num += 1
 
-        print(
-            f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
-            f"Success rate: \033[96m{TASK_ENV.suc}/{TASK_ENV.test_num}\033[0m => \033[95m{round(TASK_ENV.suc/TASK_ENV.test_num*100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
-        )
+        if force_end_reset_to_init:
+            print(
+                f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
+                f"Original Success (task checkpoint): \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
+                f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m | "
+                f"Full Success (task + reset): \033[96m{full_success_count}/{TASK_ENV.test_num}\033[0m => "
+                f"\033[95m{round(full_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
+            )
+        else:
+            print(
+                f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
+                f"Success rate: \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
+                f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
+            )
         # TASK_ENV._take_picture()
         now_seed += 1
 
-    return now_seed, TASK_ENV.suc
+    if force_end_reset_to_init:
+        print(
+            f"Failure stage summary: task_checkpoint={task_stage_fail_count}, reset_to_init={reset_stage_fail_count}"
+        )
+
+    return now_seed, {
+        "force_end_reset_to_init": force_end_reset_to_init,
+        "reported_success_count": TASK_ENV.suc,
+        "task_success_count": task_success_count,
+        "full_success_count": full_success_count,
+        "task_stage_fail_count": task_stage_fail_count,
+        "reset_stage_fail_count": reset_stage_fail_count,
+    }
 
 
 def parse_args_and_config():

@@ -10,6 +10,7 @@ EVAL_TASKS:
 
 EVAL_SEED: 0
 EVAL_GPU_ID: "0"
+END_RESET_TO_INIT: true
 
 MODEL_BASE: /home/rogerspyke/projects/thesis-draft-dev/third_party/RoboTwin/policy/TinyVLA/model_param/InternVL3-1B/
 USE_POLICY_BEST: false

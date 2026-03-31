@@ -103,7 +103,7 @@ def _load_ev_cfg(act_dir: str, name: str) -> dict:
         cfg = yaml.safe_load(f)
     if not cfg:
         raise ValueError("Config file is empty.")
-    for k in ("EVAL_SEED", "EVAL_GPU_ID"):
+    for k in ("EVAL_SEED", "EVAL_GPU_ID", "END_RESET_TO_INIT"):
         if k not in cfg:
             raise ValueError(f"Missing required key in config: {k}")
     _parse_joint_ckpt_dir_parts(cfg)
@@ -118,6 +118,10 @@ def _to_cli_bool(v) -> str:
     if isinstance(v, str):
         return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
     return "true" if bool(v) else "false"
+
+
+def _resolve_eval_force_end_reset_to_init(cfg: dict) -> str:
+    return _to_cli_bool(cfg["END_RESET_TO_INIT"])
 
 
 def main(argv: list) -> int:
@@ -153,7 +157,7 @@ def main(argv: list) -> int:
         test_num = int(cfg.get("TEST_NUM", 100))
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
-        force_end_reset_to_init = _to_cli_bool(cfg.get("force_end_reset_to_init", True))
+        force_end_reset_to_init = _resolve_eval_force_end_reset_to_init(cfg)
         env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
         if env_gpu:
             gpu_id = env_gpu

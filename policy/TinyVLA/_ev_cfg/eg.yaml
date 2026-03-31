@@ -12,6 +12,7 @@ EVAL_TASKS:
 
 EVAL_SEED: 0
 EVAL_GPU_ID: "0"
+END_RESET_TO_INIT: true
 
 MODEL_BASE: /path/to/TinyVLA-v2/model_param/InternVL3-1B/
 

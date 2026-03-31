@@ -200,7 +200,28 @@ def _build_eval_overrides(
     add_pair("instruction_type", ev_cfg.get("INSTRUCTION_TYPE", None))
     # Allow dry-run evaluation to limit rollout count (used by script/eval_policy.py).
     add_pair("test_num", ev_cfg.get("EVAL_TEST_NUM", None))
+    add_pair("force_end_reset_to_init", _resolve_eval_force_end_reset_to_init(ev_cfg))
     return overrides
+
+
+def _to_cli_bool(v: Any) -> str:
+    """
+    @input: [Any, bool-like value]
+    @output: [str, "true" or "false"]
+    @scenario: [Normalize bool-like config/env values for CLI overrides]
+    """
+    if isinstance(v, str):
+        return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
+    return "true" if bool(v) else "false"
+
+
+def _resolve_eval_force_end_reset_to_init(ev_cfg: Dict[str, Any]) -> str:
+    """
+    @input: [dict, eval config]
+    @output: [str, "true" or "false"]
+    @scenario: [Resolve eval-only reset requirement from eval config]
+    """
+    return _to_cli_bool(ev_cfg["END_RESET_TO_INIT"])
 
 
 def _resolve_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +231,15 @@ def _resolve_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict[str
     @scenario: [Support both ACT-style joint-eval config and legacy single-task config]
     """
     if "TRAIN_TASKS" in ev_cfg or "EVAL_TASKS" in ev_cfg:
-        _ensure_required_keys(ev_cfg, ["EVAL_SEED", "EVAL_GPU_ID", "MODEL_BASE", "TRAIN_TASKS", "EVAL_TASKS"])
+        _ensure_required_keys(
+            ev_cfg,
+            ["EVAL_SEED", "EVAL_GPU_ID", "MODEL_BASE", "TRAIN_TASKS", "EVAL_TASKS", "END_RESET_TO_INIT"],
+        )
         return _build_joint_eval_contract(tinyvla_dir, ev_cfg)
 
     _ensure_required_keys(
         ev_cfg,
-        ["EVAL_SEED", "EVAL_GPU_ID", "TASK_NAME", "TASK_CONFIG", "MODEL_BASE", "OUTPUT_DIR"],
+        ["EVAL_SEED", "EVAL_GPU_ID", "TASK_NAME", "TASK_CONFIG", "MODEL_BASE", "OUTPUT_DIR", "END_RESET_TO_INIT"],
     )
     output_dir = str(ev_cfg["OUTPUT_DIR"])
     use_policy_best = bool(ev_cfg.get("USE_POLICY_BEST", False))

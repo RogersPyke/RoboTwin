@@ -8,5 +8,95 @@
             "cam_right_wrist",
             "cam_left_wrist"
         ]
+    },
+    "sim-unmove_pillbottle_pad-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-unmove_pillbottle_pad/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-move_pillbottle_pad__unmove_pillbottle_pad-demo_clean__demo_clean-200": {
+        "dataset_dir": "./processed_data/sim-move_pillbottle_pad__unmove_pillbottle_pad/demo_clean__demo_clean-200",
+        "num_episodes": 200,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-hanging_mug-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-hanging_mug/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-unhanging_mug-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-unhanging_mug/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-hanging_mug__unhanging_mug-demo_clean__demo_clean-200": {
+        "dataset_dir": "./processed_data/sim-hanging_mug__unhanging_mug/demo_clean__demo_clean-200",
+        "num_episodes": 200,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-stack_bowls_three-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-stack_bowls_three/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-unstack_bowls_three-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-unstack_bowls_three/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-stack_blocks_three-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-stack_blocks_three/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
+    },
+    "sim-unstack_blocks_three-demo_clean-100": {
+        "dataset_dir": "./processed_data/sim-unstack_blocks_three/demo_clean-100",
+        "num_episodes": 100,
+        "episode_len": 1000,
+        "camera_names": [
+            "cam_high",
+            "cam_right_wrist",
+            "cam_left_wrist"
+        ]
     }
 }

@@ -47,7 +47,7 @@ def _load_ev_cfg(dp_dir: str, cfg_name: str) -> dict:
         cfg = yaml.safe_load(f)
     if not isinstance(cfg, dict) or not cfg:
         raise ValueError("Config file is empty or invalid.")
-    for key in ("TRAIN_TASKS", "EVAL_TASKS", "EVAL_SEED", "EVAL_GPU_ID"):
+    for key in ("TRAIN_TASKS", "EVAL_TASKS", "EVAL_SEED", "EVAL_GPU_ID", "END_RESET_TO_INIT"):
         if key not in cfg:
             raise KeyError(f"Missing required key: {key}")
     return cfg
@@ -57,6 +57,10 @@ def _to_cli_bool(v) -> str:
     if isinstance(v, str):
         return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
     return "true" if bool(v) else "false"
+
+
+def _resolve_eval_force_end_reset_to_init(cfg: dict) -> str:
+    return _to_cli_bool(cfg["END_RESET_TO_INIT"])
 
 
 def _parse_task_rows(cfg: dict, key: str) -> list:
@@ -98,7 +102,7 @@ def main(argv: list) -> int:
         test_num = int(cfg.get("TEST_NUM", 100))
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
-        force_end_reset_to_init = _to_cli_bool(cfg.get("force_end_reset_to_init", True))
+        force_end_reset_to_init = _resolve_eval_force_end_reset_to_init(cfg)
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])
