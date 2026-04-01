@@ -1,6 +1,10 @@
 #!/bin/bash
 
-export XLA_PYTHON_CLIENT_MEM_FRACTION=0.4 # ensure GPU < 24G
+# JAX memory policy:
+# - Disable large upfront preallocation to avoid startup OOM.
+# - Keep a high but bounded memory fraction for model restore/inference.
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.9
 
 policy_name=pi0
 task_name=${1}

@@ -43,20 +43,27 @@ def create_empty_dataset(
     has_effort: bool = False,
     dataset_config: DatasetConfig = DEFAULT_DATASET_CONFIG,
 ) -> LeRobotDataset:
+    """
+    @input: repo_id: str, robot_type: str, mode: str, has_velocity: bool, has_effort: bool, dataset_config: DatasetConfig
+    @output: LeRobotDataset instance
+    @scenario: Initialize a new LeRobot dataset with the specified configuration and features.
+    """
     motors = [
-        "left_waist",
-        "left_shoulder",
-        "left_elbow",
-        "left_forearm_roll",
-        "left_wrist_angle",
-        "left_wrist_rotate",
+        "left_joint_1",
+        "left_joint_2",
+        "left_joint_3",
+        "left_joint_4",
+        "left_joint_5",
+        "left_joint_6",
+        "left_joint_7",
         "left_gripper",
-        "right_waist",
-        "right_shoulder",
-        "right_elbow",
-        "right_forearm_roll",
-        "right_wrist_angle",
-        "right_wrist_rotate",
+        "right_joint_1",
+        "right_joint_2",
+        "right_joint_3",
+        "right_joint_4",
+        "right_joint_5",
+        "right_joint_6",
+        "right_joint_7",
         "right_gripper",
     ]
 
@@ -176,17 +183,42 @@ def load_raw_episode_data(
         torch.Tensor | None,
         torch.Tensor | None,
 ]:
+    """
+    @input: ep_path: Path
+    @output: tuple (images_per_cam, state, action, velocity, effort)
+    @scenario: Load and preprocess raw HDF5 episode data, padding 14-dim 6-DOF robot data to 16-dim (adding zero joint_7).
+    """
     with h5py.File(ep_path, "r") as ep:
-        state = torch.from_numpy(ep["/observations/qpos"][:])
-        action = torch.from_numpy(ep["/action"][:])
+        raw_state = torch.from_numpy(ep["/observations/qpos"][:])
+        raw_action = torch.from_numpy(ep["/action"][:])
+
+        num_frames = raw_state.shape[0]
+
+        def pad_data(raw):
+            if raw is None:
+                return None
+            # Convert 14-dim (7/arm) to 16-dim (8/arm)
+            # Aloha format: [q0..q5, gripper] per arm
+            # Target format: [q0..q5, 0 (joint_7), gripper] per arm
+            padded = torch.zeros((num_frames, 16), dtype=torch.float32)
+            # Left arm: raw[0:6] -> padded[0:6], raw[6] -> padded[7]
+            padded[:, 0:6] = raw[:, 0:6]
+            padded[:, 7] = raw[:, 6]
+            # Right arm: raw[7:13] -> padded[8:14], raw[13] -> padded[15]
+            padded[:, 8:14] = raw[:, 7:13]
+            padded[:, 15] = raw[:, 13]
+            return padded
+
+        state = pad_data(raw_state)
+        action = pad_data(raw_action)
 
         velocity = None
         if "/observations/qvel" in ep:
-            velocity = torch.from_numpy(ep["/observations/qvel"][:])
+            velocity = pad_data(torch.from_numpy(ep["/observations/qvel"][:]))
 
         effort = None
         if "/observations/effort" in ep:
-            effort = torch.from_numpy(ep["/observations/effort"][:])
+            effort = pad_data(torch.from_numpy(ep["/observations/effort"][:]))
 
         imgs_per_cam = load_raw_images_per_camera(
             ep,

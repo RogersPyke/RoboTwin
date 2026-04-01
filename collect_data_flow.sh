@@ -59,7 +59,23 @@ trap on_signal SIGINT SIGTERM
 #   (2) For each CFG, collect all TASKs first, then next CFG.
 #   (3) GPU parallel: same order, multiple jobs at a time.
 # Task names to collect (comma-separated).
-TASK_TO_COLL="stack_bowls_two, stack_blocks_two"
+TASK_TO_COLL="grab_roller,
+handover_mic,
+place_bread_basket,
+stack_bowls_two,
+stack_blocks_two,
+blocks_ranking_rgb,
+lift_pot,
+place_can_basket,
+place_dual_shoes,
+put_object_cabinet,
+scan_object,
+handover_block,
+hanging_mug,
+pick_dual_bottles,
+place_bread_skillet,
+place_burger_fries,
+place_cans_plasticbox"
 
 # "grab_roller, handover_block, 
 # handover_mic, hanging_mug, 
@@ -68,10 +84,10 @@ TASK_TO_COLL="stack_bowls_two, stack_blocks_two"
 # place_cans_plasticbox"
 
 # Task config names to collect (comma-separated).
-CFG_TO_COLL="franka_clean"
+CFG_TO_COLL="arx_clean"
 # GPU IDs for parallel workers: length = number of processes; each value = Vulkan/CUDA GPU ID.
 # Example: "0,0" = 2 processes on GPU 0; "0,1" = 2 processes on GPU 0 and 1.
-GPU_PARALLEL="0, 0"
+GPU_PARALLEL="0,1"
 
 SUBPROCESS_PRINT=true
 # If one task's seed-fail count exceeds this threshold, skip that task.

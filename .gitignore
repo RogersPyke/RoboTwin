@@ -8,7 +8,7 @@ envs/curobo
 *.zip
 viewer_show.*
 eval_video/
-task_config/
+# task_config/
 **/.DS_Store
 
 # eval result
@@ -33,3 +33,7 @@ envs/curobo/*
 docs/*
 logs/*
 nohup.out
+
+# data
+policy/pi0/processed_data/**
+policy/pi0/training_data/**
