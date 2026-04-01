@@ -167,8 +167,8 @@ class Base_Task(gym.Env):
         # ========== CUSTOM MODIFICATION ==========
         # Apply end-reset wrapper once per instance (config from kwags); no change needed in collect_data/eval scripts.
         if not getattr(self, "_end_reset_wrapped", False):
-            from ._end_reset_wrapper import with_end_reset, get_force_end_reset_to_init
-            with_end_reset(self, get_force_end_reset_to_init(kwags))
+            from ._end_reset_wrapper import with_end_reset, get_end_reset_to_init
+            with_end_reset(self, get_end_reset_to_init(kwags))
             self._end_reset_wrapped = True
         # =========================================
         

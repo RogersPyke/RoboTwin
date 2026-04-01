@@ -120,7 +120,7 @@ def _to_cli_bool(v) -> str:
     return "true" if bool(v) else "false"
 
 
-def _resolve_eval_force_end_reset_to_init(cfg: dict) -> str:
+def _resolve_eval_end_reset_to_init(cfg: dict) -> str:
     return _to_cli_bool(cfg["END_RESET_TO_INIT"])
 
 
@@ -157,7 +157,7 @@ def main(argv: list) -> int:
         test_num = int(cfg.get("TEST_NUM", 100))
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
-        force_end_reset_to_init = _resolve_eval_force_end_reset_to_init(cfg)
+        end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
         env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
         if env_gpu:
             gpu_id = env_gpu
@@ -190,15 +190,15 @@ def main(argv: list) -> int:
                 "--seed", seed,
                 "--test_num", str(test_num),
                 "--temporal_agg", "true",
-                "--force_end_reset_to_init", force_end_reset_to_init,
+                "--END_RESET_TO_INIT", end_reset_to_init,
             ]
             logger.info(
-                "Eval: task_name=%s task_config=%s ckpt_dir=%s test_num=%s force_end_reset_to_init=%s",
+                "Eval: task_name=%s task_config=%s ckpt_dir=%s test_num=%s END_RESET_TO_INIT=%s",
                 task_name,
                 task_config,
                 ckpt_dir,
                 test_num,
-                force_end_reset_to_init,
+                end_reset_to_init,
             )
             logger.info("Run: %s", " ".join(cmd))
             subprocess.run(cmd, check=True, env=env, cwd=repo_root)

@@ -66,8 +66,10 @@ NVCC=/usr/local/cuda-12.1/bin/nvcc \
 python -m pip install . --no-build-isolation --no-cache-dir || { echo "[ERROR] Curobo install failed."; exit 1; }
 cd ../..
 
+echo "Installing conda-pack, pyyaml, modelscope ..."
 conda install -c conda-forge conda-pack -y
 conda install pyyaml -y
+conda install modelscope -y
 
 echo "Installation basic environment complete!"
 echo -e "You need to:"

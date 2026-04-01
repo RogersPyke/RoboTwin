@@ -1,6 +1,6 @@
 # Purpose:
 #   - Keep seed filtering path (play_once + reset function) unchanged.
-#   - In policy eval, if force_end_reset_to_init=True, final success requires:
+#   - In policy eval, if END_RESET_TO_INIT=True, final success requires:
 #       task success reached first, then model actions bring robot back to init within step limit.
 #   - No hard-coded reset action is executed after policy success in eval mode.
 
@@ -14,7 +14,7 @@ import numpy as np
 
 from .utils import ArmTag
 
-FORCE_END_RESET_TO_INIT = True
+END_RESET_TO_INIT = True
 
 LOG_DIR_NAME = "logs"
 UTC8 = timezone(timedelta(hours=8))
@@ -45,10 +45,10 @@ def _ensure_logger():
     return logger
 
 
-def get_force_end_reset_to_init(config_dict):
+def get_end_reset_to_init(config_dict):
     if not isinstance(config_dict, dict):
-        return FORCE_END_RESET_TO_INIT
-    v = config_dict.get("force_end_reset_to_init", FORCE_END_RESET_TO_INIT)
+        return END_RESET_TO_INIT
+    v = config_dict.get("END_RESET_TO_INIT", END_RESET_TO_INIT)
     if isinstance(v, str):
         return v.strip().lower() in ("1", "true", "yes", "y", "on")
     return bool(v)
@@ -148,7 +148,7 @@ def _reset_eval_flags(task_env):
     task_env._eval_reset_logged_success = False
 
 
-def with_end_reset(task_env, force_end_reset_to_init):
+def with_end_reset(task_env, end_reset_to_init):
     logger = _ensure_logger()
     original_play_once = task_env.play_once
     original_take_action = task_env.take_action
@@ -157,7 +157,7 @@ def with_end_reset(task_env, force_end_reset_to_init):
         if getattr(task_env, "eval_mode", False):
             _reset_eval_flags(task_env)
         result = original_play_once()
-        if not force_end_reset_to_init:
+        if not end_reset_to_init:
             return result
         _do_reset_to_init(task_env, logger)
         return result
@@ -165,14 +165,14 @@ def with_end_reset(task_env, force_end_reset_to_init):
     def _take_action(self, action, action_type="qpos"):
         if getattr(self, "eval_mode", False) and getattr(self, "take_action_cnt", 0) == 0:
             _reset_eval_flags(self)
-            if force_end_reset_to_init:
+            if end_reset_to_init:
                 _capture_eval_init_reference(self, logger)
 
         original_take_action(action, action_type)
 
         if not getattr(self, "eval_mode", False):
             return
-        if not force_end_reset_to_init:
+        if not end_reset_to_init:
             return
 
         if getattr(self, "eval_success", False) and not getattr(self, "_eval_task_success_reached", False):

@@ -88,18 +88,24 @@ def _ensure_single_task_zarr(dp_dir: str, task_name: str, task_config: str, expe
     return rel_path
 
 
-def _concat_zarrs(dp_dir: str, rows: list, combined_rel_path: str, logger: logging.Logger) -> None:
-    combined_abs_path = os.path.join(dp_dir, combined_rel_path)
-    if os.path.isdir(combined_abs_path):
-        shutil.rmtree(combined_abs_path)
+def _resolve_src_zarr_paths(dp_dir: str, rows: list, logger: logging.Logger) -> list:
+    src_paths = []
+    for task_name, task_config, expert_num in rows:
+        src_rel_path = _ensure_single_task_zarr(dp_dir, task_name, task_config, expert_num, logger)
+        src_abs_path = os.path.join(dp_dir, src_rel_path)
+        if not os.path.isdir(src_abs_path):
+            raise FileNotFoundError(f"Source zarr not found: {src_rel_path}")
+        src_paths.append((task_name, task_config, expert_num, src_rel_path, src_abs_path))
+    return src_paths
 
+
+def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combined_rel_path: str, logger: logging.Logger) -> None:
+    # Step 2: read source zarrs into memory first.
     src_meta = []
     src_head = []
     src_state = []
     src_action = []
-    for task_name, task_config, expert_num in rows:
-        src_rel_path = os.path.join("data", f"{task_name}-{task_config}-{expert_num}.zarr")
-        src_abs_path = os.path.join(dp_dir, src_rel_path)
+    for task_name, task_config, expert_num, src_rel_path, src_abs_path in src_paths:
         root = zarr.open(src_abs_path, mode="r")
         src_head_arr = root["data"]["head_camera"][:]
         src_state_arr = root["data"]["state"][:]
@@ -122,6 +128,10 @@ def _concat_zarrs(dp_dir: str, rows: list, combined_rel_path: str, logger: loggi
         episode_ends_list.append(src_ep_ends + offset)
         offset = int(src_ep_ends[-1])
     all_episode_ends = np.concatenate(episode_ends_list, axis=0).astype(np.int64)
+
+    # Step 3: overwrite-write combined zarr.
+    if os.path.isdir(combined_abs_path):
+        shutil.rmtree(combined_abs_path)
 
     compressor = zarr.Blosc(cname="zstd", clevel=3, shuffle=1)
     root = zarr.group(combined_abs_path)
@@ -190,7 +200,6 @@ def main(argv: list) -> int:
         early_stop_patience_evals = int(cfg.get("EARLY_STOP_PATIENCE_EVALS", 0))
         early_stop_rel_tol = float(cfg.get("EARLY_STOP_REL_TOL", 0.0))
         eval_steps_for_early_stop = int(cfg.get("EVAL_STEPS_FOR_EARLY_STOP", 1))
-        delete_combined_zarr_after_train = bool(cfg.get("TRAIN_DELETE_COMBINED_ZARR_AFTER_TRAIN", True))
 
         task_slug = "__".join([row[0] for row in rows])
         config_slug = "__".join([row[1] for row in rows])
@@ -198,9 +207,10 @@ def main(argv: list) -> int:
         combined_rel_path = os.path.join("data", f"{task_slug}-{config_slug}-{total_episodes}.zarr")
         combined_abs_path = os.path.join(dp_dir, combined_rel_path)
 
-        for task_name, task_config, expert_num in rows:
-            _ensure_single_task_zarr(dp_dir, task_name, task_config, expert_num, logger)
-        _concat_zarrs(dp_dir, rows, combined_rel_path, logger)
+        # Step 1: resolve required source zarrs from task parameters.
+        src_paths = _resolve_src_zarr_paths(dp_dir, rows, logger)
+        # Step 2/3: read source zarrs into memory, then overwrite combined.
+        _concat_zarrs_from_src_paths(src_paths, combined_abs_path, combined_rel_path, logger)
 
         ckpt_dir = os.path.join(dp_dir, "checkpoints", f"{task_slug}-{config_slug}-{total_episodes}-{seed}")
         os.makedirs(ckpt_dir, exist_ok=True)
@@ -243,11 +253,13 @@ def main(argv: list) -> int:
         ]
         logger.info("Launch training: %s", " ".join(cmd))
         try:
+            # Step 4: run training loop with combined dataset.
             subprocess.run(cmd, check=True, cwd=dp_dir, env=env)
         finally:
-            if delete_combined_zarr_after_train and os.path.isdir(combined_abs_path):
+            # Step 5: always remove combined created by this run.
+            if os.path.isdir(combined_abs_path):
                 shutil.rmtree(combined_abs_path)
-                logger.info("Deleted combined zarr after train: %s", combined_rel_path)
+                logger.info("Deleted combined zarr in finally: %s", combined_rel_path)
         return 0
     except Exception as exc:
         logger.error("Wrapper failed: %s", str(exc))

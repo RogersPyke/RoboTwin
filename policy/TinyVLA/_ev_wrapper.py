@@ -200,7 +200,7 @@ def _build_eval_overrides(
     add_pair("instruction_type", ev_cfg.get("INSTRUCTION_TYPE", None))
     # Allow dry-run evaluation to limit rollout count (used by script/eval_policy.py).
     add_pair("test_num", ev_cfg.get("EVAL_TEST_NUM", None))
-    add_pair("force_end_reset_to_init", _resolve_eval_force_end_reset_to_init(ev_cfg))
+    add_pair("END_RESET_TO_INIT", _resolve_eval_end_reset_to_init(ev_cfg))
     return overrides
 
 
@@ -215,7 +215,7 @@ def _to_cli_bool(v: Any) -> str:
     return "true" if bool(v) else "false"
 
 
-def _resolve_eval_force_end_reset_to_init(ev_cfg: Dict[str, Any]) -> str:
+def _resolve_eval_end_reset_to_init(ev_cfg: Dict[str, Any]) -> str:
     """
     @input: [dict, eval config]
     @output: [str, "true" or "false"]

@@ -86,8 +86,8 @@ def main(usr_args):
         args = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     # Eval overrides (deploy_policy + CLI) may set env behavior keys not present in task yml.
-    if "force_end_reset_to_init" in usr_args and usr_args["force_end_reset_to_init"] is not None:
-        args["force_end_reset_to_init"] = usr_args["force_end_reset_to_init"]
+    if "END_RESET_TO_INIT" in usr_args and usr_args["END_RESET_TO_INIT"] is not None:
+        args["END_RESET_TO_INIT"] = usr_args["END_RESET_TO_INIT"]
 
     args['task_name'] = task_name
     args["task_config"] = task_config
@@ -193,13 +193,13 @@ def main(usr_args):
     with open(file_path, "w") as file:
         file.write(f"Timestamp: {current_time}\n\n")
         file.write(f"Instruction Type: {instruction_type}\n\n")
-        file.write(f"Force End Reset To Init: {eval_stats['force_end_reset_to_init']}\n\n")
+        file.write(f"END_RESET_TO_INIT: {eval_stats['END_RESET_TO_INIT']}\n\n")
         file.write(
             f"Original Success Rate (Task Checkpoint): "
             f"{eval_stats['task_success_count']}/{test_num} => "
             f"{round(eval_stats['task_success_count'] / test_num * 100, 1)}%\n"
         )
-        if eval_stats["force_end_reset_to_init"]:
+        if eval_stats["END_RESET_TO_INIT"]:
             file.write(
                 f"Full-Process Success Rate (Task + Back To Init): "
                 f"{eval_stats['full_success_count']}/{test_num} => "
@@ -227,7 +227,7 @@ def eval_policy(task_name,
     print(f"\033[34mPolicy Name: {args['policy_name']}\033[0m")
 
     expert_check = True
-    force_end_reset_to_init = _as_bool(args.get("force_end_reset_to_init", True))
+    end_reset_to_init = _as_bool(args.get("END_RESET_TO_INIT", True))
     TASK_ENV.suc = 0
     TASK_ENV.test_num = 0
     task_success_count = 0
@@ -337,7 +337,7 @@ def eval_policy(task_name,
         task_success_reached = bool(getattr(TASK_ENV, "_eval_task_success_reached", False))
         if succ:
             TASK_ENV.suc += 1
-            if force_end_reset_to_init:
+            if end_reset_to_init:
                 task_success_count += 1
                 full_success_count += 1
                 print("\033[92mSuccess! (task checkpoint + back to init)\033[0m")
@@ -345,7 +345,7 @@ def eval_policy(task_name,
                 task_success_count += 1
                 print("\033[92mSuccess! (task checkpoint)\033[0m")
         else:
-            if force_end_reset_to_init:
+            if end_reset_to_init:
                 if task_success_reached:
                     task_success_count += 1
                     reset_stage_fail_count += 1
@@ -365,7 +365,7 @@ def eval_policy(task_name,
 
         TASK_ENV.test_num += 1
 
-        if force_end_reset_to_init:
+        if end_reset_to_init:
             print(
                 f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
                 f"Original Success (task checkpoint): \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
@@ -382,13 +382,13 @@ def eval_policy(task_name,
         # TASK_ENV._take_picture()
         now_seed += 1
 
-    if force_end_reset_to_init:
+    if end_reset_to_init:
         print(
             f"Failure stage summary: task_checkpoint={task_stage_fail_count}, reset_to_init={reset_stage_fail_count}"
         )
 
     return now_seed, {
-        "force_end_reset_to_init": force_end_reset_to_init,
+        "END_RESET_TO_INIT": end_reset_to_init,
         "reported_success_count": TASK_ENV.suc,
         "task_success_count": task_success_count,
         "full_success_count": full_success_count,

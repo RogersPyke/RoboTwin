@@ -59,7 +59,7 @@ def _to_cli_bool(v) -> str:
     return "true" if bool(v) else "false"
 
 
-def _resolve_eval_force_end_reset_to_init(cfg: dict) -> str:
+def _resolve_eval_end_reset_to_init(cfg: dict) -> str:
     return _to_cli_bool(cfg["END_RESET_TO_INIT"])
 
 
@@ -102,7 +102,7 @@ def main(argv: list) -> int:
         test_num = int(cfg.get("TEST_NUM", 100))
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
-        force_end_reset_to_init = _resolve_eval_force_end_reset_to_init(cfg)
+        end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])
@@ -148,17 +148,17 @@ def main(argv: list) -> int:
                 str(expert_num),
                 "--test_num",
                 str(test_num),
-                "--force_end_reset_to_init",
-                force_end_reset_to_init,
+                "--END_RESET_TO_INIT",
+                end_reset_to_init,
             ]
             logger.info(
-                "Eval task=%s config=%s ckpt=%s/%s test_num=%s force_end_reset_to_init=%s",
+                "Eval task=%s config=%s ckpt=%s/%s test_num=%s END_RESET_TO_INIT=%s",
                 task_name,
                 task_config,
                 train_task_slug,
                 train_config_slug,
                 test_num,
-                force_end_reset_to_init,
+                end_reset_to_init,
             )
             logger.info("Run: %s", " ".join(cmd))
             subprocess.run(cmd, check=True, cwd=repo_root, env=env)

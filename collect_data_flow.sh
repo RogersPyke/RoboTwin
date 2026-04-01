@@ -22,8 +22,11 @@ CFG_TO_COLL="franka_clean"
 GPU_PARALLEL="0"
 
 SUBPROCESS_PRINT=true
+# Data-collection-only end-reset switch: true/false.
+# When true, collected trajectories include explicit return-to-init behavior.
+END_RESET_TO_INIT=true
 
-export TASK_TO_COLL CFG_TO_COLL GPU_PARALLEL SUBPROCESS_PRINT
+export TASK_TO_COLL CFG_TO_COLL GPU_PARALLEL SUBPROCESS_PRINT END_RESET_TO_INIT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
