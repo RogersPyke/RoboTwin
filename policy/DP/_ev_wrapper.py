@@ -79,6 +79,9 @@ def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="DP multi-task eval wrapper (_ev_cfg/*.yaml)")
     parser.add_argument("cfg_name", nargs="?", type=str, help="Config name (_ev_cfg/<name>.yaml).")
     parser.add_argument("--config", dest="config", type=str, required=False, help="Legacy cfg arg.")
+    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
+    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
+    parser.add_argument("--test-num", dest="test_num", type=int, required=False, help="Optional eval test_num override.")
     args = parser.parse_args(argv[1:])
 
     dp_dir = os.path.dirname(os.path.abspath(__file__))
@@ -93,16 +96,46 @@ def main(argv: list) -> int:
         train_rows = _parse_task_rows(cfg, "TRAIN_TASKS")
         eval_rows = _parse_task_rows(cfg, "EVAL_TASKS")
         seed = int(cfg["EVAL_SEED"])
+        seed_source = "YAML:EVAL_SEED"
         gpu_id = str(cfg["EVAL_GPU_ID"])
+        gpu_source = "YAML:EVAL_GPU_ID"
+        env_seed = os.environ.get("DP_FLOW_SEED", "").strip()
         env_gpu = os.environ.get("DP_FLOW_GPU", "").strip()
-        if env_gpu:
-            gpu_id = env_gpu
+        env_test_num = os.environ.get("DP_FLOW_TEST_NUM", "").strip()
         checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
         head_camera_type = str(cfg.get("EVAL_HEAD_CAMERA_TYPE", "D435"))
         test_num = int(cfg.get("TEST_NUM", 100))
+        test_num_source = "YAML:TEST_NUM/default"
+        if args.seed is not None:
+            seed = int(args.seed)
+            seed_source = "CLI:--seed"
+        elif env_seed:
+            seed = int(env_seed)
+            seed_source = "FLOW_ENV:DP_FLOW_SEED"
+        if args.gpu_id is not None:
+            gpu_id = str(args.gpu_id).strip()
+            gpu_source = "CLI:--gpu-id"
+        elif env_gpu:
+            gpu_id = env_gpu
+            gpu_source = "FLOW_ENV:DP_FLOW_GPU"
+        if args.test_num is not None:
+            test_num = int(args.test_num)
+            test_num_source = "CLI:--test-num"
+        elif env_test_num:
+            test_num = int(env_test_num)
+            test_num_source = "FLOW_ENV:DP_FLOW_TEST_NUM"
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
         end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
+        logger.info(
+            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
+            seed,
+            seed_source,
+            gpu_id,
+            gpu_source,
+            test_num,
+            test_num_source,
+        )
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])

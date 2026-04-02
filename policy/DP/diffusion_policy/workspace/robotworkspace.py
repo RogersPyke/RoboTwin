@@ -20,7 +20,6 @@ import numpy as np
 from diffusion_policy.workspace.base_workspace import BaseWorkspace
 from diffusion_policy.policy.diffusion_unet_image_policy import DiffusionUnetImagePolicy
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
-from diffusion_policy.common.checkpoint_util import TopKCheckpointManager
 from diffusion_policy.common.json_logger import JsonLogger
 from diffusion_policy.common.pytorch_util import dict_apply, optimizer_to
 from diffusion_policy.model.diffusion.ema_model import EMAModel
@@ -30,7 +29,14 @@ OmegaConf.register_new_resolver("eval", eval, replace=True)
 
 
 class RobotWorkspace(BaseWorkspace):
-    include_keys = ["global_step", "epoch"]
+    include_keys = [
+        "global_step",
+        "epoch",
+        "train_optimizer_steps",
+        "early_stop_best_val_loss",
+        "early_stop_best_train_step",
+        "early_stop_no_improve_evals",
+    ]
 
     def __init__(self, cfg: OmegaConf, output_dir=None):
         super().__init__(cfg, output_dir=output_dir)
@@ -54,18 +60,39 @@ class RobotWorkspace(BaseWorkspace):
         # configure training state
         self.global_step = 0
         self.epoch = 0
+        self.train_optimizer_steps = 0
+        self.early_stop_best_val_loss = float("inf")
+        self.early_stop_best_train_step = -1
+        self.early_stop_no_improve_evals = 0
+
+    def _val_mean_loss(self, cfg, dataset, val_dataloader, device):
+        self.model.eval()
+        try:
+            losses = []
+            with torch.no_grad():
+                for batch_idx, batch in enumerate(val_dataloader):
+                    batch = dataset.postprocess(batch, device)
+                    losses.append(self.model.compute_loss(batch))
+                    if (cfg.training.max_val_steps is not None
+                            and batch_idx >= cfg.training.max_val_steps - 1):
+                        break
+            if not losses:
+                return None
+            return torch.mean(torch.tensor(losses)).item()
+        finally:
+            self.model.train()
+            if cfg.training.freeze_encoder:
+                self.model.obs_encoder.eval()
 
     def run(self):
         cfg = copy.deepcopy(self.cfg)
         seed = cfg.training.seed
-        head_camera_type = cfg.head_camera_type
         early_stop_patience_evals = int(getattr(cfg.training, "early_stop_patience_evals", 0))
         early_stop_rel_tol = float(getattr(cfg.training, "early_stop_rel_tol", 0.0))
         eval_steps_for_early_stop = int(getattr(cfg.training, "eval_steps_for_early_stop", 1))
         early_stop_enabled = early_stop_patience_evals > 0 and early_stop_rel_tol > 0.0
-        best_val_loss = float("inf")
-        best_eval_epoch = -1
-        no_improve_evals = 0
+        if early_stop_enabled:
+            eval_steps_for_early_stop = max(1, eval_steps_for_early_stop)
 
         # resume training
         if cfg.training.resume:
@@ -126,9 +153,8 @@ class RobotWorkspace(BaseWorkspace):
         #     }
         # )
 
-        # configure checkpoint
-        topk_manager = TopKCheckpointManager(save_dir=os.path.join(self.output_dir, "checkpoints"),
-                                             **cfg.checkpoint.topk)
+        save_name = pathlib.Path(cfg.task.dataset.zarr_path).stem
+        ckpt_rel_dir = f"checkpoints/{save_name}-{seed}"
 
         # device transfer
         device = torch.device(cfg.training.device)
@@ -154,7 +180,6 @@ class RobotWorkspace(BaseWorkspace):
 
         with JsonLogger(log_path) as json_logger:
             for local_epoch_idx in range(cfg.training.num_epochs):
-                step_log = dict()
                 # ========= train for this epoch ==========
                 if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
@@ -171,22 +196,82 @@ class RobotWorkspace(BaseWorkspace):
                         batch = dataset.postprocess(batch, device)
                         if train_sampling_batch is None:
                             train_sampling_batch = batch
-                        # compute loss
                         raw_loss = self.model.compute_loss(batch)
                         loss = raw_loss / cfg.training.gradient_accumulate_every
                         loss.backward()
 
-                        # step optimizer
+                        val_fields = {}
                         if (self.global_step % cfg.training.gradient_accumulate_every == 0):
                             self.optimizer.step()
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
+                            self.train_optimizer_steps += 1
+                            if (early_stop_enabled
+                                    and self.train_optimizer_steps % eval_steps_for_early_stop == 0):
+                                val_loss_f = self._val_mean_loss(cfg, dataset, val_dataloader, device)
+                                if val_loss_f is not None:
+                                    val_fields["val_loss"] = float(val_loss_f)
+                                    if np.isinf(self.early_stop_best_val_loss):
+                                        self.early_stop_best_val_loss = float(val_loss_f)
+                                        self.early_stop_best_train_step = int(self.train_optimizer_steps)
+                                        self.early_stop_no_improve_evals = 0
+                                        print(
+                                            f"Val loss @ step{self.early_stop_best_train_step}: "
+                                            f"{self.early_stop_best_val_loss:.5f}",
+                                            flush=True,
+                                        )
+                                        self.save_checkpoint(
+                                            path=f"{ckpt_rel_dir}/best_val.ckpt", use_thread=False)
+                                    else:
+                                        rel = (
+                                            (self.early_stop_best_val_loss - float(val_loss_f))
+                                            / max(abs(self.early_stop_best_val_loss), 1e-12))
+                                        if rel > early_stop_rel_tol:
+                                            self.early_stop_best_val_loss = float(val_loss_f)
+                                            self.early_stop_best_train_step = int(
+                                                self.train_optimizer_steps)
+                                            self.early_stop_no_improve_evals = 0
+                                            print(
+                                                f"Val loss @ step{self.early_stop_best_train_step}: "
+                                                f"{self.early_stop_best_val_loss:.5f} (improved)",
+                                                flush=True,
+                                            )
+                                            self.save_checkpoint(
+                                                path=f"{ckpt_rel_dir}/best_val.ckpt", use_thread=False)
+                                        else:
+                                            self.early_stop_no_improve_evals += 1
+                                            print(
+                                                f"Val loss @ step{self.train_optimizer_steps}: "
+                                                f"{float(val_loss_f):.5f} (no improve "
+                                                f"#{self.early_stop_no_improve_evals})",
+                                                flush=True,
+                                            )
+                                            if (self.early_stop_no_improve_evals
+                                                    >= early_stop_patience_evals):
+                                                raw_loss_cpu = raw_loss.item()
+                                                json_logger.log({
+                                                    "train_loss": raw_loss_cpu,
+                                                    "global_step": self.global_step,
+                                                    "epoch": self.epoch,
+                                                    "lr": lr_scheduler.get_last_lr()[0],
+                                                    **val_fields,
+                                                    "early_stop": True,
+                                                    "early_stop_best_train_step": int(
+                                                        self.early_stop_best_train_step),
+                                                    "early_stop_best_val_loss": float(
+                                                        self.early_stop_best_val_loss),
+                                                })
+                                                print(
+                                                    f"[WARN] Early stop at opt_step="
+                                                    f"{self.train_optimizer_steps}; "
+                                                    f"best: {ckpt_rel_dir}/best_val.ckpt",
+                                                    flush=True,
+                                                )
+                                                return
 
-                        # update ema
                         if cfg.training.use_ema:
                             ema.step(self.model)
 
-                        # logging
                         raw_loss_cpu = raw_loss.item()
                         tepoch.set_postfix(loss=raw_loss_cpu, refresh=False)
                         train_losses.append(raw_loss_cpu)
@@ -195,11 +280,11 @@ class RobotWorkspace(BaseWorkspace):
                             "global_step": self.global_step,
                             "epoch": self.epoch,
                             "lr": lr_scheduler.get_last_lr()[0],
+                            **val_fields,
                         }
 
                         is_last_batch = batch_idx == (len(train_dataloader) - 1)
                         if not is_last_batch:
-                            # log of last step is combined with validation and rollout
                             json_logger.log(step_log)
                             self.global_step += 1
 
@@ -208,74 +293,26 @@ class RobotWorkspace(BaseWorkspace):
                             break
 
                 # at the end of each epoch
-                # replace train_loss with epoch average
                 train_loss = np.mean(train_losses)
                 step_log["train_loss"] = train_loss
 
-                # ========= eval for this epoch ==========
+                # ========= eval for this epoch (epoch-end val only when early stop is off) ==========
                 policy = self.model
                 if cfg.training.use_ema:
                     policy = self.ema_model
                 policy.eval()
 
-                # run rollout
-                # if (self.epoch % cfg.training.rollout_every) == 0:
-                #     runner_log = env_runner.run(policy)
-                #     # log all
-                #     step_log.update(runner_log)
-
-                # run validation
-                val_loss = None
-                should_run_val = (self.epoch % cfg.training.val_every) == 0
-                if early_stop_enabled:
-                    should_run_val = (self.epoch % eval_steps_for_early_stop) == 0
-
-                if should_run_val:
-                    with torch.no_grad():
-                        val_losses = list()
-                        with tqdm.tqdm(
-                                val_dataloader,
-                                desc=f"Validation epoch {self.epoch}",
-                                leave=False,
-                                mininterval=cfg.training.tqdm_interval_sec,
-                        ) as tepoch:
-                            for batch_idx, batch in enumerate(tepoch):
-                                batch = dataset.postprocess(batch, device)
-                                loss = self.model.compute_loss(batch)
-                                val_losses.append(loss)
-                                if (cfg.training.max_val_steps
-                                        is not None) and batch_idx >= (cfg.training.max_val_steps - 1):
-                                    break
-                        if len(val_losses) > 0:
-                            val_loss = torch.mean(torch.tensor(val_losses)).item()
-                            # log epoch average validation loss
-                            step_log["val_loss"] = val_loss
-                            if early_stop_enabled:
-                                if np.isinf(best_val_loss):
-                                    best_val_loss = float(val_loss)
-                                    best_eval_epoch = int(self.epoch)
-                                    no_improve_evals = 0
-                                else:
-                                    rel_improve = (best_val_loss - float(val_loss)) / max(abs(best_val_loss), 1e-12)
-                                    if rel_improve > early_stop_rel_tol:
-                                        best_val_loss = float(val_loss)
-                                        best_eval_epoch = int(self.epoch)
-                                        no_improve_evals = 0
-                                    else:
-                                        no_improve_evals += 1
-                                        if no_improve_evals >= early_stop_patience_evals:
-                                            step_log["early_stop"] = True
-                                            step_log["early_stop_best_eval_epoch"] = best_eval_epoch
-                                            step_log["early_stop_best_val_loss"] = best_val_loss
-                                            json_logger.log(step_log)
-                                            self.global_step += 1
-                                            self.epoch += 1
-                                            return
+                if not early_stop_enabled:
+                    should_run_val = (self.epoch % cfg.training.val_every) == 0
+                    if should_run_val:
+                        val_loss = self._val_mean_loss(cfg, dataset, val_dataloader, device)
+                        if val_loss is not None:
+                            step_log["val_loss"] = float(val_loss)
+                            print(f"Val loss:   {float(val_loss):.5f}", flush=True)
 
                 # run diffusion sampling on a training batch
                 if (self.epoch % cfg.training.sample_every) == 0:
                     with torch.no_grad():
-                        # sample trajectory from training set, and evaluate difference
                         batch = train_sampling_batch
                         obs_dict = batch["obs"]
                         gt_action = batch["action"]
@@ -293,15 +330,11 @@ class RobotWorkspace(BaseWorkspace):
 
                 # checkpoint
                 if ((self.epoch + 1) % cfg.training.checkpoint_every) == 0:
-                    # checkpointing
-                    save_name = pathlib.Path(self.cfg.task.dataset.zarr_path).stem
-                    self.save_checkpoint(f"checkpoints/{save_name}-{seed}/{self.epoch + 1}.ckpt")  # TODO
+                    self.save_checkpoint(f"{ckpt_rel_dir}/{self.epoch + 1}.ckpt")
 
                 # ========= eval end for this epoch ==========
                 policy.train()
 
-                # end of epoch
-                # log of last step is combined with validation and rollout
                 json_logger.log(step_log)
                 self.global_step += 1
                 self.epoch += 1

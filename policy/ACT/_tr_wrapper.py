@@ -149,6 +149,8 @@ def main(argv: list) -> int:
         required=False,
         help="(legacy) Config name (file: _tr_cfg/<name>.yaml).",
     )
+    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
+    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
     args = parser.parse_args(argv[1:])
 
     act_dir = os.path.dirname(os.path.abspath(__file__))
@@ -163,10 +165,23 @@ def main(argv: list) -> int:
         cfg, cfg_src_abspath = _load_tr_cfg(act_dir, cfg_name)
         task_names, task_configs, expert_counts = _parse_train_tasks_rows(cfg)
         global_seed = int(cfg["TRAIN_SEED"])
+        seed_source = "YAML:TRAIN_SEED"
         gpu_id = str(cfg["TRAIN_GPU_ID"]).strip()
+        gpu_source = "YAML:TRAIN_GPU_ID"
+        env_seed = os.environ.get("ACT_FLOW_SEED", "").strip()
         env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
-        if env_gpu:
+        if args.seed is not None:
+            global_seed = int(args.seed)
+            seed_source = "CLI:--seed"
+        elif env_seed:
+            global_seed = int(env_seed)
+            seed_source = "FLOW_ENV:ACT_FLOW_SEED"
+        if args.gpu_id is not None:
+            gpu_id = str(args.gpu_id).strip()
+            gpu_source = "CLI:--gpu-id"
+        elif env_gpu:
             gpu_id = env_gpu
+            gpu_source = "FLOW_ENV:ACT_FLOW_GPU"
 
         # Backward-compatible defaults (match historical hard-coded values in this wrapper).
         train_num_epochs = int(_get_cfg_opt(cfg, "TRAIN_NUM_EPOCHS", 6000))
@@ -184,6 +199,13 @@ def main(argv: list) -> int:
         early_stop_patience_evals = cfg.get("EARLY_STOP_PATIENCE_EVALS", None)
         early_stop_rel_tol = cfg.get("EARLY_STOP_REL_TOL", None)
         eval_steps_for_early_stop = cfg.get("EVAL_STEPS_FOR_EARLY_STOP", None)
+        logger.info(
+            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
+            global_seed,
+            seed_source,
+            gpu_id,
+            gpu_source,
+        )
 
         combined_task_slug = "__".join(task_names)
         combined_config_slug = "__".join(task_configs)
