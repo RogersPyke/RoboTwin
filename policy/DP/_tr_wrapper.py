@@ -215,6 +215,12 @@ def main(argv: list) -> int:
         early_stop_patience_evals = int(cfg.get("EARLY_STOP_PATIENCE_EVALS", 0))
         early_stop_rel_tol = float(cfg.get("EARLY_STOP_REL_TOL", 0.0))
         eval_steps_for_early_stop = int(cfg.get("EVAL_STEPS_FOR_EARLY_STOP", 1))
+        if "DP_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
+            early_stop_patience_evals = int(os.environ["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
+        if "DP_FLOW_EARLY_STOP_REL_TOL" in os.environ:
+            early_stop_rel_tol = float(os.environ["DP_FLOW_EARLY_STOP_REL_TOL"].strip())
+        if "DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
+            eval_steps_for_early_stop = int(os.environ["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
         logger.info(
             "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
             seed,

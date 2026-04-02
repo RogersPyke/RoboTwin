@@ -15,26 +15,39 @@ This file only injects flow-level env values and process orchestration:
 - DP_FLOW_GPU      from PARALLEL slot gpu id
 - DP_FLOW_SEED     from FLOW_SEED (optional)
 - DP_FLOW_TEST_NUM from FLOW_TEST_NUM (optional)
+- DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP, DP_FLOW_EARLY_STOP_PATIENCE_EVALS,
+  DP_FLOW_EARLY_STOP_REL_TOL from matching FLOW constants (optional, None skips)
 """
 
 import atexit
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, TextIO, Tuple
+
+BASE_DIR = Path(__file__).resolve().parent
+
+CATEGERY = "train"
 
 # Optional flow-level overrides. Keep None to use YAML defaults.
 TASK_CONFIG = "demo_clean"
 EXPERT_NUM = "100"
 PARALLEL = [1, 1, 1]
-FLOW_SEED = None
-FLOW_TEST_NUM = None
+FLOW_SEED = 0
+FLOW_TEST_NUM = 50
+EVAL_STEPS_FOR_EARLY_STOP = 1000
+EARLY_STOP_PATIENCE_EVALS = 50
+EARLY_STOP_REL_TOL = 1e-3
 
-TASKS = [
+# Explicit demo-processing task names (process_data.sh first argument).
+TASK_DATA = [
     "move_pillbottle_pad",
     "unmove_pillbottle_pad",
     "stack_bowls_three",
@@ -45,7 +58,8 @@ TASKS = [
     "unhanging_mug",
 ]
 
-STEMS = [
+# Ordered FIFO steps: (phase, stem). phase is "train" or "eval".
+TASK_SEQ = [(CATEGORY, stem) for stem in [
     "flow_single_move_pillbottle_pad",
     "flow_single_unmove_pillbottle_pad",
     "flow_joint_move_pillbottle_pad",
@@ -58,18 +72,43 @@ STEMS = [
     "flow_single_hanging_mug",
     "flow_single_unhanging_mug",
     "flow_joint_hanging_mug",
-]
+]]
+
+def _utc8_now_str() -> str:
+    tz8 = timezone(timedelta(hours=8))
+    return datetime.now(tz8).strftime("%Y%m%d%H%M%S")
+
+
+def _safe_filename_part(s: str) -> str:
+    out = re.sub(r"[^0-9A-Za-z._-]+", "_", s.strip())
+    return out[:180] if len(out) > 180 else out
+
+
+def _logs_dir() -> Path:
+    d = BASE_DIR / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _bash_lc_cmd(script: str) -> List[str]:
+    inner = ["bash", "-lc", script]
+    if shutil.which("stdbuf"):
+        return ["stdbuf", "-oL", "-eL"] + inner
+    return inner
 
 
 @dataclass
 class Job:
     slot: int
+    phase: str
     stem: str
+    queue_idx: int
     process: subprocess.Popen
+    log_path: Path
+    log_file: TextIO = field(repr=False)
 
 
 ACTIVE_JOBS: Dict[int, Job] = {}
-BASE_DIR = Path(__file__).resolve().parent
 
 
 def kill_process_group(pid: int) -> None:
@@ -98,6 +137,10 @@ def cleanup_all_jobs() -> None:
     for pid, job in list(ACTIVE_JOBS.items()):
         if job.process.poll() is None:
             kill_process_group(pid)
+        try:
+            job.log_file.close()
+        except Exception:
+            pass
     ACTIVE_JOBS.clear()
 
 
@@ -106,40 +149,147 @@ def on_signal(signum: int, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def run_foreground(cmd: List[str], env: dict) -> None:
-    subprocess.run(cmd, cwd=BASE_DIR, env=env, check=True)
+def _rename_log_with_pid(tmp_path: Path, final_path: Path) -> None:
+    try:
+        if tmp_path != final_path and tmp_path.is_file():
+            tmp_path.rename(final_path)
+    except OSError:
+        pass
 
 
-def start_slot_job(slot: int, stem: str, gpu_id: int, env: dict) -> Job:
+def run_process_data_steps(env: dict) -> int:
+    """Sequential process_data; one log file per task (full console capture)."""
+    gpu_tag = str(PARALLEL[0]) if PARALLEL else "none"
+    for q_idx, task_name in enumerate(TASK_DATA):
+        ts = _utc8_now_str()
+        safe_task = _safe_filename_part(task_name)
+        tmp_path = _logs_dir() / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
+        final_path = _logs_dir() / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
+        lf = open(tmp_path, "w", buffering=1, encoding="utf-8", errors="replace")
+        lf.write(
+            f"# flow_meta kind=process_data task_name={task_name} slot=0 gpu={gpu_tag} "
+            f"queue_idx={q_idx} ts_utc8={ts}\n"
+        )
+        lf.flush()
+        cmd = ["bash", "process_data.sh", task_name, TASK_CONFIG, EXPERT_NUM]
+        if shutil.which("stdbuf"):
+            cmd = ["stdbuf", "-oL", "-eL"] + cmd
+        print(
+            f"[flow][slot=0][process_data][task={task_name}][gpu={gpu_tag}] "
+            f"log={tmp_path} starting",
+            flush=True,
+        )
+        p = subprocess.Popen(
+            cmd,
+            cwd=BASE_DIR,
+            env=env,
+            stdout=lf,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        pid = p.pid
+        lf.write(f"# child_pid={pid}\n")
+        lf.flush()
+        done_final = final_path.parent / final_path.name.format(pid=pid)
+        _rename_log_with_pid(tmp_path, done_final)
+        code = p.wait()
+        try:
+            lf.close()
+        except Exception:
+            pass
+        if code != 0:
+            print(
+                f"[flow][process_data][task={task_name}] failed code={code} log={done_final}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return code
+        print(
+            f"[flow][process_data][task={task_name}] done log={done_final}",
+            flush=True,
+        )
+    return 0
+
+
+def start_slot_job(
+    slot: int,
+    phase: str,
+    stem: str,
+    gpu_id: int,
+    env: dict,
+    queue_idx: int,
+) -> Job:
     slot_env = env.copy()
-    # Inject flow context for wrappers; wrappers resolve with:
-    # CLI > FLOW env > YAML.
     slot_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     slot_env["DP_FLOW_GPU"] = str(gpu_id)
     slot_env["DP_FLOW_SLOT"] = str(slot)
     slot_env["DP_FLOW_STEM"] = stem
+    slot_env["DP_FLOW_PHASE"] = phase
     if FLOW_SEED is not None:
         slot_env["DP_FLOW_SEED"] = str(FLOW_SEED)
     if FLOW_TEST_NUM is not None:
         slot_env["DP_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
+    if EVAL_STEPS_FOR_EARLY_STOP is not None:
+        slot_env["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"] = str(EVAL_STEPS_FOR_EARLY_STOP)
+    if EARLY_STOP_PATIENCE_EVALS is not None:
+        slot_env["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"] = str(EARLY_STOP_PATIENCE_EVALS)
+    if EARLY_STOP_REL_TOL is not None:
+        slot_env["DP_FLOW_EARLY_STOP_REL_TOL"] = str(EARLY_STOP_REL_TOL)
+
+    ts = _utc8_now_str()
+    safe_stem = _safe_filename_part(stem)
+    tmp_path = _logs_dir() / (
+        f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_tmp.log"
+    )
+    final_path = _logs_dir() / (
+        f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_pid{{pid}}.log"
+    )
+
+    lf = open(tmp_path, "w", buffering=1, encoding="utf-8", errors="replace")
+    lf.write(
+        f"# flow_meta kind={phase} stem={stem} slot={slot} gpu={gpu_id} "
+        f"queue_idx={queue_idx} ts_utc8={ts}\n"
+    )
+    lf.flush()
+
+    if phase == "train":
+        script = f"set -euo pipefail; bash _train.sh {stem!r}"
+    else:
+        script = f"set -euo pipefail; bash _eval.sh {stem!r}"
+
     print(
-        f"[flow] child slot={slot} stem={stem} gpu={gpu_id} "
-        f"seed={FLOW_SEED} test_num={FLOW_TEST_NUM} "
-        f"(source=FLOW.PARALLEL)",
+        f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
+        f"log={tmp_path} starting",
         flush=True,
     )
-    script = (
-        f"set -euo pipefail; "
-        f"bash _train.sh {stem!r}; "
-        f"bash _eval.sh {stem!r}"
-    )
     process = subprocess.Popen(
-        ["bash", "-lc", script],
+        _bash_lc_cmd(script),
         cwd=BASE_DIR,
         env=slot_env,
+        stdout=lf,
+        stderr=subprocess.STDOUT,
         start_new_session=True,
     )
-    return Job(slot=slot, stem=stem, process=process)
+    pid = process.pid
+    lf.write(f"# child_pid={pid}\n")
+    lf.flush()
+    done_final = final_path.parent / final_path.name.format(pid=pid)
+    _rename_log_with_pid(tmp_path, done_final)
+
+    print(
+        f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
+        f"log={done_final} pid={pid} (source=FLOW.PARALLEL)",
+        flush=True,
+    )
+    return Job(
+        slot=slot,
+        phase=phase,
+        stem=stem,
+        queue_idx=queue_idx,
+        process=process,
+        log_path=done_final,
+        log_file=lf,
+    )
 
 
 def main() -> int:
@@ -152,25 +302,37 @@ def main() -> int:
     print(
         f"[flow] main TASK_CONFIG={TASK_CONFIG} EXPERT_NUM={EXPERT_NUM} "
         f"PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} FLOW_TEST_NUM={FLOW_TEST_NUM} "
-        f"TASKS={len(TASKS)} STEMS={len(STEMS)} "
+        f"TASK_DATA={len(TASK_DATA)} TASK_SEQ={len(TASK_SEQ)} "
         f"(source=FLOW constants)",
         flush=True,
     )
 
-    for task in TASKS:
-        run_foreground(["bash", "process_data.sh", task, TASK_CONFIG, EXPERT_NUM], env)
+    pd_code = run_process_data_steps(env)
+    if pd_code != 0:
+        return pd_code
 
     next_idx = 0
-    total = len(STEMS)
+    total = len(TASK_SEQ)
     slot_count = len(PARALLEL)
 
-    for slot in range(slot_count):
-        if next_idx >= total:
-            break
-        stem = STEMS[next_idx]
-        job = start_slot_job(slot, stem, PARALLEL[slot], env)
-        ACTIVE_JOBS[job.process.pid] = job
-        next_idx += 1
+    def try_fill_slots() -> None:
+        nonlocal next_idx
+        while next_idx < total and len(ACTIVE_JOBS) < slot_count:
+            slot = None
+            for s in range(slot_count):
+                used = any(j.slot == s for j in ACTIVE_JOBS.values())
+                if not used:
+                    slot = s
+                    break
+            if slot is None:
+                break
+            phase, stem = TASK_SEQ[next_idx]
+            gpu_id = PARALLEL[slot]
+            job = start_slot_job(slot, phase, stem, gpu_id, env, next_idx)
+            ACTIVE_JOBS[job.process.pid] = job
+            next_idx += 1
+
+    try_fill_slots()
 
     while ACTIVE_JOBS:
         failed = False
@@ -179,19 +341,25 @@ def main() -> int:
             if code is None:
                 continue
             del ACTIVE_JOBS[pid]
+            try:
+                job.log_file.close()
+            except Exception:
+                pass
             if code != 0:
                 failed = True
+                print(
+                    f"[flow][slot={job.slot}][{job.phase}][stem={job.stem}] "
+                    f"failed code={code} log={job.log_path}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 break
-            if next_idx < total:
-                stem = STEMS[next_idx]
-                new_job = start_slot_job(job.slot, stem, PARALLEL[job.slot], env)
-                ACTIVE_JOBS[new_job.process.pid] = new_job
-                next_idx += 1
+            try_fill_slots()
         if failed:
             cleanup_all_jobs()
             print("[flow] job failed, aborted", file=sys.stderr)
             return 1
-        time.sleep(0.5)
+        time.sleep(0.15)
 
     return 0
 
@@ -200,5 +368,7 @@ if __name__ == "__main__":
     atexit.register(cleanup_all_jobs)
     signal.signal(signal.SIGINT, on_signal)
     signal.signal(signal.SIGTERM, on_signal)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, on_signal)
     os.chdir(BASE_DIR)
     raise SystemExit(main())

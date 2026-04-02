@@ -195,10 +195,16 @@ def main(argv: list) -> int:
         act_hidden_dim = int(_get_cfg_opt(cfg, "ACT_HIDDEN_DIM", 512))
         act_dim_feedforward = int(_get_cfg_opt(cfg, "ACT_DIM_FEEDFORWARD", 3200))
 
-        # Early stopping: preferred via YAML. If None/null, do not pass and use script defaults (disabled).
+        # Early stopping: YAML baseline; optional FLOW env from __flow.py overrides YAML.
         early_stop_patience_evals = cfg.get("EARLY_STOP_PATIENCE_EVALS", None)
         early_stop_rel_tol = cfg.get("EARLY_STOP_REL_TOL", None)
         eval_steps_for_early_stop = cfg.get("EVAL_STEPS_FOR_EARLY_STOP", None)
+        if "ACT_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
+            early_stop_patience_evals = int(os.environ["ACT_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
+        if "ACT_FLOW_EARLY_STOP_REL_TOL" in os.environ:
+            early_stop_rel_tol = float(os.environ["ACT_FLOW_EARLY_STOP_REL_TOL"].strip())
+        if "ACT_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
+            eval_steps_for_early_stop = int(os.environ["ACT_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
         logger.info(
             "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
             global_seed,
