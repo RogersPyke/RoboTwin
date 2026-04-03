@@ -21,18 +21,30 @@ This file only injects flow-level env values and process orchestration:
 
 import atexit
 import os
-import re
 import shutil
 import signal
 import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, TextIO, Tuple
+from typing import Dict, List, TextIO
 
 BASE_DIR = Path(__file__).resolve().parent
+
+_POLICY_ROOT = Path(__file__).resolve().parent.parent
+if str(_POLICY_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_ROOT))
+from util.logger import (
+    bash_lc_cmd,
+    dump_log_tail_to_stderr,
+    ensure_logs_dir,
+    inject_flow_child_env,
+    open_flow_text_log,
+    rename_log_with_pid,
+    safe_filename_part,
+    utc8_now_str,
+)
 
 
 CATEGORY = "train"
@@ -44,7 +56,7 @@ PARALLEL = [0, 0, 0]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
 EVAL_STEPS_FOR_EARLY_STOP = 1000
-EARLY_STOP_PATIENCE_EVALS = 50
+EARLY_STOP_PATIENCE_EVALS = 30
 EARLY_STOP_REL_TOL = 1e-3
 
 # Explicit demo-processing task names (process_data.sh first argument).
@@ -74,29 +86,6 @@ TASK_SEQ = [(CATEGORY, stem) for stem in [
     "flow_single_unhanging_mug",
     "flow_joint_hanging_mug",
 ]]
-
-
-def _utc8_now_str() -> str:
-    tz8 = timezone(timedelta(hours=8))
-    return datetime.now(tz8).strftime("%Y%m%d%H%M%S")
-
-
-def _safe_filename_part(s: str) -> str:
-    out = re.sub(r"[^0-9A-Za-z._-]+", "_", s.strip())
-    return out[:180] if len(out) > 180 else out
-
-
-def _logs_dir() -> Path:
-    d = BASE_DIR / "logs"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
-
-
-def _bash_lc_cmd(script: str) -> List[str]:
-    inner = ["bash", "-lc", script]
-    if shutil.which("stdbuf"):
-        return ["stdbuf", "-oL", "-eL"] + inner
-    return inner
 
 
 @dataclass
@@ -151,23 +140,16 @@ def on_signal(signum: int, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def _rename_log_with_pid(tmp_path: Path, final_path: Path) -> None:
-    try:
-        if tmp_path != final_path and tmp_path.is_file():
-            tmp_path.rename(final_path)
-    except OSError:
-        pass
-
-
 def run_process_data_steps(env: dict) -> int:
     """Sequential process_data; one log file per task (full console capture)."""
     gpu_tag = str(PARALLEL[0]) if PARALLEL else "none"
+    logs = ensure_logs_dir(BASE_DIR)
     for q_idx, task_name in enumerate(TASK_DATA):
-        ts = _utc8_now_str()
-        safe_task = _safe_filename_part(task_name)
-        tmp_path = _logs_dir() / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
-        final_path = _logs_dir() / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
-        lf = open(tmp_path, "w", buffering=1, encoding="utf-8", errors="replace")
+        ts = utc8_now_str()
+        safe_task = safe_filename_part(task_name)
+        tmp_path = logs / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
+        final_path = logs / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
+        lf = open_flow_text_log(tmp_path)
         lf.write(
             f"# flow_meta kind=process_data task_name={task_name} slot=0 gpu={gpu_tag} "
             f"queue_idx={q_idx} ts_utc8={ts}\n"
@@ -183,7 +165,7 @@ def run_process_data_steps(env: dict) -> int:
         )
         p = subprocess.Popen(
             cmd,
-            cwd=BASE_DIR,
+            cwd=str(BASE_DIR),
             env=env,
             stdout=lf,
             stderr=subprocess.STDOUT,
@@ -193,7 +175,7 @@ def run_process_data_steps(env: dict) -> int:
         lf.write(f"# child_pid={pid}\n")
         lf.flush()
         done_final = final_path.parent / final_path.name.format(pid=pid)
-        _rename_log_with_pid(tmp_path, done_final)
+        rename_log_with_pid(tmp_path, done_final)
         code = p.wait()
         try:
             lf.close()
@@ -204,6 +186,10 @@ def run_process_data_steps(env: dict) -> int:
                 f"[flow][process_data][task={task_name}] failed code={code} log={done_final}",
                 file=sys.stderr,
                 flush=True,
+            )
+            dump_log_tail_to_stderr(
+                done_final,
+                f"[flow][process_data][task={task_name}]",
             )
             return code
         print(
@@ -238,16 +224,17 @@ def start_slot_job(
     if EARLY_STOP_REL_TOL is not None:
         slot_env["ACT_FLOW_EARLY_STOP_REL_TOL"] = str(EARLY_STOP_REL_TOL)
 
-    ts = _utc8_now_str()
-    safe_stem = _safe_filename_part(stem)
-    tmp_path = _logs_dir() / (
+    logs = ensure_logs_dir(BASE_DIR)
+    ts = utc8_now_str()
+    safe_stem = safe_filename_part(stem)
+    tmp_path = logs / (
         f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_tmp.log"
     )
-    final_path = _logs_dir() / (
+    final_path = logs / (
         f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_pid{{pid}}.log"
     )
 
-    lf = open(tmp_path, "w", buffering=1, encoding="utf-8", errors="replace")
+    lf = open_flow_text_log(tmp_path)
     lf.write(
         f"# flow_meta kind={phase} stem={stem} slot={slot} gpu={gpu_id} "
         f"queue_idx={queue_idx} ts_utc8={ts}\n"
@@ -265,8 +252,8 @@ def start_slot_job(
         flush=True,
     )
     process = subprocess.Popen(
-        _bash_lc_cmd(script),
-        cwd=BASE_DIR,
+        bash_lc_cmd(script),
+        cwd=str(BASE_DIR),
         env=slot_env,
         stdout=lf,
         stderr=subprocess.STDOUT,
@@ -276,7 +263,7 @@ def start_slot_job(
     lf.write(f"# child_pid={pid}\n")
     lf.flush()
     done_final = final_path.parent / final_path.name.format(pid=pid)
-    _rename_log_with_pid(tmp_path, done_final)
+    rename_log_with_pid(tmp_path, done_final)
 
     print(
         f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
@@ -299,7 +286,7 @@ def main() -> int:
         print("[flow] PARALLEL is empty", file=sys.stderr)
         return 1
 
-    env = os.environ.copy()
+    env = inject_flow_child_env(os.environ.copy())
     print(
         f"[flow] main TASK_CONFIG={TASK_CONFIG} EXPERT_NUM={EXPERT_NUM} "
         f"PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} FLOW_TEST_NUM={FLOW_TEST_NUM} "
@@ -348,12 +335,15 @@ def main() -> int:
                 pass
             if code != 0:
                 failed = True
+                hdr = (
+                    f"[flow][slot={job.slot}][{job.phase}][stem={job.stem}]"
+                )
                 print(
-                    f"[flow][slot={job.slot}][{job.phase}][stem={job.stem}] "
-                    f"failed code={code} log={job.log_path}",
+                    f"{hdr} failed code={code} log={job.log_path}",
                     file=sys.stderr,
                     flush=True,
                 )
+                dump_log_tail_to_stderr(job.log_path, hdr)
                 break
             try_fill_slots()
         if failed:

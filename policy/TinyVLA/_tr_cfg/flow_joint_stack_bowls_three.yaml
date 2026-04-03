@@ -1,0 +1,49 @@
+# TinyVLA flow train config (aligned with ACT _tr_cfg/flow_joint_stack_bowls_three.yaml).
+# Adjust model_name_or_path / max_steps / batch sizes for your hardware.
+
+
+TRAIN_TASKS:
+  - [stack_bowls_three, demo_clean, 100]
+  - [unstack_bowls_three, demo_clean, 100]
+
+TRAIN_SEED: 0
+TRAIN_GPU_ID: "0"
+
+EVAL_STEPS_FOR_EARLY_STOP: 1000
+EARLY_STOP_PATIENCE_EVALS: 50
+EARLY_STOP_REL_TOL: 1e-3
+
+DEEPSPEED:
+  enabled: false
+
+VLA_TRAIN_ARGS:
+  skip_mirrored_data: false
+  episode_first: false
+  chunk_size: 16
+  policy_head_type: unet_diffusion_policy
+  state_dim: 14
+  action_dim: 14
+  noise_samples: 2
+  model_name_or_path: model_param/InternVL3-1B/
+  flash_attn: false
+  max_steps: 100000
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 16
+  gradient_accumulation_steps: 1
+  save_strategy: "steps"
+  save_steps: 2000
+  save_total_limit: 3
+  evaluation_strategy: "steps"
+  eval_steps: 1000
+  learning_rate: 2.0e-5
+  weight_decay: 0.0
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.05
+  logging_steps: 50
+  bf16: true
+  tf32: false
+  gradient_checkpointing: true
+  dataloader_num_workers: 4
+  report_to: "none"
+  freeze_vision_tower: false
+  freeze_backbone: false

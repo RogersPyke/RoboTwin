@@ -9,6 +9,7 @@ os.environ['DEVICE'] = "cuda"
 os.environ["WANDB_DISABLED"] = "true"
 
 import torch
+import transformers
 from policy_heads import *
 from data_utils.dataset import set_seed, load_data
 
@@ -21,7 +22,7 @@ from data_utils.robot_data_processor import InternVL3Process
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-from vla.train._early_stop import TinyVLAEarlyStopCallback
+from vla.train.relative_early_stop import RelativeEarlyStop
 
 local_rank = None
 
@@ -196,7 +197,7 @@ def train_bc(train_dataset=None, val_dataset=None, model=None, config=None, toke
         training_args.evaluation_strategy = "steps"
         training_args.eval_steps = int(early_stop_args.eval_steps_for_early_stop)
 
-    callback = TinyVLAEarlyStopCallback(
+    callback = RelativeEarlyStop(
         output_dir=training_args.output_dir,
         early_stop_patience_evals=int(early_stop_args.early_stop_patience_evals),
         early_stop_rel_tol=float(early_stop_args.early_stop_rel_tol),

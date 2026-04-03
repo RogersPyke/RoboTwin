@@ -388,11 +388,17 @@ def _snapshot_training_metadata(
 
 
 @log_exceptions
-def _run_training(tinyvla_dir: str, cfg_name: str) -> int:
+def _run_training(
+    tinyvla_dir: str,
+    cfg_name: str,
+    cli_seed: Optional[int] = None,
+    cli_gpu_id: Optional[str] = None,
+) -> int:
     """
-    @input: [str, tinyvla_dir], [str, cfg_name]
+    @input: [str, tinyvla_dir], [str, cfg_name], [Optional[int], cli_seed], [Optional[str], cli_gpu_id]
     @output: [int, 0 on success else non-zero]
     @scenario: [Load _tr_cfg yaml, build command, launch TinyVLA training]
+    Runtime precedence: CLI > TVLA_FLOW_* env > YAML (matches ACT/DP flow contract).
     """
     cfg_base = _normalize_cfg_name(cfg_name)
     cfg_path = os.path.join(tinyvla_dir, "_tr_cfg", f"{cfg_base}.yaml")
@@ -400,8 +406,42 @@ def _run_training(tinyvla_dir: str, cfg_name: str) -> int:
         raise FileNotFoundError(f"No config found at: _tr_cfg/{cfg_base}.yaml")
 
     cfg = _load_yaml(cfg_path)
+
+    # Flow-level early-stop overrides (optional env from __flow.py).
+    if "TVLA_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
+        cfg["EARLY_STOP_PATIENCE_EVALS"] = int(os.environ["TVLA_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
+    if "TVLA_FLOW_EARLY_STOP_REL_TOL" in os.environ:
+        cfg["EARLY_STOP_REL_TOL"] = float(os.environ["TVLA_FLOW_EARLY_STOP_REL_TOL"].strip())
+    if "TVLA_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
+        cfg["EVAL_STEPS_FOR_EARLY_STOP"] = int(os.environ["TVLA_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
+
     train_seed = int(cfg["TRAIN_SEED"])
-    train_gpu_id = str(cfg["TRAIN_GPU_ID"])
+    train_gpu_id = str(cfg["TRAIN_GPU_ID"]).strip()
+    seed_source = "YAML:TRAIN_SEED"
+    gpu_source = "YAML:TRAIN_GPU_ID"
+
+    if cli_seed is not None:
+        train_seed = int(cli_seed)
+        seed_source = "CLI:--seed"
+    elif os.environ.get("TVLA_FLOW_SEED", "").strip():
+        train_seed = int(os.environ["TVLA_FLOW_SEED"].strip())
+        seed_source = "FLOW_ENV:TVLA_FLOW_SEED"
+
+    if cli_gpu_id is not None:
+        train_gpu_id = str(cli_gpu_id).strip()
+        gpu_source = "CLI:--gpu-id"
+    elif os.environ.get("TVLA_FLOW_GPU", "").strip():
+        train_gpu_id = os.environ["TVLA_FLOW_GPU"].strip()
+        gpu_source = "FLOW_ENV:TVLA_FLOW_GPU"
+
+    if LOGGER is not None:
+        LOGGER.info(
+            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
+            train_seed,
+            seed_source,
+            train_gpu_id,
+            gpu_source,
+        )
 
     train_args, output_dir, joint_contract = _prepare_train_args(tinyvla_dir, cfg)
 
@@ -474,6 +514,8 @@ def main(argv: List[str]) -> int:
         required=False,
         help="(legacy) Config name (file: _tr_cfg/<name>.yaml).",
     )
+    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
+    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
     args = parser.parse_args(argv[1:])
 
     tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
@@ -484,7 +526,7 @@ def main(argv: List[str]) -> int:
         parser.error("Missing cfg_name. Use: python3 _tr_wrapper.py <cfg_name> (or --config <cfg_name>)")
 
     try:
-        return _run_training(tinyvla_dir, cfg)
+        return _run_training(tinyvla_dir, cfg, cli_seed=args.seed, cli_gpu_id=args.gpu_id)
     except Exception:
         if LOGGER is not None:
             LOGGER.error("Top-level wrapper exit due to failure.")

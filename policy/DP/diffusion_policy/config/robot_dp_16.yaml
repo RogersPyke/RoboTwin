@@ -3,7 +3,7 @@ defaults:
   - task: default_task_16
 
 name: robot_${task.name}
-_target_: diffusion_policy.workspace.robotworkspace.RobotWorkspace
+_target_: diffusion_policy.workspace.robotworkspace_early_stop.RobotWorkspaceEarlyStopPlugin
 
 task_name: ${task.name}
 shape_meta: ${task.shape_meta}

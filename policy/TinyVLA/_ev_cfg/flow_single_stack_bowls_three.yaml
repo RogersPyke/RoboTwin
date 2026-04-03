@@ -1,0 +1,16 @@
+# TinyVLA flow eval (aligned with ACT _ev_cfg/flow_single_stack_bowls_three.yaml). MODEL_BASE is relative to RoboTwin repo root (eval cwd).
+
+
+TRAIN_TASKS:
+  - [stack_bowls_three, demo_clean, 100]
+
+EVAL_TASKS:
+  - [stack_bowls_three, demo_clean, 100]
+
+EVAL_SEED: 0
+EVAL_GPU_ID: "0"
+TEST_NUM: 50
+END_RESET_TO_INIT: true
+
+MODEL_BASE: policy/TinyVLA/model_param/InternVL3-1B/
+USE_POLICY_BEST: false

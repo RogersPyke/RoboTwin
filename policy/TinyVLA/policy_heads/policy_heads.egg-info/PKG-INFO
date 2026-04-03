@@ -1,11 +1,8 @@
-Metadata-Version: 2.4
+Metadata-Version: 2.1
 Name: policy_heads
 Version: 0.0.0
 License: MIT License
 License-File: LICENSE
-Dynamic: description
-Dynamic: license
-Dynamic: license-file
 
 This part of the codebase is modified from DETR https://github.com/facebookresearch/detr under APACHE 2.0.
 

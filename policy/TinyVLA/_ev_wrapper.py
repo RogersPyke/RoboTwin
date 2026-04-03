@@ -167,6 +167,17 @@ def _build_joint_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict
     }
 
 
+def _resolve_eval_test_num(ev_cfg: Dict[str, Any]) -> Any:
+    """
+    @input: [dict, eval yaml]
+    @output: [Any, test_num or None]
+    @scenario: [Prefer EVAL_TEST_NUM; fall back to ACT-style TEST_NUM for copied configs]
+    """
+    if ev_cfg.get("EVAL_TEST_NUM", None) is not None:
+        return ev_cfg.get("EVAL_TEST_NUM")
+    return ev_cfg.get("TEST_NUM", None)
+
+
 def _build_eval_overrides(
     ev_cfg: Dict[str, Any],
     task_name: str,
@@ -199,7 +210,7 @@ def _build_eval_overrides(
     add_pair("enable_lore", ev_cfg.get("ENABLE_LORE", False))
     add_pair("instruction_type", ev_cfg.get("INSTRUCTION_TYPE", None))
     # Allow dry-run evaluation to limit rollout count (used by script/eval_policy.py).
-    add_pair("test_num", ev_cfg.get("EVAL_TEST_NUM", None))
+    add_pair("test_num", _resolve_eval_test_num(ev_cfg))
     add_pair("END_RESET_TO_INIT", _resolve_eval_end_reset_to_init(ev_cfg))
     return overrides
 
@@ -263,10 +274,74 @@ def _resolve_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict[str
     }
 
 
-@log_exceptions
-def _run_eval(tinyvla_dir: str, cfg_name: str) -> int:
+def _merge_tvla_flow_eval_runtime(
+    ev_cfg: Dict[str, Any],
+    cli_seed: Optional[int] = None,
+    cli_gpu_id: Optional[str] = None,
+    cli_test_num: Optional[int] = None,
+) -> Dict[str, Any]:
     """
-    @input: [str, tinyvla_dir], [str, cfg_name]
+    @input: [dict, raw eval yaml], [optional CLI overrides]
+    @output: [dict, copy with resolved EVAL_SEED / EVAL_GPU_ID / EVAL_TEST_NUM]
+    @scenario: [CLI > TVLA_FLOW_* > YAML]
+    """
+    runtime = dict(ev_cfg)
+    eval_seed = int(runtime["EVAL_SEED"])
+    eval_gpu_id = str(runtime["EVAL_GPU_ID"]).strip()
+    seed_source = "YAML:EVAL_SEED"
+    gpu_source = "YAML:EVAL_GPU_ID"
+
+    if cli_seed is not None:
+        eval_seed = int(cli_seed)
+        seed_source = "CLI:--seed"
+    elif os.environ.get("TVLA_FLOW_SEED", "").strip():
+        eval_seed = int(os.environ["TVLA_FLOW_SEED"].strip())
+        seed_source = "FLOW_ENV:TVLA_FLOW_SEED"
+
+    if cli_gpu_id is not None:
+        eval_gpu_id = str(cli_gpu_id).strip()
+        gpu_source = "CLI:--gpu-id"
+    elif os.environ.get("TVLA_FLOW_GPU", "").strip():
+        eval_gpu_id = os.environ["TVLA_FLOW_GPU"].strip()
+        gpu_source = "FLOW_ENV:TVLA_FLOW_GPU"
+
+    runtime["EVAL_SEED"] = eval_seed
+    runtime["EVAL_GPU_ID"] = eval_gpu_id
+
+    test_num = _resolve_eval_test_num(runtime)
+    test_source = "YAML:EVAL_TEST_NUM/TEST_NUM"
+    if cli_test_num is not None:
+        test_num = int(cli_test_num)
+        test_source = "CLI:--test-num"
+    elif os.environ.get("TVLA_FLOW_TEST_NUM", "").strip():
+        test_num = int(os.environ["TVLA_FLOW_TEST_NUM"].strip())
+        test_source = "FLOW_ENV:TVLA_FLOW_TEST_NUM"
+    if test_num is not None:
+        runtime["EVAL_TEST_NUM"] = test_num
+
+    if LOGGER is not None:
+        LOGGER.info(
+            "Resolved eval runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
+            eval_seed,
+            seed_source,
+            eval_gpu_id,
+            gpu_source,
+            test_num,
+            test_source,
+        )
+    return runtime
+
+
+@log_exceptions
+def _run_eval(
+    tinyvla_dir: str,
+    cfg_name: str,
+    cli_seed: Optional[int] = None,
+    cli_gpu_id: Optional[str] = None,
+    cli_test_num: Optional[int] = None,
+) -> int:
+    """
+    @input: [str, tinyvla_dir], [str, cfg_name], [optional CLI overrides]
     @output: [int, 0 on success else non-zero]
     @scenario: [Load _ev_cfg yaml, build overrides, run eval_policy.py]
     """
@@ -276,7 +351,13 @@ def _run_eval(tinyvla_dir: str, cfg_name: str) -> int:
         raise FileNotFoundError(f"No config found at: _ev_cfg/{cfg_base}.yaml")
 
     ev_cfg = _load_yaml(cfg_path)
-    contract = _resolve_eval_contract(tinyvla_dir, ev_cfg)
+    runtime_cfg = _merge_tvla_flow_eval_runtime(
+        ev_cfg,
+        cli_seed=cli_seed,
+        cli_gpu_id=cli_gpu_id,
+        cli_test_num=cli_test_num,
+    )
+    contract = _resolve_eval_contract(tinyvla_dir, runtime_cfg)
 
     model_path = contract["model_path"]
     state_path = contract["state_path"]
@@ -289,7 +370,7 @@ def _run_eval(tinyvla_dir: str, cfg_name: str) -> int:
     policy_deploy_yml = "policy/TinyVLA/deploy_policy.yml"
 
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(ev_cfg["EVAL_GPU_ID"])
+    env["CUDA_VISIBLE_DEVICES"] = str(runtime_cfg["EVAL_GPU_ID"])
     env["PYTHONNOUSERSITE"] = "1"
     env["PYTHONWARNINGS"] = "ignore::UserWarning"
     env["ACT_EV_CFG_SNAPSHOT_SRC"] = os.path.abspath(cfg_path)
@@ -306,7 +387,7 @@ def _run_eval(tinyvla_dir: str, cfg_name: str) -> int:
 
     for task_name, task_config, expert_num in contract["eval_runs"]:
         overrides_tokens = _build_eval_overrides(
-            ev_cfg=ev_cfg,
+            ev_cfg=runtime_cfg,
             task_name=task_name,
             task_config=task_config,
             expert_num=expert_num,
@@ -355,6 +436,15 @@ def main(argv: List[str]) -> int:
         required=False,
         help="(legacy) Config name (file: _ev_cfg/<name>.yaml).",
     )
+    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional eval GPU id override.")
+    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
+    parser.add_argument(
+        "--test-num",
+        dest="test_num",
+        type=int,
+        required=False,
+        help="Optional rollout count override (eval_policy --test_num).",
+    )
     args = parser.parse_args(argv[1:])
 
     tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
@@ -365,7 +455,13 @@ def main(argv: List[str]) -> int:
         parser.error("Missing cfg_name. Use: python3 _ev_wrapper.py <cfg_name> (or --config <cfg_name>)")
 
     try:
-        return _run_eval(tinyvla_dir, cfg)
+        return _run_eval(
+            tinyvla_dir,
+            cfg,
+            cli_seed=args.seed,
+            cli_gpu_id=args.gpu_id,
+            cli_test_num=args.test_num,
+        )
     except Exception:
         if LOGGER is not None:
             LOGGER.error("Top-level wrapper exit due to failure.")

@@ -3,14 +3,17 @@
 # conda create -n twin python=3.10 -y
 # conda activate twin
 # Disable user-site packages to avoid leaking ~/.local into this env.
+export PIP_USER=0
 export PYTHONNOUSERSITE=1
+export PYTHONUNBUFFERED=1
+export PIP_NO_BUILD_ISOLATION=1
 
 echo "Installing the necessary packages ..."
-python -m pip install -r script/requirements.txt
+python -m pip install --no-cache-dir --no-user --no-build-isolation -r script/requirements.txt
 
 echo "Installing pytorch3d ..."
 FORCE_CUDA=1 CUDA_HOME=/usr/local/cuda-12.1 \
-python -m pip install "git+https://github.com/facebookresearch/pytorch3d.git" --no-build-isolation --no-cache-dir || echo "[WARN] pytorch3d install failed, skip and continue."
+python -m pip install --no-cache-dir --no-user --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git" || echo "[WARN] pytorch3d install failed, skip and continue."
 
 echo "Adjusting code in sapien/wrapper/urdf_loader.py ..."
 # location of sapien, like "~/.conda/envs/RoboTwin/lib/python3.10/site-packages/sapien"
@@ -60,10 +63,10 @@ if [ ! -d curobo ]; then
 fi
 cd curobo
 # Ensure torch runtime deps (including cuDNN) are present before building curobo.
-python -m pip install --upgrade "torch==2.4.1"
+python -m pip install --no-cache-dir --no-user --no-build-isolation --upgrade "torch==2.4.1"
 CUDA_HOME=/usr/local/cuda-12.1 \
 NVCC=/usr/local/cuda-12.1/bin/nvcc \
-python -m pip install . --no-build-isolation --no-cache-dir || { echo "[ERROR] Curobo install failed."; exit 1; }
+python -m pip install --no-cache-dir --no-user --no-build-isolation . || { echo "[ERROR] Curobo install failed."; exit 1; }
 cd ../..
 
 echo "Installing conda-pack, pyyaml, modelscope ..."
