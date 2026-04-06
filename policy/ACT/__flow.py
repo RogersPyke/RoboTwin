@@ -35,7 +35,7 @@ BASE_DIR = Path(__file__).resolve().parent
 _POLICY_ROOT = Path(__file__).resolve().parent.parent
 if str(_POLICY_ROOT) not in sys.path:
     sys.path.insert(0, str(_POLICY_ROOT))
-from util.logger import (
+from flow_log_util.flow_log import (
     bash_lc_cmd,
     dump_log_tail_to_stderr,
     ensure_logs_dir,
@@ -52,7 +52,7 @@ CATEGORY = "train"
 # Optional flow-level overrides. Keep None to use YAML defaults.
 TASK_CONFIG = "demo_clean"
 EXPERT_NUM = "100"
-PARALLEL = [0, 0, 0]
+PARALLEL = [0, 0]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
 EVAL_STEPS_FOR_EARLY_STOP = 1000

@@ -35,7 +35,7 @@ BASE_DIR = Path(__file__).resolve().parent
 _POLICY_ROOT = Path(__file__).resolve().parent.parent
 if str(_POLICY_ROOT) not in sys.path:
     sys.path.insert(0, str(_POLICY_ROOT))
-from util.logger import (
+from flow_log_util.flow_log import (
     bash_lc_cmd,
     dump_log_tail_to_stderr,
     ensure_logs_dir,

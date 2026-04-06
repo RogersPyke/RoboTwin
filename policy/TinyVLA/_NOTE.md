@@ -123,7 +123,7 @@ mnop=.../robotiwin/policy/TinyVLA/model_param/InternVL3-1B/ # Set The Path of ba
 ```
 
 ### Early stopping (TinyVLA)
-TinyVLA supports an ACT-aligned early stopping mechanism driven by `eval_loss` during HF `Trainer` evaluation. Implementation: `vla/train/tinyvla_relative_early_stop_plugin.py` (`TrainerCallback`), reusing `policy/util/early_stop.py` (`RelativeEarlyStopTracker`) like ACT/DP.
+TinyVLA supports an ACT-aligned early stopping mechanism driven by `eval_loss` during HF `Trainer` evaluation. Implementation: `vla/train/relative_early_stop.py` (`TrainerCallback`), reusing `policy/early_stop_util/early_stop.py` (`RelativeEarlyStopTracker`) like ACT/DP.
 
 It is now recommended to configure early stopping in the wrapper YAML, not inside `VLA_TRAIN_ARGS`:
 ```yaml

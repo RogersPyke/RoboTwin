@@ -21,6 +21,43 @@ TASK_CONFIGS = {
         'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
         "sample_weights": [1],
     },
+    # Base tasks for __flow.py TASK_DATA (joint wrapper requires each subtask registered here).
+    "move_pillbottle_pad": {
+        'dataset_dir': [DATA_DIR + "/sim-move_pillbottle_pad/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
+    "unmove_pillbottle_pad": {
+        'dataset_dir': [DATA_DIR + "/sim-unmove_pillbottle_pad/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
+    "stack_bowls_three": {
+        'dataset_dir': [DATA_DIR + "/sim-stack_bowls_three/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
+    "unstack_bowls_three": {
+        'dataset_dir': [DATA_DIR + "/sim-unstack_bowls_three/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
+    "stack_blocks_three": {
+        'dataset_dir': [DATA_DIR + "/sim-stack_blocks_three/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
+    "unstack_blocks_three": {
+        'dataset_dir': [DATA_DIR + "/sim-unstack_blocks_three/demo_clean-100"],
+        'episode_len': 500,
+        'camera_names': ['cam_high', 'cam_left_wrist', 'cam_right_wrist'],
+        "sample_weights": [1],
+    },
 }
 
 ### ALOHA fixed constants

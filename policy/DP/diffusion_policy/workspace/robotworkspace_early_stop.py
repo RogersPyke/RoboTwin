@@ -18,8 +18,8 @@ from diffusion_policy.workspace.robotworkspace import RobotWorkspace, create_dat
 
 _POLICY_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(_POLICY_ROOT) not in sys.path:
-    sys.path.append(str(_POLICY_ROOT))
-from util.early_stop import RelativeEarlyStopTracker
+    sys.path.insert(0, str(_POLICY_ROOT))
+from early_stop_util import RelativeEarlyStopTracker
 
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)

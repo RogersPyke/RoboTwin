@@ -14,6 +14,7 @@ from transformers.trainer import (
     ALL_LAYERNORM_LAYERS,
     logger,
 )
+import inspect
 from typing import List, Optional, Dict
 # from transformers.utils import is_torch_tpu_available
 import time
@@ -185,6 +186,42 @@ class VLATrainer(Trainer):
                 logger.info(f"skipped: {skipped / 2 ** 20}M params")
 
         return self.optimizer
+
+    def _maybe_log_save_evaluate(
+        self,
+        tr_loss,
+        grad_norm,
+        model,
+        trial,
+        epoch,
+        ignore_keys_for_eval,
+        start_time=None,
+    ):
+        """
+        Delegate to transformers.Trainer._maybe_log_save_evaluate with a compatible argument set.
+
+        Upstream copied _inner_training_loop passes start_time like recent Trainer versions.
+        Transformers 4.45.x and earlier use six parameters after self (no start_time); 4.46+
+        add start_time; later releases may add optional learning_rate. Bind only names present
+        on the base implementation to avoid TypeError across versions.
+        """
+        sup = super()._maybe_log_save_evaluate
+        sig = inspect.signature(sup)
+        locals_map = {
+            "tr_loss": tr_loss,
+            "grad_norm": grad_norm,
+            "model": model,
+            "trial": trial,
+            "epoch": epoch,
+            "ignore_keys_for_eval": ignore_keys_for_eval,
+            "start_time": start_time,
+        }
+        call_kwargs = {
+            n: locals_map[n]
+            for n in sig.parameters
+            if n != "self" and n in locals_map
+        }
+        return sup(**call_kwargs)
 
     # modified from transformers.trainer.Trainer, only change the metric record
     def _inner_training_loop(

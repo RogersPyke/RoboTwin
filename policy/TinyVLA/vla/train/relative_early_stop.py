@@ -2,13 +2,13 @@
 TinyVLA relative early-stop plugin (DP-style separate module).
 
 Purpose:
-- Subclass HuggingFace TrainerCallback and compose policy/util RelativeEarlyStopTracker
+- Subclass HuggingFace TrainerCallback and compose early_stop_util.RelativeEarlyStopTracker
   (same semantics as ACT and DP RobotWorkspaceEarlyStopPlugin).
 - Best weights saved under output_dir/policy_best/ when validation improves.
 
 Dependencies:
 - transformers TrainerCallback
-- util.early_stop.RelativeEarlyStopTracker (RoboTwin policy root on sys.path)
+- early_stop_util.RelativeEarlyStopTracker (RoboTwin policy root on sys.path)
 - vla model save helpers (safe_save_model_for_hf_trainer, PEFT helpers)
 """
 
@@ -23,8 +23,8 @@ from transformers import TrainerCallback
 
 _POLICY_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(_POLICY_ROOT) not in sys.path:
-    sys.path.append(str(_POLICY_ROOT))
-from util.early_stop import RelativeEarlyStopTracker
+    sys.path.insert(0, str(_POLICY_ROOT))
+from early_stop_util import RelativeEarlyStopTracker
 
 from vla import safe_save_model_for_hf_trainer
 from vla import get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3
