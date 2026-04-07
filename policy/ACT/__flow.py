@@ -36,7 +36,7 @@ from flow_log_util.flow_log import (
     safe_filename_part,
     utc8_now_str,
 )
-from rw_common.flow_eval_best_symlinks import prepare_act_flow_best_symlinks
+from early_stop_util.flow_eval_best_symlinks import prepare_act_flow_best_symlinks
 
 # GPU id per parallel slot (CUDA_VISIBLE_DEVICES for that slot).
 PARALLEL = [0, 0]
