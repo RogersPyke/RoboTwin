@@ -36,7 +36,23 @@ class TinyVLA(InternVLChatModel):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
             is_pad: Optional[bool] = None,
+            # --- edit --- 
+            # HF can_return_loss() requires forward(..., return_loss: bool = True) so Trainer.prediction_step sets loss_without_labels and aggregates eval_loss when label_names is empty. 
+            return_loss: bool = True,
+            # ------------
     ):
+        """
+        Policy training forward. Returns (loss, hidden_states, ...).
+
+        Args:
+            return_loss: HF Trainer compatibility only (default True). transformers inspects this name/default so
+                evaluation uses compute_loss and metrics include eval_loss; TinyVLA still always computes policy loss
+                in this path (no CLIP-style skip when False).
+        """
+        # --- edit ---
+        # Bind parameter so callers may pass return_loss=False without TypeError; body unchanged. 
+        _ = return_loss
+        # ------------
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
         hidden_states = self.vlm_forward(
             pixel_values=pixel_values,
