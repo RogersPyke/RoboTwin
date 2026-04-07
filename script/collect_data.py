@@ -44,6 +44,14 @@ def main(task_name=None, task_config=None):
     with open(config_path, "r", encoding="utf-8") as f:
         args = yaml.load(f.read(), Loader=yaml.FullLoader)
 
+    env_end_reset_to_init = os.environ.get("END_RESET_TO_INIT")
+    if env_end_reset_to_init is not None and env_end_reset_to_init.strip().lower() != "true":
+        raise ValueError(
+            f"Invalid value for END_RESET_TO_INIT: {env_end_reset_to_init!r}. Only 'true' is allowed."
+        )
+    if env_end_reset_to_init is not None:
+        args["END_RESET_TO_INIT"] = True
+
     args['task_name'] = task_name
 
     embodiment_type = args.get("embodiment")
@@ -99,6 +107,7 @@ def main(task_name=None, task_config=None):
     print("\033[94mWrist Camera Config:\033[0m " + str(args["camera"]["wrist_camera_type"]) + f", " +
           str(args["camera"]["collect_wrist_camera"]))
     print("\033[94mEmbodiment Config:\033[0m " + embodiment_name)
+    print("\033[94mEND_RESET_TO_INIT:\033[0m " + str(args.get("END_RESET_TO_INIT", True)))
     print("\n==================================")
 
     args["embodiment_name"] = embodiment_name

@@ -30,7 +30,6 @@ import signal
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -48,7 +47,6 @@ def _worker_init():
     """
     _worker_ignore_sigint()
     _worker_process_group_and_sigterm()
-    _worker_watch_main_parent()
 
 
 def _worker_process_group_and_sigterm():
@@ -68,32 +66,6 @@ def _worker_process_group_and_sigterm():
         except OSError:
             pass
     signal.signal(signal.SIGTERM, _kill_process_group)
-
-
-def _worker_watch_main_parent():
-    """
-    Watch main-process PID from env and terminate this worker group when main dies.
-    This covers abrupt parent exits where no signal reaches workers.
-    """
-    main_pid_raw = os.environ.get("COLLECT_FLOW_MAIN_PID", "").strip()
-    if not main_pid_raw.isdigit():
-        return
-    main_pid = int(main_pid_raw)
-
-    def _watchdog():
-        while True:
-            try:
-                os.kill(main_pid, 0)
-            except OSError:
-                try:
-                    os.killpg(os.getpgrp(), signal.SIGTERM)
-                except OSError:
-                    pass
-                os._exit(143)
-            time.sleep(0.5)
-
-    t = threading.Thread(target=_watchdog, daemon=True)
-    t.start()
 
 
 def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging.Logger):
@@ -130,18 +102,6 @@ def _parse_subprocess_print(env_key: str = "SUBPROCESS_PRINT") -> bool:
     """Parse SUBPROCESS_PRINT from environment. True only for 'true'/'True'/'1'; else False."""
     val = os.environ.get(env_key, "false").strip().lower()
     return val in ("true", "1")
-
-
-def _parse_fail_seed_skip_threshold(env_key: str = "FAIL_SEED_SKIP_THRESHOLD") -> int:
-    """Parse fail-seed threshold from environment; invalid/non-positive values fallback to 100."""
-    raw = os.environ.get(env_key, "100").strip()
-    try:
-        value = int(raw)
-        if value <= 0:
-            return 100
-        return value
-    except Exception:
-        return 100
 
 
 def load_config():
@@ -300,12 +260,7 @@ def _read_stdout_and_log_wrapper(
 
 
 def run_collect_data_sh(
-    task: str,
-    cfg: str,
-    gpu_id: int,
-    script_dir: Path,
-    subprocess_print: bool,
-    fail_seed_skip_threshold: int,
+    task: str, cfg: str, gpu_id: int, script_dir: Path, subprocess_print: bool
 ) -> bool:
     """
     Run collect_data.sh for one (task, config) pair on the given GPU.
@@ -318,58 +273,41 @@ def run_collect_data_sh(
     cmd = ["bash", str(script_dir / "collect_data.sh"), task, cfg, str(gpu_id)]
     log.info("%s START GPU%s", tag, gpu_id)
     try:
-        # Always read subprocess output to support fail-seed threshold skip logic.
-        # Do not use start_new_session: keep subprocess in worker's process group
-        # so that worker's SIGTERM handler (killpg) terminates this child too.
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(script_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-        state = {"in_data_collection": False, "data_collection_episode_index": 0}
-        fail_seed_count = 0
-        fail_seed_limit_hit = False
-
-        while True:
-            line = proc.stdout.readline()
-            if not line:
-                break
-
-            line_clean = line.rstrip("\n")
-            if subprocess_print:
-                print(line_clean, flush=True)
-            else:
-                msg = _wrapper_progress_message(line_clean, state)
-                if msg:
-                    log.info("%s wrapper: %s", tag, msg)
-
-            if "simulate data episode" in line_clean and " fail! (seed = " in line_clean:
-                fail_seed_count += 1
-                if fail_seed_count > fail_seed_skip_threshold:
-                    fail_seed_limit_hit = True
-                    log.warning(
-                        "%s SKIP: fail-seed count %s exceeded threshold %s.",
-                        tag,
-                        fail_seed_count,
-                        fail_seed_skip_threshold,
-                    )
-                    proc.terminate()
-                    break
-
-        try:
-            proc.wait(timeout=3600)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            proc.wait()
-            raise
-
-        if fail_seed_limit_hit:
-            return False
-
-        result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
+        if subprocess_print:
+            result = subprocess.run(
+                cmd,
+                cwd=str(script_dir),
+                capture_output=False,
+                text=True,
+                timeout=3600,
+            )
+            out, err = None, None
+        else:
+            # Do not use start_new_session: keep subprocess in worker's process group
+            # so that worker's SIGTERM handler (killpg) terminates this child too.
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(script_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            state = {"in_data_collection": False, "data_collection_episode_index": 0}
+            reader = threading.Thread(
+                target=_read_stdout_and_log_wrapper,
+                args=(proc, state, log, task, cfg),
+                daemon=True,
+            )
+            reader.start()
+            try:
+                proc.wait(timeout=3600)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+                proc.wait()
+                raise
+            reader.join(timeout=5.0)
+            result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
 
         if result.returncode != 0:
             log.error("%s FAILED stderr: %s", tag, result.stderr or result.stdout)
@@ -384,6 +322,19 @@ def run_collect_data_sh(
         return False
 
 
+def worker(jobs: list, gpu_id: int, script_dir: Path, subprocess_print: bool) -> int:
+    """
+    Run a list of (task, cfg) jobs on one GPU. Returns number of failures.
+    Input: jobs list of (task, cfg), gpu_id (int), script_dir (Path), subprocess_print (bool).
+    Output: int, count of failed runs.
+    """
+    failed = 0
+    for task, cfg in jobs:
+        if not run_collect_data_sh(task, cfg, gpu_id, script_dir, subprocess_print):
+            failed += 1
+    return failed
+
+
 def main() -> int:
     """
     Load config from env, build job list with strict order, assign to workers by len(GPU_PARALLEL).
@@ -395,36 +346,28 @@ def main() -> int:
     """
     task_to_coll, cfg_to_coll, gpu_parallel = load_config()
     subprocess_print = _parse_subprocess_print()
-    fail_seed_skip_threshold = _parse_fail_seed_skip_threshold()
 
     log_file = setup_logging()
     log = logging.getLogger("main")
     log.info("[main] Log file: %s", log_file)
-    log.info("[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s FAIL_SEED_SKIP_THRESHOLD=%s",
-             task_to_coll, cfg_to_coll, gpu_parallel, subprocess_print, fail_seed_skip_threshold)
+    log.info("[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
+             task_to_coll, cfg_to_coll, gpu_parallel, subprocess_print)
 
-    # Order: for each CFG, all TASKs (CFG outer, TASK inner).
+    # Order: for each CFG, all TASKs (CFG outer, TASK inner); pair (task, cfg) for run_collect_data_sh.
     product = [(task, cfg) for cfg in cfg_to_coll for task in task_to_coll]
     if not product:
         log.warning("[main] Empty Cartesian product; nothing to run.")
         return 0
 
     n_workers = len(gpu_parallel)
-    # Dynamic refill: keep pool busy with up to n_workers jobs at all times.
-    # GPU assignment follows submission order (round-robin over GPU_PARALLEL).
-    job_args = []
-    for i, (task, cfg) in enumerate(product):
-        gpu_id = gpu_parallel[i % n_workers]
-        job_args.append(
-            (
-                task,
-                cfg,
-                gpu_id,
-                SCRIPT_DIR,
-                subprocess_print,
-                fail_seed_skip_threshold,
-            )
-        )
+    worker_jobs = [[] for _ in range(n_workers)]
+    for i, pair in enumerate(product):
+        worker_jobs[i % n_workers].append(pair)
+
+    args_list = [
+        (worker_jobs[i], gpu_parallel[i], SCRIPT_DIR, subprocess_print)
+        for i in range(n_workers)
+    ]
     # Process group: main is group leader so we control shutdown; workers get own group in initializer.
     try:
         os.setpgid(0, 0)
@@ -440,10 +383,9 @@ def main() -> int:
         pool.join()
         os._exit(exit_code)
 
-    os.environ["COLLECT_FLOW_MAIN_PID"] = str(os.getpid())
     pool = mp.Pool(processes=n_workers, initializer=_worker_init)
     try:
-        results_obj = pool.starmap_async(run_collect_data_sh, job_args)
+        results_obj = pool.starmap_async(worker, args_list)
         results = None
         while True:
             if shutdown_event.is_set():
@@ -459,7 +401,7 @@ def main() -> int:
         pool.close()
         pool.join()
 
-    total_failed = sum(0 if ok else 1 for ok in results)
+    total_failed = sum(results)
     if total_failed > 0:
         log.error("[main] Done. %s task(s) failed.", total_failed)
         return 1

@@ -101,6 +101,10 @@ class Base_Task(gym.Env):
 
         self.save_freq = kwags.get("save_freq")
         self.world_pcd = None
+        # ======== CUSTOM FIX ========
+        # if self.save_data:
+        #     self.folder_path = {"cache": f"{self.save_dir}/.cache/episode{self.ep_num}/"}
+        # ============================
 
         self.size_dict = list()
         self.cluttered_objs = list()
@@ -112,8 +116,10 @@ class Base_Task(gym.Env):
         self.need_plan = kwags.get("need_plan", True)
         self.left_joint_path = kwags.get("left_joint_path", [])
         self.right_joint_path = kwags.get("right_joint_path", [])
+        # ======== CUSTOM FIX ========
         self.left_cnt = 0
         self.right_cnt = 0
+        # ============================
 
         self.instruction = None  # for Eval
 
@@ -158,6 +164,14 @@ class Base_Task(gym.Env):
 
         self.stage_success_tag = False
 
+        # ========== CUSTOM MODIFICATION ==========
+        # Apply end-reset wrapper once per instance (config from kwags); no change needed in collect_data/eval scripts.
+        if not getattr(self, "_end_reset_wrapped", False):
+            from ._end_reset_wrapper import with_end_reset, get_end_reset_to_init
+            with_end_reset(self, get_end_reset_to_init(kwags))
+            self._end_reset_wrapped = True
+        # =========================================
+        
     def check_stable(self):
         actors_list, actors_pose_list = [], []
         for actor in self.scene.get_all_actors():
@@ -178,13 +192,13 @@ class Base_Task(gym.Env):
             for idx, actor in enumerate(actors_list):
                 final_pose = actors_pose_list[idx][-1]
                 for pose in actors_pose_list[idx][-200:]:
-                    if get_sim(final_pose, pose) > 3.0:
+                    if get_sim(final_pose, pose) > 5.0:
                         is_stable = False
                         unstable_list.append(actor.get_name())
                         break
 
         is_stable = True
-        for _ in range(2000):
+        for _ in range(3500):
             self.scene.step()
         for idx, actor in enumerate(actors_list):
             actors_pose_list.append([actor.get_pose()])
@@ -571,6 +585,8 @@ class Base_Task(gym.Env):
         self.need_plan = args.get("need_plan", True)
         self.left_joint_path = args.get("left_joint_path", [])
         self.right_joint_path = args.get("right_joint_path", [])
+        self.left_cnt = 0
+        self.right_cnt = 0
 
     def _set_eval_video_ffmpeg(self, ffmpeg):
         self.eval_video_ffmpeg = ffmpeg
