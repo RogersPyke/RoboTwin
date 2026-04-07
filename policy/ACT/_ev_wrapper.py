@@ -142,6 +142,13 @@ def main(argv: list) -> int:
     parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
     parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
     parser.add_argument("--test-num", dest="test_num", type=int, required=False, help="Optional eval test_num override.")
+    parser.add_argument(
+        "--end-reset-to-init",
+        dest="end_reset_to_init",
+        type=str,
+        required=False,
+        help="Optional END_RESET_TO_INIT override: true/false (ACT_FLOW_END_RESET_TO_INIT from __flow.py).",
+    )
     args = parser.parse_args(argv[1:])
 
     act_dir = os.path.dirname(os.path.abspath(__file__))
@@ -161,9 +168,8 @@ def main(argv: list) -> int:
         gpu_source = "YAML:EVAL_GPU_ID"
         test_num = int(cfg.get("TEST_NUM", 100))
         test_num_source = "YAML:TEST_NUM/default"
-        if test_num < 1:
-            raise ValueError("TEST_NUM must be >= 1")
         end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
+        er_source = "YAML:END_RESET_TO_INIT"
         env_seed = os.environ.get("ACT_FLOW_SEED", "").strip()
         env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
         env_test_num = os.environ.get("ACT_FLOW_TEST_NUM", "").strip()
@@ -185,16 +191,24 @@ def main(argv: list) -> int:
         elif env_test_num:
             test_num = int(env_test_num)
             test_num_source = "FLOW_ENV:ACT_FLOW_TEST_NUM"
+        if args.end_reset_to_init is not None:
+            end_reset_to_init = _to_cli_bool(args.end_reset_to_init)
+            er_source = "CLI:--end-reset-to-init"
+        elif os.environ.get("ACT_FLOW_END_RESET_TO_INIT", "").strip():
+            end_reset_to_init = _to_cli_bool(os.environ["ACT_FLOW_END_RESET_TO_INIT"])
+            er_source = "FLOW_ENV:ACT_FLOW_END_RESET_TO_INIT"
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
         logger.info(
-            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
+            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s), END_RESET_TO_INIT=%s (%s)",
             seed,
             seed_source,
             gpu_id,
             gpu_source,
             test_num,
             test_num_source,
+            end_reset_to_init,
+            er_source,
         )
 
         repo_root = os.path.abspath(os.path.join(act_dir, "..", ".."))

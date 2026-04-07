@@ -5,6 +5,9 @@ DP multi-task eval wrapper.
 Usage: python3 _ev_wrapper.py <cfg_name>
        python3 _ev_wrapper.py --config <cfg_name>
 Config file: _ev_cfg/<cfg_name>.yaml
+
+Runtime precedence: CLI > DP_FLOW_* env (e.g. from policy/DP/__flow.py) > YAML.
+TRAIN_TASKS and EVAL_TASKS are always taken from YAML only.
 """
 
 import argparse
@@ -82,6 +85,34 @@ def main(argv: list) -> int:
     parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
     parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
     parser.add_argument("--test-num", dest="test_num", type=int, required=False, help="Optional eval test_num override.")
+    parser.add_argument(
+        "--checkpoint-num",
+        dest="checkpoint_num",
+        type=int,
+        required=False,
+        help="Optional CHECKPOINT_NUM override (DP_FLOW_CHECKPOINT_NUM in __flow.py).",
+    )
+    parser.add_argument(
+        "--head-camera-type",
+        dest="head_camera_type",
+        type=str,
+        required=False,
+        help="Optional EVAL_HEAD_CAMERA_TYPE override (DP_FLOW_EVAL_HEAD_CAMERA_TYPE).",
+    )
+    parser.add_argument(
+        "--end-reset-to-init",
+        dest="end_reset_to_init",
+        type=str,
+        required=False,
+        help="Optional END_RESET_TO_INIT override: true/false (DP_FLOW_END_RESET_TO_INIT).",
+    )
+    parser.add_argument(
+        "--checkpoint-expert-data-num",
+        dest="checkpoint_expert_data_num",
+        type=int,
+        required=False,
+        help="Optional CHECKPOINT_EXPERT_DATA_NUM override (DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM).",
+    )
     args = parser.parse_args(argv[1:])
 
     dp_dir = os.path.dirname(os.path.abspath(__file__))
@@ -95,6 +126,8 @@ def main(argv: list) -> int:
         cfg = _load_ev_cfg(dp_dir, cfg_name)
         train_rows = _parse_task_rows(cfg, "TRAIN_TASKS")
         eval_rows = _parse_task_rows(cfg, "EVAL_TASKS")
+        train_total_episodes = int(sum([row[2] for row in train_rows]))
+
         seed = int(cfg["EVAL_SEED"])
         seed_source = "YAML:EVAL_SEED"
         gpu_id = str(cfg["EVAL_GPU_ID"])
@@ -102,10 +135,18 @@ def main(argv: list) -> int:
         env_seed = os.environ.get("DP_FLOW_SEED", "").strip()
         env_gpu = os.environ.get("DP_FLOW_GPU", "").strip()
         env_test_num = os.environ.get("DP_FLOW_TEST_NUM", "").strip()
+
         checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
+        ck_source = "YAML:CHECKPOINT_NUM/default"
         head_camera_type = str(cfg.get("EVAL_HEAD_CAMERA_TYPE", "D435"))
+        hc_source = "YAML:EVAL_HEAD_CAMERA_TYPE/default"
         test_num = int(cfg.get("TEST_NUM", 100))
         test_num_source = "YAML:TEST_NUM/default"
+        checkpoint_expert_data_num = int(cfg.get("CHECKPOINT_EXPERT_DATA_NUM", train_total_episodes))
+        ced_source = "YAML:CHECKPOINT_EXPERT_DATA_NUM/default"
+        end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
+        er_source = "YAML:END_RESET_TO_INIT"
+
         if args.seed is not None:
             seed = int(args.seed)
             seed_source = "CLI:--seed"
@@ -124,23 +165,56 @@ def main(argv: list) -> int:
         elif env_test_num:
             test_num = int(env_test_num)
             test_num_source = "FLOW_ENV:DP_FLOW_TEST_NUM"
+
+        if args.checkpoint_num is not None:
+            checkpoint_num = int(args.checkpoint_num)
+            ck_source = "CLI:--checkpoint-num"
+        elif os.environ.get("DP_FLOW_CHECKPOINT_NUM", "").strip():
+            checkpoint_num = int(os.environ["DP_FLOW_CHECKPOINT_NUM"].strip())
+            ck_source = "FLOW_ENV:DP_FLOW_CHECKPOINT_NUM"
+        if args.head_camera_type is not None:
+            head_camera_type = str(args.head_camera_type).strip()
+            hc_source = "CLI:--head-camera-type"
+        elif os.environ.get("DP_FLOW_EVAL_HEAD_CAMERA_TYPE", "").strip():
+            head_camera_type = os.environ["DP_FLOW_EVAL_HEAD_CAMERA_TYPE"].strip()
+            hc_source = "FLOW_ENV:DP_FLOW_EVAL_HEAD_CAMERA_TYPE"
+        if args.checkpoint_expert_data_num is not None:
+            checkpoint_expert_data_num = int(args.checkpoint_expert_data_num)
+            ced_source = "CLI:--checkpoint-expert-data-num"
+        elif os.environ.get("DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM", "").strip():
+            checkpoint_expert_data_num = int(os.environ["DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM"].strip())
+            ced_source = "FLOW_ENV:DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM"
+        if args.end_reset_to_init is not None:
+            end_reset_to_init = _to_cli_bool(args.end_reset_to_init)
+            er_source = "CLI:--end-reset-to-init"
+        elif os.environ.get("DP_FLOW_END_RESET_TO_INIT", "").strip():
+            end_reset_to_init = _to_cli_bool(os.environ["DP_FLOW_END_RESET_TO_INIT"])
+            er_source = "FLOW_ENV:DP_FLOW_END_RESET_TO_INIT"
+
         if test_num < 1:
             raise ValueError("TEST_NUM must be >= 1")
-        end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
         logger.info(
-            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
+            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s), "
+            "checkpoint_num=%s (%s), head_camera=%s (%s), checkpoint_expert_data_num=%s (%s), "
+            "END_RESET_TO_INIT=%s (%s)",
             seed,
             seed_source,
             gpu_id,
             gpu_source,
             test_num,
             test_num_source,
+            checkpoint_num,
+            ck_source,
+            head_camera_type,
+            hc_source,
+            checkpoint_expert_data_num,
+            ced_source,
+            end_reset_to_init,
+            er_source,
         )
 
         train_task_slug = "__".join([row[0] for row in train_rows])
         train_config_slug = "__".join([row[1] for row in train_rows])
-        train_total_episodes = int(sum([row[2] for row in train_rows]))
-        checkpoint_expert_data_num = int(cfg.get("CHECKPOINT_EXPERT_DATA_NUM", train_total_episodes))
 
         env = os.environ.copy()
         env["CUDA_VISIBLE_DEVICES"] = gpu_id

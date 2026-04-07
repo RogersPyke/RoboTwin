@@ -78,7 +78,13 @@ def prepare_dp_flow_best_symlinks(
             train_config_slug = "__".join([r[1] for r in train_rows])
             train_total = int(sum(r[2] for r in train_rows))
             checkpoint_expert_data_num = int(cfg.get("CHECKPOINT_EXPERT_DATA_NUM", train_total))
+            v_ced = os.environ.get("DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM", "").strip()
+            if v_ced:
+                checkpoint_expert_data_num = int(v_ced)
             checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
+            v_ck = os.environ.get("DP_FLOW_CHECKPOINT_NUM", "").strip()
+            if v_ck:
+                checkpoint_num = int(v_ck)
             seed = _resolve_seed("DP_FLOW_SEED", flow_seed, int(cfg["EVAL_SEED"]))
             rel_dir = (
                 Path("policy/DP/checkpoints")

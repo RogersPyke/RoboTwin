@@ -6,9 +6,11 @@ Eval-only flow scheduler (ev branch): parallel bash _eval.sh <stem> per EVAL_STE
 Runtime precedence for eval wrappers:
 CLI args > FLOW env injected by this file > YAML in _ev_cfg/.
 
-Injected env:
+Injected env (child _eval.sh -> _ev_wrapper.py; YAML default except TRAIN_TASKS/EVAL_TASKS):
 - ACT_FLOW_GPU, ACT_FLOW_SLOT, ACT_FLOW_STEM, ACT_FLOW_PHASE (=eval)
-- ACT_FLOW_SEED, ACT_FLOW_TEST_NUM (optional; from FLOW_* constants below)
+- ACT_FLOW_SEED, ACT_FLOW_TEST_NUM, ACT_FLOW_END_RESET_TO_INIT (optional; from FLOW_* below)
+
+Precedence: CLI > ACT_FLOW_* > YAML for overridable eval keys (task lists stay in YAML only).
 """
 
 import atexit
@@ -42,6 +44,11 @@ from early_stop_util.flow_eval_best_symlinks import prepare_act_flow_best_symlin
 PARALLEL = [0, 0]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
+# Optional YAML overrides (None = use _ev_cfg/<stem>.yaml). ACT eval has no DP-style checkpoint/camera keys.
+FLOW_CHECKPOINT_NUM = None
+FLOW_EVAL_HEAD_CAMERA_TYPE = None
+FLOW_END_RESET_TO_INIT = None
+FLOW_CHECKPOINT_EXPERT_DATA_NUM = None
 
 # Ordered FIFO: each stem matches _ev_cfg/<stem>.yaml
 EVAL_STEMS = [
@@ -58,6 +65,20 @@ EVAL_STEMS = [
     "flow_single_unhanging_mug",
     "flow_joint_hanging_mug",
 ]
+
+
+def _act_flow_scheduler_overrides() -> Dict[str, str]:
+    """
+    Keys merged into os.environ for child _ev_wrapper. TRAIN_TASKS / EVAL_TASKS are YAML-only.
+    """
+    out: Dict[str, str] = {}
+    if FLOW_SEED is not None:
+        out["ACT_FLOW_SEED"] = str(FLOW_SEED)
+    if FLOW_TEST_NUM is not None:
+        out["ACT_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
+    if FLOW_END_RESET_TO_INIT is not None:
+        out["ACT_FLOW_END_RESET_TO_INIT"] = "true" if bool(FLOW_END_RESET_TO_INIT) else "false"
+    return out
 
 
 @dataclass
@@ -124,10 +145,6 @@ def start_slot_job(
     slot_env["ACT_FLOW_SLOT"] = str(slot)
     slot_env["ACT_FLOW_STEM"] = stem
     slot_env["ACT_FLOW_PHASE"] = "eval"
-    if FLOW_SEED is not None:
-        slot_env["ACT_FLOW_SEED"] = str(FLOW_SEED)
-    if FLOW_TEST_NUM is not None:
-        slot_env["ACT_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
 
     logs = ensure_logs_dir(BASE_DIR)
     ts = utc8_now_str()
@@ -187,10 +204,12 @@ def main() -> int:
         print("[flow] PARALLEL is empty", file=sys.stderr)
         return 1
 
+    os.environ.update(_act_flow_scheduler_overrides())
     env = inject_flow_child_env(os.environ.copy())
     print(
         f"[flow][eval-only] PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} "
-        f"FLOW_TEST_NUM={FLOW_TEST_NUM} EVAL_STEMS={len(EVAL_STEMS)}",
+        f"FLOW_TEST_NUM={FLOW_TEST_NUM} FLOW_END_RESET_TO_INIT={FLOW_END_RESET_TO_INIT} "
+        f"EVAL_STEMS={len(EVAL_STEMS)}",
         flush=True,
     )
     try:

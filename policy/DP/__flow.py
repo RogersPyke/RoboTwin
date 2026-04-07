@@ -6,9 +6,12 @@ Eval-only flow scheduler (ev branch): parallel bash _eval.sh <stem> per EVAL_STE
 Runtime precedence for eval wrappers:
 CLI args > FLOW env injected by this file > YAML in _ev_cfg/.
 
-Injected env:
+Injected env (child _eval.sh -> _ev_wrapper.py; YAML is default except TRAIN_TASKS/EVAL_TASKS):
 - DP_FLOW_GPU, DP_FLOW_SLOT, DP_FLOW_STEM, DP_FLOW_PHASE (=eval)
-- DP_FLOW_SEED, DP_FLOW_TEST_NUM (optional; from FLOW_* constants below)
+- DP_FLOW_SEED, DP_FLOW_TEST_NUM, DP_FLOW_CHECKPOINT_NUM, DP_FLOW_EVAL_HEAD_CAMERA_TYPE,
+  DP_FLOW_END_RESET_TO_INIT, DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM (optional; from FLOW_* below)
+
+Precedence: CLI > DP_FLOW_* > YAML for all overridable eval keys.
 """
 
 import atexit
@@ -38,9 +41,14 @@ from flow_log_util.flow_log import (
 )
 from early_stop_util.flow_eval_best_symlinks import prepare_dp_flow_best_symlinks
 
-PARALLEL = [1, 1]
+PARALLEL = [0, 0, 1, 1]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
+# Optional YAML overrides (None = use _ev_cfg/<stem>.yaml for that key).
+FLOW_CHECKPOINT_NUM = None
+FLOW_EVAL_HEAD_CAMERA_TYPE = None
+FLOW_END_RESET_TO_INIT = False
+FLOW_CHECKPOINT_EXPERT_DATA_NUM = None
 
 EVAL_STEMS = [
     "flow_single_move_pillbottle_pad",
@@ -56,6 +64,27 @@ EVAL_STEMS = [
     "flow_single_unhanging_mug",
     "flow_joint_hanging_mug",
 ]
+
+
+def _dp_flow_scheduler_overrides() -> Dict[str, str]:
+    """
+    Keys merged into os.environ (and thus child _ev_wrapper) from __flow.py constants.
+    TRAIN_TASKS / EVAL_TASKS are never set here; they always come from _ev_cfg/*.yaml.
+    """
+    out: Dict[str, str] = {}
+    if FLOW_SEED is not None:
+        out["DP_FLOW_SEED"] = str(FLOW_SEED)
+    if FLOW_TEST_NUM is not None:
+        out["DP_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
+    if FLOW_CHECKPOINT_NUM is not None:
+        out["DP_FLOW_CHECKPOINT_NUM"] = str(int(FLOW_CHECKPOINT_NUM))
+    if FLOW_EVAL_HEAD_CAMERA_TYPE is not None:
+        out["DP_FLOW_EVAL_HEAD_CAMERA_TYPE"] = str(FLOW_EVAL_HEAD_CAMERA_TYPE).strip()
+    if FLOW_END_RESET_TO_INIT is not None:
+        out["DP_FLOW_END_RESET_TO_INIT"] = "true" if bool(FLOW_END_RESET_TO_INIT) else "false"
+    if FLOW_CHECKPOINT_EXPERT_DATA_NUM is not None:
+        out["DP_FLOW_CHECKPOINT_EXPERT_DATA_NUM"] = str(int(FLOW_CHECKPOINT_EXPERT_DATA_NUM))
+    return out
 
 
 @dataclass
@@ -122,10 +151,6 @@ def start_slot_job(
     slot_env["DP_FLOW_SLOT"] = str(slot)
     slot_env["DP_FLOW_STEM"] = stem
     slot_env["DP_FLOW_PHASE"] = "eval"
-    if FLOW_SEED is not None:
-        slot_env["DP_FLOW_SEED"] = str(FLOW_SEED)
-    if FLOW_TEST_NUM is not None:
-        slot_env["DP_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
 
     logs = ensure_logs_dir(BASE_DIR)
     ts = utc8_now_str()
@@ -185,10 +210,12 @@ def main() -> int:
         print("[flow] PARALLEL is empty", file=sys.stderr)
         return 1
 
+    os.environ.update(_dp_flow_scheduler_overrides())
     env = inject_flow_child_env(os.environ.copy())
     print(
         f"[flow][eval-only] PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} "
-        f"FLOW_TEST_NUM={FLOW_TEST_NUM} EVAL_STEMS={len(EVAL_STEMS)}",
+        f"FLOW_TEST_NUM={FLOW_TEST_NUM} FLOW_CHECKPOINT_NUM={FLOW_CHECKPOINT_NUM} "
+        f"EVAL_STEMS={len(EVAL_STEMS)}",
         flush=True,
     )
     try:

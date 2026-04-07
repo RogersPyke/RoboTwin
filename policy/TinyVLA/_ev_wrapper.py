@@ -279,10 +279,11 @@ def _merge_tvla_flow_eval_runtime(
     cli_seed: Optional[int] = None,
     cli_gpu_id: Optional[str] = None,
     cli_test_num: Optional[int] = None,
+    cli_end_reset_to_init: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     @input: [dict, raw eval yaml], [optional CLI overrides]
-    @output: [dict, copy with resolved EVAL_SEED / EVAL_GPU_ID / EVAL_TEST_NUM]
+    @output: [dict, copy with resolved EVAL_SEED / EVAL_GPU_ID / EVAL_TEST_NUM / END_RESET_TO_INIT]
     @scenario: [CLI > TVLA_FLOW_* > YAML]
     """
     runtime = dict(ev_cfg)
@@ -319,15 +320,27 @@ def _merge_tvla_flow_eval_runtime(
     if test_num is not None:
         runtime["EVAL_TEST_NUM"] = test_num
 
+    er_source = "YAML:END_RESET_TO_INIT"
+    if cli_end_reset_to_init is not None:
+        runtime["END_RESET_TO_INIT"] = cli_end_reset_to_init
+        er_source = "CLI:--end-reset-to-init"
+    elif os.environ.get("TVLA_FLOW_END_RESET_TO_INIT", "").strip():
+        runtime["END_RESET_TO_INIT"] = os.environ["TVLA_FLOW_END_RESET_TO_INIT"].strip()
+        er_source = "FLOW_ENV:TVLA_FLOW_END_RESET_TO_INIT"
+
     if LOGGER is not None:
+        end_disp = _resolve_eval_end_reset_to_init(runtime)
         LOGGER.info(
-            "Resolved eval runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
+            "Resolved eval runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s), "
+            "END_RESET_TO_INIT=%s (%s)",
             eval_seed,
             seed_source,
             eval_gpu_id,
             gpu_source,
             test_num,
             test_source,
+            end_disp,
+            er_source,
         )
     return runtime
 
@@ -339,6 +352,7 @@ def _run_eval(
     cli_seed: Optional[int] = None,
     cli_gpu_id: Optional[str] = None,
     cli_test_num: Optional[int] = None,
+    cli_end_reset_to_init: Optional[str] = None,
 ) -> int:
     """
     @input: [str, tinyvla_dir], [str, cfg_name], [optional CLI overrides]
@@ -356,6 +370,7 @@ def _run_eval(
         cli_seed=cli_seed,
         cli_gpu_id=cli_gpu_id,
         cli_test_num=cli_test_num,
+        cli_end_reset_to_init=cli_end_reset_to_init,
     )
     contract = _resolve_eval_contract(tinyvla_dir, runtime_cfg)
 
@@ -445,6 +460,13 @@ def main(argv: List[str]) -> int:
         required=False,
         help="Optional rollout count override (eval_policy --test_num).",
     )
+    parser.add_argument(
+        "--end-reset-to-init",
+        dest="end_reset_to_init",
+        type=str,
+        required=False,
+        help="Optional END_RESET_TO_INIT override: true/false (TVLA_FLOW_END_RESET_TO_INIT from __flow.py).",
+    )
     args = parser.parse_args(argv[1:])
 
     tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
@@ -461,6 +483,7 @@ def main(argv: List[str]) -> int:
             cli_seed=args.seed,
             cli_gpu_id=args.gpu_id,
             cli_test_num=args.test_num,
+            cli_end_reset_to_init=args.end_reset_to_init,
         )
     except Exception:
         if LOGGER is not None:
