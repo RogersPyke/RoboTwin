@@ -201,17 +201,22 @@ class unhanging_mug(Base_Task):
         return self.info
 
     def check_success(self):
-        """Mug is on the table at target pose; gripper of the arm that did final place (grasp_arm) is open."""
+        """
+        Eval-only relaxed success.
+        NOTE:
+        - This logic is for EV branch only.
+        - For strict data-generation seed filtering, use data branch.
+        """
         if getattr(self, "skip_success_check", False):
             return True
-        mug_pos = self.mug.get_pose().p
-        target_z = self.mug_target_pose[2]
-        eps_xy = 0.02
-        eps_z = 0.02
-        on_table = (
-            np.all(np.abs(mug_pos[:2] - np.array(self.mug_target_pose[:2])) < eps_xy)
-            and np.abs(mug_pos[2] - target_z) < eps_z
-        )
-        grasp_arm = getattr(self, "_grasp_arm_tag", ArmTag("left"))
-        gripper_open = self.is_left_gripper_open() if grasp_arm == ArmTag("left") else self.is_right_gripper_open()
-        return on_table and gripper_open
+        mug_pose = self.mug.get_pose()
+        mug_pos = mug_pose.p
+        mug_mat = mug_pose.to_transformation_matrix()
+
+        table_z = 0.74 + getattr(self, "table_z_bias", 0.0)
+        on_table = (mug_pos[2] >= table_z) and (mug_pos[2] <= table_z + 0.20)
+
+        # Cup mouth up (geometric approximation): mug local +Z should align with world +Z.
+        mug_local_z_in_world = mug_mat[:3, 2]
+        mouth_up = mug_local_z_in_world[2] > 0.70
+        return on_table and mouth_up

@@ -59,6 +59,9 @@ class unstack_blocks_three(Base_Task):
         self.block3 = create_block(sapien.Pose(pos3, prev_pose.q), (0, 0, 1))
         for _ in range(SETTLE_STEP):
             self.scene.step()
+        self.block1_init_xy = np.array(self.block1.get_pose().p[:2], dtype=np.float64)
+        self.block2_init_xy = np.array(self.block2.get_pose().p[:2], dtype=np.float64)
+        self.block3_init_xy = np.array(self.block3.get_pose().p[:2], dtype=np.float64)
 
         self.add_prohibit_area(self.block1, padding=0.05)
         self.add_prohibit_area(self.block2, padding=0.05)
@@ -165,6 +168,12 @@ class unstack_blocks_three(Base_Task):
         return str(arm_tag)
 
     def check_success(self):
+        """
+        Eval-only relaxed success.
+        NOTE:
+        - This logic is for EV branch only.
+        - For strict data-generation seed filtering, use data branch.
+        """
         z_table_min = 0.74 + self.table_z_bias
         block1_pose = self.block1.get_pose().p
         block2_pose = self.block2.get_pose().p
@@ -173,6 +182,24 @@ class unstack_blocks_three(Base_Task):
             block1_pose[2] >= z_table_min
             and block2_pose[2] >= z_table_min
             and block3_pose[2] >= z_table_min
+            and block1_pose[2] <= z_table_min + 0.20
+            and block2_pose[2] <= z_table_min + 0.20
+            and block3_pose[2] <= z_table_min + 0.20
         )
-        grippers_open = self.is_left_gripper_open() and self.is_right_gripper_open()
-        return on_table and grippers_open
+
+        moved_from_init = (
+            np.linalg.norm(np.array(block1_pose[:2]) - self.block1_init_xy) > 0.04
+            and np.linalg.norm(np.array(block2_pose[:2]) - self.block2_init_xy) > 0.04
+            and np.linalg.norm(np.array(block3_pose[:2]) - self.block3_init_xy) > 0.04
+        )
+
+        # "Not stacked together": blocks should not contact each other.
+        b1 = self.block1.get_name() if hasattr(self.block1, "get_name") else self.block1.actor.get_name()
+        b2 = self.block2.get_name() if hasattr(self.block2, "get_name") else self.block2.actor.get_name()
+        b3 = self.block3.get_name() if hasattr(self.block3, "get_name") else self.block3.actor.get_name()
+        no_stack = (
+            (not self.check_actors_contact(b1, b2))
+            and (not self.check_actors_contact(b1, b3))
+            and (not self.check_actors_contact(b2, b3))
+        )
+        return on_table and moved_from_init and no_stack

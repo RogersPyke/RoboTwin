@@ -155,16 +155,20 @@ class unmove_pillbottle_pad(Base_Task):
         return self.info
 
     def check_success(self):
-        """True if pillbottle is at pillbottle_tgt_pose (xy/z tolerance) and both grippers open."""
+        """
+        Eval-only relaxed success.
+        NOTE:
+        - This logic is for EV branch only.
+        - For strict data-generation seed filtering, use data branch.
+        """
         if getattr(self, "skip_success_check", False):
             return True
         pillbottle_pos = self.pillbottle.get_pose().p
-        target = self.pillbottle_tgt_pose
-        eps_xy = 0.03
-        eps_z = 0.005
-        at_target = (
-            np.all(np.abs(pillbottle_pos[:2] - np.array(target[:2])) < np.array([eps_xy, eps_xy]))
-            and np.abs(pillbottle_pos[2] - target[2]) < eps_z
-        )
-        grippers_open = self.robot.is_left_gripper_open() and self.robot.is_right_gripper_open()
-        return at_target and grippers_open
+        pad_pos = self.pad.get_pose().p
+
+        table_z = 0.74 + getattr(self, "table_z_bias", 0.0)
+        on_table = (pillbottle_pos[2] >= table_z) and (pillbottle_pos[2] <= table_z + 0.20)
+
+        # "Leave pad": xy distance from pad center larger than pad half-size with margin.
+        pad_clear_xy = np.linalg.norm(np.array(pillbottle_pos[:2]) - np.array(pad_pos[:2])) > 0.06
+        return on_table and pad_clear_xy

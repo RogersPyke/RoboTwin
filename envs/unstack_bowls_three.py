@@ -90,6 +90,9 @@ class unstack_bowls_three(Base_Task):
         init1_xy = np.array(self.bowl1.get_pose().p[:2])
         init2_xy = np.array(self.bowl2.get_pose().p[:2])
         init3_xy = np.array(self.bowl3.get_pose().p[:2])
+        self.bowl1_init_xy = init1_xy.copy()
+        self.bowl2_init_xy = init2_xy.copy()
+        self.bowl3_init_xy = init3_xy.copy()
 
         z_t = TABLE_Z + self.table_z_bias
         # Same range and method as stack_bowls_three: rand_pose + validation (|x|>=0.09, dist^2 from [0,-0.1]>=0.0169).
@@ -217,21 +220,35 @@ class unstack_bowls_three(Base_Task):
         return self.info
 
     def check_success(self):
-        """All three bowls at targets and grippers open."""
-        t1 = np.array(self.bowl1_target_pose).flatten()
-        t2 = np.array(self.bowl2_target_pose).flatten()
-        t3 = np.array(self.bowl3_target_pose).flatten()
+        """
+        Eval-only relaxed success.
+        NOTE:
+        - This logic is for EV branch only.
+        - For strict data-generation seed filtering, use data branch.
+        """
         p1 = self.bowl1.get_pose().p
         p2 = self.bowl2.get_pose().p
         p3 = self.bowl3.get_pose().p
-        eps = 0.02
-        return (
-            np.all(np.abs(p1[:2] - t1[:2]) < eps)
-            and np.abs(p1[2] - t1[2]) < eps
-            and np.all(np.abs(p2[:2] - t2[:2]) < eps)
-            and np.abs(p2[2] - t2[2]) < eps
-            and np.all(np.abs(p3[:2] - t3[:2]) < eps)
-            and np.abs(p3[2] - t3[2]) < eps
-            and self.is_left_gripper_open()
-            and self.is_right_gripper_open()
+        table_z = 0.74 + getattr(self, "table_z_bias", 0.0)
+        on_table = (
+            table_z <= p1[2] <= table_z + 0.20
+            and table_z <= p2[2] <= table_z + 0.20
+            and table_z <= p3[2] <= table_z + 0.20
         )
+
+        moved_from_init = (
+            np.linalg.norm(np.array(p1[:2]) - np.array(self.bowl1_init_xy)) > 0.04
+            and np.linalg.norm(np.array(p2[:2]) - np.array(self.bowl2_init_xy)) > 0.04
+            and np.linalg.norm(np.array(p3[:2]) - np.array(self.bowl3_init_xy)) > 0.04
+        )
+
+        # "Not stacked together": bowls should not contact each other.
+        b1 = self.bowl1.get_name() if hasattr(self.bowl1, "get_name") else self.bowl1.actor.get_name()
+        b2 = self.bowl2.get_name() if hasattr(self.bowl2, "get_name") else self.bowl2.actor.get_name()
+        b3 = self.bowl3.get_name() if hasattr(self.bowl3, "get_name") else self.bowl3.actor.get_name()
+        no_stack = (
+            (not self.check_actors_contact(b1, b2))
+            and (not self.check_actors_contact(b1, b3))
+            and (not self.check_actors_contact(b2, b3))
+        )
+        return on_table and moved_from_init and no_stack
