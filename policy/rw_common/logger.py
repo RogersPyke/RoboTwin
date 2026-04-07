@@ -1,7 +1,7 @@
 """
 Shared helpers for policy __flow.py schedulers: per-job log files, child env, failure excerpts.
 
-Usage: imported from ACT/DP/TinyVLA __flow.py after adding policy/ to sys.path (package flow_log_util).
+Usage: imported from ACT/DP/TinyVLA __flow.py after adding policy/ to sys.path (package rw_common).
 """
 
 from __future__ import annotations

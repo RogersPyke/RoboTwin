@@ -6,7 +6,9 @@ import sys, os
 
 current_file_path = os.path.abspath(__file__)
 parent_dir = os.path.dirname(current_file_path)
-sys.path.append(parent_dir)
+# Prepend so this repo's diffusion_policy (incl. robotworkspace_early_stop) wins over any
+# older pip-installed diffusion_policy in site-packages (checkpoint cfg._target_ needs it).
+sys.path.insert(0, parent_dir)
 
 from diffusion_policy.workspace.robotworkspace import RobotWorkspace
 from diffusion_policy.env_runner.dp_runner import DPRunner

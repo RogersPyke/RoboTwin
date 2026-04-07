@@ -36,7 +36,7 @@ e = IPython.embed
 _POLICY_ROOT = Path(__file__).resolve().parents[1]
 if str(_POLICY_ROOT) not in sys.path:
     sys.path.insert(0, str(_POLICY_ROOT))
-from early_stop_util import RelativeEarlyStopTracker
+from rw_common.early_stop import RelativeEarlyStopTracker
 
 
 def main(args):

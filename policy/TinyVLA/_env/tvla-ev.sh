@@ -42,6 +42,12 @@ echo "[INFO] Rebuilding ${ENV_TARGET} from ${ENV_SOURCE}"
 conda env remove -n "${ENV_TARGET}" -y >/dev/null 2>&1 || true
 conda create -n "${ENV_TARGET}" --clone "${ENV_SOURCE}" -y
 
+# Pip must not overwrite conda-installed wheels for packages conda still tracks.
+# Otherwise conda-pack fails with "Files managed by conda were found to have been
+# deleted/overwritten" (common for tqdm/idna when pip upgrades them).
+echo "[INFO] Dropping conda-managed tqdm/idna so pip install -r owns them (conda-pack safe)"
+conda remove -n "${ENV_TARGET}" --force tqdm idna -y 2>/dev/null || true
+
 # Stage-1 requirements:
 #   Install directly from Eval_Tiny_DexVLA_requirements.txt.
 # Not listed in Eval_Tiny_DexVLA_requirements.txt on purpose:

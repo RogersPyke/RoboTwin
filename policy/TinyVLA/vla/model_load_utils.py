@@ -2,6 +2,7 @@ import torch
 
 import transformers
 import logging
+from typing import Optional
 from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig, Qwen2Tokenizer
 import warnings
 import os
@@ -229,6 +230,48 @@ def load_merge_lora_weights(model_path=None, model_base=None, kwargs=None):
     print('Model is loaded...')
     return model, tokenizer
 
+
+def _resolve_hf_pretrained_dir(model_path: str) -> str:
+    """
+    If output_dir root has no model.safetensors, use latest checkpoint-*/ that contains weights.
+    HF Trainer often saves only under checkpoint-* until final save.
+    """
+    mp = os.path.abspath(model_path)
+    if os.path.isfile(os.path.join(mp, "model.safetensors")):
+        return mp
+    best_dir = None
+    best_step = -1
+    try:
+        for name in os.listdir(mp):
+            if not name.startswith("checkpoint-"):
+                continue
+            suf = name[len("checkpoint-") :]
+            if not suf.isdigit():
+                continue
+            step = int(suf)
+            sub = os.path.join(mp, name)
+            if os.path.isfile(os.path.join(sub, "model.safetensors")) and step > best_step:
+                best_step = step
+                best_dir = sub
+    except OSError:
+        pass
+    if best_dir is not None:
+        print(f"[load_model_for_eval] resolved weights dir: {best_dir}")
+        return best_dir
+    return mp
+
+
+def _tokenizer_pretrained_dir(hf_dir: str, model_base: Optional[str]) -> str:
+    """Prefer tokenizer next to weights; fall back to backbone dir when missing."""
+    if os.path.isfile(os.path.join(hf_dir, "tokenizer.json")):
+        return hf_dir
+    if model_base:
+        mb = os.path.abspath(str(model_base))
+        if os.path.isfile(os.path.join(mb, "tokenizer.json")):
+            return mb
+    return hf_dir
+
+
 def load_model_for_eval(model_path, model_base, device_map="cuda:0", policy_config=None):
     kwargs = {"device_map": device_map, 'torch_dtype': torch.bfloat16}
 
@@ -261,10 +304,12 @@ def load_model_for_eval(model_path, model_base, device_map="cuda:0", policy_conf
 
     else:
         print(f"load {model_path}!!!")
-        config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True, use_fast=False)
+        hf_dir = _resolve_hf_pretrained_dir(model_path)
+        tok_dir = _tokenizer_pretrained_dir(hf_dir, model_base)
+        config = AutoConfig.from_pretrained(hf_dir, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(tok_dir, trust_remote_code=True, use_fast=False)
         model = AutoModelForCausalLM.from_pretrained(
-            model_path,
+            hf_dir,
             config=config,
             use_safetensors=True,
             **kwargs)
