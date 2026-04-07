@@ -26,6 +26,7 @@ policy/weights/*
 
 envs/curobo/*
 envs/contact_graspnet/*
+envs/flash-attention/
 envs/flash-attention/**
 
 .vscode
