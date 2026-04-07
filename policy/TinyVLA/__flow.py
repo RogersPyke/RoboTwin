@@ -48,12 +48,10 @@ from flow_log_util.flow_log import (
     utc8_now_str,
 )
 
-
-CATEGORY = "train"
-
 # Optional flow-level overrides. Keep None to use YAML defaults.
 TASK_CONFIG = "demo_clean"
 EXPERT_NUM = "100"
+# GPU id per parallel slot (CUDA_VISIBLE_DEVICES for that slot).
 PARALLEL = [2, 3]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
@@ -72,19 +70,19 @@ TASK_DATA = [
     "unhanging_mug",
 ]
 
-TASK_SEQ = [(CATEGORY, stem) for stem in [
+TASK_SEQ = [("train", stem) for stem in [
     "flow_single_move_pillbottle_pad",
     "flow_single_unmove_pillbottle_pad",
-    "flow_joint_move_pillbottle_pad",
+    # "flow_joint_move_pillbottle_pad",
     "flow_single_stack_bowls_three",
     "flow_single_unstack_bowls_three",
-    "flow_joint_stack_bowls_three",
+    # "flow_joint_stack_bowls_three",
     "flow_single_stack_blocks_three",
     "flow_single_unstack_blocks_three",
-    "flow_joint_stack_blocks_three",
+    # "flow_joint_stack_blocks_three",
     "flow_single_hanging_mug",
     "flow_single_unhanging_mug",
-    "flow_joint_hanging_mug",
+    # "flow_joint_hanging_mug",
 ]]
 
 
@@ -242,10 +240,7 @@ def start_slot_job(
     )
     lf.flush()
 
-    if phase == "train":
-        script = f"set -euo pipefail; bash _train.sh {stem!r}"
-    else:
-        script = f"set -euo pipefail; bash _eval.sh {stem!r}"
+    script = f"set -euo pipefail; bash _train.sh {stem!r}"
 
     print(
         f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "

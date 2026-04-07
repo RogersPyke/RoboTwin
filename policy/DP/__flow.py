@@ -46,12 +46,10 @@ from flow_log_util.flow_log import (
     utc8_now_str,
 )
 
-CATEGERY = "train"
-
 # Optional flow-level overrides. Keep None to use YAML defaults.
 TASK_CONFIG = "demo_clean"
 EXPERT_NUM = "100"
-PARALLEL = [1, 1, 1]
+PARALLEL = [1, 1]
 FLOW_SEED = 0
 FLOW_TEST_NUM = 50
 EVAL_STEPS_FOR_EARLY_STOP = 1000
@@ -70,20 +68,20 @@ TASK_DATA = [
     "unhanging_mug",
 ]
 
-# Ordered FIFO steps: (phase, stem). phase is "train" or "eval".
-TASK_SEQ = [(CATEGERY, stem) for stem in [
+# Ordered FIFO train-only steps.
+TASK_SEQ = [("train", stem) for stem in [
     "flow_single_move_pillbottle_pad",
     "flow_single_unmove_pillbottle_pad",
-    "flow_joint_move_pillbottle_pad",
+    # "flow_joint_move_pillbottle_pad",
     "flow_single_stack_bowls_three",
     "flow_single_unstack_bowls_three",
-    "flow_joint_stack_bowls_three",
+    # "flow_joint_stack_bowls_three",
     "flow_single_stack_blocks_three",
     "flow_single_unstack_blocks_three",
-    "flow_joint_stack_blocks_three",
+    # "flow_joint_stack_blocks_three",
     "flow_single_hanging_mug",
     "flow_single_unhanging_mug",
-    "flow_joint_hanging_mug",
+    # "flow_joint_hanging_mug",
 ]]
 
 
@@ -240,10 +238,7 @@ def start_slot_job(
     )
     lf.flush()
 
-    if phase == "train":
-        script = f"set -euo pipefail; bash _train.sh {stem!r}"
-    else:
-        script = f"set -euo pipefail; bash _eval.sh {stem!r}"
+    script = f"set -euo pipefail; bash _train.sh {stem!r}"
 
     print(
         f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
