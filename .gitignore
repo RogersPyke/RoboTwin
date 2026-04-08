@@ -1,6 +1,6 @@
 models/
-data/*
-data-rev/*
+data/**
+data-rev/**
 !data/process_stuck.py
 __pycache__/
 **.pyc

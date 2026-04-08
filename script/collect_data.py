@@ -232,6 +232,13 @@ def run(TASK_ENV, args):
                 info_db = json.load(file)
 
             info = TASK_ENV.play_once()
+            # Attach pert_meta from PerturbationMixin if present (pert tasks only).
+            pert_meta = getattr(TASK_ENV, "_pert_meta", None)
+            if pert_meta is not None:
+                info["pert_meta"] = {
+                    k: (v if not hasattr(v, "tolist") else v.tolist())
+                    for k, v in pert_meta.items()
+                }
             info_db[f"episode_{episode_idx}"] = info
 
             with open(info_file_path, "w", encoding="utf-8") as file:
