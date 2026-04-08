@@ -32,10 +32,10 @@ from typing import Dict, List, TextIO
 
 BASE_DIR = Path(__file__).resolve().parent
 
-_POLICY_ROOT = Path(__file__).resolve().parent.parent
-if str(_POLICY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_POLICY_ROOT))
-from flow_log_util.flow_log import (
+_POLICY_UTIL_ROOT = Path(__file__).resolve().parent.parent.parent / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
+from log_util.flow_log import (
     bash_lc_cmd,
     dump_log_tail_to_stderr,
     ensure_logs_dir,

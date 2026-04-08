@@ -33,10 +33,11 @@ import IPython
 
 e = IPython.embed
 
-_POLICY_ROOT = Path(__file__).resolve().parents[1]
-if str(_POLICY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_POLICY_ROOT))
+_POLICY_UTIL_ROOT = Path(__file__).resolve().parent.parent.parent / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
 from early_stop_util import RelativeEarlyStopTracker
+from log_util.tr_log import print_relative_early_stop_val_line
 
 
 def main(args):
@@ -452,12 +453,17 @@ def train_bc(train_dataloader, val_dataloader, config):
                 else float(epoch_val_loss)
             )
             last_val_loss = float(epoch_val_loss_f)
-            print(f"Val loss:   {epoch_val_loss_f:.5f}")
 
             # ==== Early stop tracking ====
             decision = early_stop.on_eval(
                 step=int(total_train_steps),
                 val_loss=epoch_val_loss_f,
+            )
+            print_relative_early_stop_val_line(
+                "ACT",
+                int(total_train_steps),
+                float(epoch_val_loss_f),
+                decision,
             )
             if decision.improved:
                 # Design: best checkpoint saving is ONLY triggered by best-val refresh.
@@ -511,11 +517,16 @@ def train_bc(train_dataloader, val_dataloader, config):
                     else float(epoch_val_loss)
                 )
                 last_val_loss = float(epoch_val_loss_f)
-                print(f"Val loss @ step{total_train_steps}: {epoch_val_loss_f:.5f}")
 
                 decision = early_stop.on_eval(
                     step=int(total_train_steps),
                     val_loss=epoch_val_loss_f,
+                )
+                print_relative_early_stop_val_line(
+                    "ACT",
+                    int(total_train_steps),
+                    float(epoch_val_loss_f),
+                    decision,
                 )
                 if decision.improved:
                     # Design: best checkpoint saving is ONLY triggered by best-val refresh.
@@ -528,11 +539,6 @@ def train_bc(train_dataloader, val_dataloader, config):
                     )
                     best_ckpt_path = os.path.join(ckpt_dir, "policy_best.ckpt")
                     torch.save(policy.state_dict(), best_ckpt_path)
-                else:
-                    print(
-                        f"Val loss @ step{total_train_steps}: {epoch_val_loss_f:.5f} "
-                        f"(no improve #{decision.no_improve_count})"
-                    )
 
                 policy.train()
                 if decision.should_stop:

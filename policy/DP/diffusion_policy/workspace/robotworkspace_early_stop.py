@@ -16,10 +16,11 @@ from diffusion_policy.model.diffusion.ema_model import EMAModel
 from diffusion_policy.dataset.base_dataset import BaseImageDataset
 from diffusion_policy.workspace.robotworkspace import RobotWorkspace, create_dataloader
 
-_POLICY_ROOT = pathlib.Path(__file__).resolve().parents[3]
-if str(_POLICY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_POLICY_ROOT))
+_POLICY_UTIL_ROOT = pathlib.Path(__file__).resolve().parents[4] / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
 from early_stop_util import RelativeEarlyStopTracker
+from log_util.tr_log import print_epoch_val_line, print_relative_early_stop_val_line
 
 
 OmegaConf.register_new_resolver("eval", eval, replace=True)
@@ -230,30 +231,17 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                             decision.rel_improve
                                         )
 
+                                    print_relative_early_stop_val_line(
+                                        "DP",
+                                        int(self.train_optimizer_steps),
+                                        float(val_loss_f),
+                                        decision,
+                                    )
                                     if decision.improved:
                                         # Design: best checkpoint saving is ONLY triggered by best-val refresh.
-                                        if decision.rel_improve is None:
-                                            print(
-                                                f"Val loss @ step{self.train_optimizer_steps}: "
-                                                f"{float(val_loss_f):.5f}",
-                                                flush=True,
-                                            )
-                                        else:
-                                            print(
-                                                f"Val loss @ step{self.train_optimizer_steps}: "
-                                                f"{float(val_loss_f):.5f} (improved)",
-                                                flush=True,
-                                            )
                                         self.save_checkpoint(
                                             path=f"{ckpt_rel_dir}/best_val.ckpt",
                                             use_thread=False,
-                                        )
-                                    else:
-                                        print(
-                                            f"Val loss @ step{self.train_optimizer_steps}: "
-                                            f"{float(val_loss_f):.5f} (no improve "
-                                            f"#{self.early_stop_no_improve_evals})",
-                                            flush=True,
                                         )
 
                                     if decision.should_stop:
@@ -348,7 +336,11 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                             )
                             if decision.rel_improve is not None:
                                 step_log["early_stop_rel_improve"] = float(decision.rel_improve)
-                            print(f"Val loss:   {float(val_loss):.5f}", flush=True)
+                            print_epoch_val_line(
+                                "DP",
+                                int(self.train_optimizer_steps),
+                                float(val_loss),
+                            )
                             if decision.improved:
                                 self.save_checkpoint(
                                     path=f"{ckpt_rel_dir}/best_val.ckpt",

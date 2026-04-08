@@ -8,7 +8,7 @@ Purpose:
 
 Dependencies:
 - transformers TrainerCallback
-- early_stop_util.RelativeEarlyStopTracker (RoboTwin policy root on sys.path)
+- early_stop_util.RelativeEarlyStopTracker (RoboTwin policy_util/ on sys.path)
 - vla model save helpers (safe_save_model_for_hf_trainer, PEFT helpers)
 """
 
@@ -21,10 +21,11 @@ from typing import Optional
 import torch
 from transformers import TrainerCallback
 
-_POLICY_ROOT = pathlib.Path(__file__).resolve().parents[3]
-if str(_POLICY_ROOT) not in sys.path:
-    sys.path.insert(0, str(_POLICY_ROOT))
+_POLICY_UTIL_ROOT = pathlib.Path(__file__).resolve().parents[4] / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
 from early_stop_util import RelativeEarlyStopTracker
+from log_util.tr_log import print_relative_early_stop_val_line
 
 from vla import safe_save_model_for_hf_trainer
 from vla import get_peft_state_maybe_zero_3, get_peft_state_non_lora_maybe_zero_3
@@ -137,27 +138,19 @@ class RelativeEarlyStop(TrainerCallback):
         )
         self.total_evals_run = int(self._tracker.total_evals_run)
 
+        if self.local_rank in (0, -1):
+            print_relative_early_stop_val_line(
+                "TinyVLA",
+                int(state.global_step),
+                float(curr_val_loss),
+                decision,
+            )
+
         if decision.improved:
             self.best_eval_step = int(decision.best_step)
             self.min_val_loss = float(decision.best_val_loss)
             self.stop_reason = "reached_training_end"
-            if decision.rel_improve is None:
-                print(
-                    f"Val loss @ step{state.global_step}: {curr_val_loss:.5f}",
-                    flush=True,
-                )
-            else:
-                print(
-                    f"Val loss @ step{state.global_step}: {curr_val_loss:.5f} (improved)",
-                    flush=True,
-                )
             self._save_best()
-        else:
-            print(
-                f"Val loss @ step{state.global_step}: {curr_val_loss:.5f} "
-                f"(no improve #{decision.no_improve_count})",
-                flush=True,
-            )
 
         if decision.should_stop:
             self.stop_reason = str(decision.stop_reason)
