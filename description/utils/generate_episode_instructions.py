@@ -131,6 +131,16 @@ def replace_placeholders_unseen(instruction: str, episode_params: Dict[str, str]
 def load_task_instructions(task_name: str) -> Dict[str, Any]:
     """Load the task instructions from the JSON file."""
     file_path = os.path.join(parent_directory, f"../task_instruction/{task_name}.json")
+    if not os.path.exists(file_path) and task_name.endswith("_pert"):
+        # For perturbation tasks, reuse base task instruction file when needed.
+        base_task_name = task_name[: -len("_pert")]
+        base_file_path = os.path.join(parent_directory, f"../task_instruction/{base_task_name}.json")
+        if os.path.exists(base_file_path):
+            file_path = base_file_path
+            print(
+                f"[INFO] Task instruction for '{task_name}' not found; "
+                f"fallback to '{base_task_name}.json'."
+            )
     with open(file_path, "r") as f:
         task_data = json.load(f)
     return task_data

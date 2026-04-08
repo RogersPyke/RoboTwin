@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 Batch data collection launcher: Cartesian product of task list x config list,
-run via collect_data.sh in parallel. Config is passed via env vars from collect_data_flow.sh.
+run via collect_data.sh in parallel. Config is declared at the beginning of this file.
 
 Dependencies: Python 3.6+, standard library only (subprocess, logging, multiprocessing).
-Usage: invoked by collect_data_flow.sh; expects env TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL
-  (comma-separated; GPU_PARALLEL values are integers).
+Usage: invoked by collect_data_flow.sh with no CLI arguments.
 
 Call-chain note (from this script as caller):
   This script only invokes: collect_data.sh -> collect_data.py -> task env (load_robot/set_planner).
@@ -33,6 +32,24 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+# ---------------------------------------------------------------------------
+# Flow config (declare/edit here)
+# ---------------------------------------------------------------------------
+TASK_TO_COLL = [
+    "hanging_mug_pert",
+    "unhanging_mug_pert",
+    "stack_blocks_three_pert",
+    "unstack_blocks_three_pert",
+    "stack_bowls_three_pert",
+    "unstack_bowls_three_pert",
+    "move_pillbottle_pad_pert",
+    "unmove_pillbottle_pad_pert",
+]
+CFG_TO_COLL = ["demo_clean_pert"]
+GPU_PARALLEL = [0]
+SUBPROCESS_PRINT = True
+END_RESET_TO_INIT = True
 
 
 def _worker_ignore_sigint():
@@ -80,36 +97,9 @@ def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging
 
     signal.signal(signal.SIGTERM, _handler)
 
-# ---------------------------------------------------------------------------
-# Config from env (set by collect_data_flow.sh)
-# ---------------------------------------------------------------------------
-def _parse_list(env_key: str) -> list:
-    """Parse comma-separated env var into list of stripped strings. Returns empty list if unset."""
-    val = os.environ.get(env_key, "")
-    return [s.strip() for s in val.split(",") if s.strip()]
-
-
-def _parse_gpu_parallel(env_key: str = "GPU_PARALLEL") -> list:
-    """Parse comma-separated GPU IDs into list of int. Returns [0, 0] if unset."""
-    val = os.environ.get(env_key, "0,0")
-    parts = [s.strip() for s in val.split(",") if s.strip()]
-    if not parts:
-        return [0, 0]
-    return [int(x) for x in parts]
-
-
-def _parse_subprocess_print(env_key: str = "SUBPROCESS_PRINT") -> bool:
-    """Parse SUBPROCESS_PRINT from environment. True only for 'true'/'True'/'1'; else False."""
-    val = os.environ.get(env_key, "false").strip().lower()
-    return val in ("true", "1")
-
-
 def load_config():
-    """Load TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL from environment. Returns (tasks, configs, gpu_list)."""
-    tasks = _parse_list("TASK_TO_COLL")
-    configs = _parse_list("CFG_TO_COLL")
-    gpu_list = _parse_gpu_parallel()
-    return tasks, configs, gpu_list
+    """Load TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL from file-level config."""
+    return list(TASK_TO_COLL), list(CFG_TO_COLL), list(GPU_PARALLEL)
 
 
 # Repo root (parent of script/); collect_data.sh and logs live here.
@@ -337,7 +327,7 @@ def worker(jobs: list, gpu_id: int, script_dir: Path, subprocess_print: bool) ->
 
 def main() -> int:
     """
-    Load config from env, build job list with strict order, assign to workers by len(GPU_PARALLEL).
+    Load file-level config, build job list with strict order, assign to workers by len(GPU_PARALLEL).
     Order: (1) TASK order = TASK_TO_COLL order; (2) for each CFG, collect all TASKs then next CFG
     (i.e. outer loop CFG, inner loop TASK); (3) GPU parallel preserves this order, processing
     multiple jobs simultaneously. Exit 0 if all OK, 1 if any failed.
@@ -345,7 +335,8 @@ def main() -> int:
     Each run_collect line is prefixed with [task][cfg] so parallel workers' output can be distinguished.
     """
     task_to_coll, cfg_to_coll, gpu_parallel = load_config()
-    subprocess_print = _parse_subprocess_print()
+    subprocess_print = bool(SUBPROCESS_PRINT)
+    os.environ["END_RESET_TO_INIT"] = "true" if END_RESET_TO_INIT else "false"
 
     log_file = setup_logging()
     log = logging.getLogger("main")

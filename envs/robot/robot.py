@@ -132,7 +132,13 @@ class Robot:
                 self.right_conn.send({"cmd": "reset"})
                 _ = self.right_conn.recv()
         else:
-            if not isinstance(self.left_planner, CuroboPlanner) or not isinstance(self.right_planner, CuroboPlanner):
+            need_reset_planner = (
+                not hasattr(self, "left_planner")
+                or not hasattr(self, "right_planner")
+                or not isinstance(self.left_planner, CuroboPlanner)
+                or not isinstance(self.right_planner, CuroboPlanner)
+            )
+            if need_reset_planner:
                 self.set_planner(scene=scene)
 
         self.init_joints()
@@ -352,6 +358,20 @@ class Robot:
         else:
             return self.right_planner.plan_grippers(now_val, target_val)
 
+    def _resolve_plan_seed_qpos(self, arm_tag, last_qpos=None, last_full_qpos=None, last_arm_qpos=None):
+        provided = [last_qpos is not None, last_full_qpos is not None, last_arm_qpos is not None]
+        if sum(provided) > 1:
+            raise ValueError("Only one of last_qpos, last_full_qpos, last_arm_qpos can be provided.")
+        if last_arm_qpos is not None:
+            return deepcopy(last_arm_qpos)
+        if last_full_qpos is not None:
+            return deepcopy(last_full_qpos)
+        if last_qpos is not None:
+            return deepcopy(last_qpos)
+        if arm_tag == "left":
+            return self.left_entity.get_qpos()
+        return self.right_entity.get_qpos()
+
     def left_plan_multi_path(
         self,
         target_lst,
@@ -359,13 +379,17 @@ class Robot:
         use_point_cloud=False,
         use_attach=False,
         last_qpos=None,
+        last_full_qpos=None,
+        last_arm_qpos=None,
     ):
         if constraint_pose is not None:
             constraint_pose = self.get_constraint_pose(constraint_pose, arm_tag="left")
-        if last_qpos is None:
-            now_qpos = self.left_entity.get_qpos()
-        else:
-            now_qpos = deepcopy(last_qpos)
+        now_qpos = self._resolve_plan_seed_qpos(
+            "left",
+            last_qpos=last_qpos,
+            last_full_qpos=last_full_qpos,
+            last_arm_qpos=last_arm_qpos,
+        )
         target_lst_copy = deepcopy(target_lst)
         for i in range(len(target_lst_copy)):
             target_lst_copy[i] = self._trans_from_gripper_to_endlink(target_lst_copy[i], arm_tag="left")
@@ -394,13 +418,17 @@ class Robot:
         use_point_cloud=False,
         use_attach=False,
         last_qpos=None,
+        last_full_qpos=None,
+        last_arm_qpos=None,
     ):
         if constraint_pose is not None:
             constraint_pose = self.get_constraint_pose(constraint_pose, arm_tag="right")
-        if last_qpos is None:
-            now_qpos = self.right_entity.get_qpos()
-        else:
-            now_qpos = deepcopy(last_qpos)
+        now_qpos = self._resolve_plan_seed_qpos(
+            "right",
+            last_qpos=last_qpos,
+            last_full_qpos=last_full_qpos,
+            last_arm_qpos=last_arm_qpos,
+        )
         target_lst_copy = deepcopy(target_lst)
         for i in range(len(target_lst_copy)):
             target_lst_copy[i] = self._trans_from_gripper_to_endlink(target_lst_copy[i], arm_tag="right")
@@ -429,13 +457,17 @@ class Robot:
         use_point_cloud=False,
         use_attach=False,
         last_qpos=None,
+        last_full_qpos=None,
+        last_arm_qpos=None,
     ):
         if constraint_pose is not None:
             constraint_pose = self.get_constraint_pose(constraint_pose, arm_tag="left")
-        if last_qpos is None:
-            now_qpos = self.left_entity.get_qpos()
-        else:
-            now_qpos = deepcopy(last_qpos)
+        now_qpos = self._resolve_plan_seed_qpos(
+            "left",
+            last_qpos=last_qpos,
+            last_full_qpos=last_full_qpos,
+            last_arm_qpos=last_arm_qpos,
+        )
 
         trans_target_pose = self._trans_from_gripper_to_endlink(target_pose, arm_tag="left")
 
@@ -463,13 +495,17 @@ class Robot:
         use_point_cloud=False,
         use_attach=False,
         last_qpos=None,
+        last_full_qpos=None,
+        last_arm_qpos=None,
     ):
         if constraint_pose is not None:
             constraint_pose = self.get_constraint_pose(constraint_pose, arm_tag="right")
-        if last_qpos is None:
-            now_qpos = self.right_entity.get_qpos()
-        else:
-            now_qpos = deepcopy(last_qpos)
+        now_qpos = self._resolve_plan_seed_qpos(
+            "right",
+            last_qpos=last_qpos,
+            last_full_qpos=last_full_qpos,
+            last_arm_qpos=last_arm_qpos,
+        )
 
         trans_target_pose = self._trans_from_gripper_to_endlink(target_pose, arm_tag="right")
 

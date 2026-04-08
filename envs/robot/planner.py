@@ -92,7 +92,7 @@ try:
 
         def plan_path(
             self,
-            curr_joint_pos,
+            seed_joint_pos,
             target_gripper_pose,
             constraint_pose=None,
             arms_tag=None,
@@ -125,7 +125,14 @@ try:
 
             goal_pose_of_ee = CuroboPose.from_list(list(target_pose_p) + list(target_pose_q))
             joint_indices = [self.all_joints.index(name) for name in self.active_joints_name if name in self.all_joints]
-            joint_angles = [curr_joint_pos[index] for index in joint_indices]
+            curr_joint_pos = np.asarray(seed_joint_pos).reshape(-1)
+            # NOTE:
+            # - full articulation qpos: map with joint_indices
+            # - arm-only qpos (from previous curobo segment): use directly
+            if curr_joint_pos.shape[0] == len(self.active_joints_name):
+                joint_angles = curr_joint_pos.tolist()
+            else:
+                joint_angles = [curr_joint_pos[index] for index in joint_indices]
             joint_angles = [round(angle, 5) for angle in joint_angles]  # avoid the precision problem
             start_joint_states = JointState.from_position(
                 torch.tensor(joint_angles).cuda().reshape(1, -1),
@@ -155,7 +162,7 @@ try:
 
         def plan_batch(
             self,
-            curr_joint_pos,
+            seed_joint_pos,
             target_gripper_pose_list,
             constraint_pose=None,
             arms_tag=None,
@@ -211,7 +218,11 @@ try:
             poses_cuda = torch.tensor(poses_list, dtype=torch.float32).cuda()
             goal_pose_of_ee = CuroboPose(poses_cuda[:, :3], poses_cuda[:, 3:])
             joint_indices = [self.all_joints.index(name) for name in self.active_joints_name if name in self.all_joints]
-            joint_angles = [curr_joint_pos[index] for index in joint_indices]
+            curr_joint_pos = np.asarray(seed_joint_pos).reshape(-1)
+            if curr_joint_pos.shape[0] == len(self.active_joints_name):
+                joint_angles = curr_joint_pos.tolist()
+            else:
+                joint_angles = [curr_joint_pos[index] for index in joint_indices]
             joint_angles = [round(angle, 5) for angle in joint_angles]  # avoid the precision problem
             joint_angles_cuda = (torch.tensor(joint_angles, dtype=torch.float32).cuda().reshape(1, -1))
             joint_angles_cuda = torch.cat([joint_angles_cuda] * num_poses, dim=0)

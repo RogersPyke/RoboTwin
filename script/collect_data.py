@@ -124,6 +124,16 @@ def run(TASK_ENV, args):
     # =========== Collect Seed ===========
     os.makedirs(args["save_path"], exist_ok=True)
 
+    def write_success_rate_file(success_count, total_tries):
+        sr = 0.0 if total_tries <= 0 else float(success_count) / float(total_tries)
+        sr_file = os.path.join(args["save_path"], "sr.txt")
+        with open(sr_file, "w", encoding="utf-8") as file:
+            file.write(f"{sr:.6f}\n")
+            file.write(f"success={success_count}\n")
+            file.write(f"tries={total_tries}\n")
+            file.write(f"failed={total_tries - success_count}\n")
+        print(f"Success rate: {sr:.2%} ({success_count}/{total_tries}), saved to {sr_file}")
+
     if not args["use_seed"]:
         print("\033[93m" + "[Start Seed and Pre Motion Data Collection]" + "\033[0m")
         args["need_plan"] = True
@@ -167,10 +177,10 @@ def run(TASK_ENV, args):
                     TASK_ENV.viewer.close()
                 time.sleep(0.3)
             except Exception as e:
-                # stack_trace = traceback.format_exc()
+                stack_trace = traceback.format_exc()
                 print(" -------------")
                 print(f"simulate data episode {suc_num} fail! (seed = {epid})")
-                print("Error: ", e)
+                print("Error: ", stack_trace)
                 print(" -------------")
                 fail_num += 1
                 TASK_ENV.close_env()
@@ -186,6 +196,7 @@ def run(TASK_ENV, args):
                     file.write("%s " % sed)
 
         print(f"\nComplete simulation, failed \033[91m{fail_num}\033[0m times / {epid} tries \n")
+        write_success_rate_file(suc_num, epid)
     else:
         print("\033[93m" + "Use Saved Seeds List".center(30, "-") + "\033[0m")
         with open(os.path.join(args["save_path"], "seed.txt"), "r") as file:
