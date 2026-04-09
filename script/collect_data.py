@@ -13,10 +13,163 @@ import json
 import traceback
 import os
 import time
+import subprocess
 from argparse import ArgumentParser
 
 current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
+
+
+def _parse_int(value, default):
+    try:
+        return int(value)
+    except Exception:
+        return default
+
+
+def _query_gpu_snapshot():
+    """
+    Query GPU memory and compute process occupancy by nvidia-smi.
+    Returns:
+      (gpu_rows, proc_map, err_msg)
+      - gpu_rows: list[dict]
+      - proc_map: dict[gpu_uuid] -> list[dict]
+      - err_msg: str or None
+    """
+    gpu_cmd = [
+        "nvidia-smi",
+        "--query-gpu=index,uuid,name,memory.total,memory.used,memory.free,utilization.gpu",
+        "--format=csv,noheader,nounits",
+    ]
+    proc_cmd = [
+        "nvidia-smi",
+        "--query-compute-apps=gpu_uuid,pid,process_name,used_memory",
+        "--format=csv,noheader,nounits",
+    ]
+    try:
+        gpu_out = subprocess.check_output(gpu_cmd, text=True, stderr=subprocess.STDOUT).strip()
+    except Exception as e:
+        return [], {}, f"nvidia-smi gpu query failed: {e}"
+
+    proc_out = ""
+    try:
+        proc_out = subprocess.check_output(proc_cmd, text=True, stderr=subprocess.STDOUT).strip()
+    except Exception:
+        proc_out = ""
+
+    gpu_rows = []
+    for line in gpu_out.splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 7:
+            continue
+        gpu_rows.append(
+            {
+                "index": parts[0],
+                "uuid": parts[1],
+                "name": parts[2],
+                "total_mb": _parse_int(parts[3], -1),
+                "used_mb": _parse_int(parts[4], -1),
+                "free_mb": _parse_int(parts[5], -1),
+                "util": _parse_int(parts[6], -1),
+            }
+        )
+
+    proc_map = {}
+    if proc_out:
+        for line in proc_out.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) < 4:
+                continue
+            gpu_uuid = parts[0]
+            row = {
+                "pid": parts[1],
+                "name": parts[2],
+                "used_mb": _parse_int(parts[3], -1),
+            }
+            proc_map.setdefault(gpu_uuid, []).append(row)
+    return gpu_rows, proc_map, None
+
+
+def _get_visible_gpu_indices():
+    raw = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if not raw:
+        return None
+    result = []
+    for token in raw.split(","):
+        token = token.strip()
+        if token:
+            result.append(token)
+    return result if result else None
+
+
+def _format_gpu_snapshot(gpu_rows, proc_map, target_indices=None):
+    lines = []
+    rows = gpu_rows
+    if target_indices is not None:
+        filtered = [row for row in gpu_rows if row.get("index") in target_indices]
+        if filtered:
+            rows = filtered
+    lines.append("GPU Snapshot:")
+    if target_indices is not None:
+        lines.append(f"  CUDA_VISIBLE_DEVICES={','.join(target_indices)}")
+    if not rows:
+        lines.append("  <no gpu rows>")
+        return "\n".join(lines)
+
+    for row in rows:
+        lines.append(
+            "  GPU {idx} | {name} | total={total}MiB used={used}MiB free={free}MiB util={util}%".format(
+                idx=row["index"],
+                name=row["name"],
+                total=row["total_mb"],
+                used=row["used_mb"],
+                free=row["free_mb"],
+                util=row["util"],
+            )
+        )
+        proc_rows = proc_map.get(row["uuid"], [])
+        if not proc_rows:
+            lines.append("    - no compute process")
+            continue
+        for proc in proc_rows:
+            lines.append(
+                "    - pid={pid} mem={mem}MiB name={name}".format(
+                    pid=proc["pid"], mem=proc["used_mb"], name=proc["name"]
+                )
+            )
+    return "\n".join(lines)
+
+
+def _gpu_memory_guard(stage_name, min_free_mb):
+    gpu_rows, proc_map, err = _query_gpu_snapshot()
+    if err is not None:
+        print(f"[GPU-GUARD] {stage_name}: {err}")
+        return
+
+    target_indices = _get_visible_gpu_indices()
+    observed_rows = gpu_rows
+    if target_indices is not None:
+        filtered = [row for row in gpu_rows if row.get("index") in target_indices]
+        if filtered:
+            observed_rows = filtered
+
+    low_rows = [row for row in observed_rows if row.get("free_mb", -1) >= 0 and row["free_mb"] < min_free_mb]
+    if low_rows:
+        snapshot = _format_gpu_snapshot(gpu_rows, proc_map, target_indices=target_indices)
+        low_desc = ", ".join([f"GPU {row['index']} free={row['free_mb']}MiB" for row in low_rows])
+        raise RuntimeError(
+            f"[GPU-GUARD] {stage_name}: insufficient free VRAM (< {min_free_mb}MiB). {low_desc}\n{snapshot}"
+        )
+
+
+def _print_gpu_snapshot(tag):
+    gpu_rows, proc_map, err = _query_gpu_snapshot()
+    if err is not None:
+        print(f"[GPU-DIAG] {tag}: {err}")
+        return
+    target_indices = _get_visible_gpu_indices()
+    print(f"[GPU-DIAG] {tag}")
+    print(_format_gpu_snapshot(gpu_rows, proc_map, target_indices=target_indices))
 
 
 def class_decorator(task_name):
@@ -118,8 +271,10 @@ def main(task_name=None, task_config=None):
 
 def run(TASK_ENV, args):
     epid, suc_num, fail_num, seed_list = 0, 0, 0, []
+    min_free_mb = _parse_int(os.environ.get("CUROBO_MIN_FREE_MB", "3500"), 3500)
 
     print(f"Task Name: \033[34m{args['task_name']}\033[0m")
+    print(f"[GPU-GUARD] min_free_mb={min_free_mb}")
 
     # =========== Collect Seed ===========
     os.makedirs(args["save_path"], exist_ok=True)
@@ -149,6 +304,10 @@ def run(TASK_ENV, args):
 
         while suc_num < args["episode_num"]:
             try:
+                _gpu_memory_guard(
+                    stage_name=f"seed_phase_before_setup_demo episode={suc_num} seed={epid}",
+                    min_free_mb=min_free_mb,
+                )
                 TASK_ENV.setup_demo(now_ep_num=suc_num, seed=epid, **args)
                 TASK_ENV.play_once()
 
@@ -181,6 +340,7 @@ def run(TASK_ENV, args):
                 print(" -------------")
                 print(f"simulate data episode {suc_num} fail! (seed = {epid})")
                 print("Error: ", stack_trace)
+                _print_gpu_snapshot(tag="seed_phase_exception")
                 print(" -------------")
                 fail_num += 1
                 TASK_ENV.close_env()
@@ -225,40 +385,47 @@ def run(TASK_ENV, args):
 
         for episode_idx in range(st_idx, args["episode_num"]):
             print(f"\033[34mTask name: {args['task_name']}\033[0m")
+            try:
+                _gpu_memory_guard(
+                    stage_name=f"data_phase_before_setup_demo episode={episode_idx}",
+                    min_free_mb=min_free_mb,
+                )
+                TASK_ENV.setup_demo(now_ep_num=episode_idx, seed=seed_list[episode_idx], **args)
 
-            TASK_ENV.setup_demo(now_ep_num=episode_idx, seed=seed_list[episode_idx], **args)
+                traj_data = TASK_ENV.load_tran_data(episode_idx)
+                args["left_joint_path"] = traj_data["left_joint_path"]
+                args["right_joint_path"] = traj_data["right_joint_path"]
+                TASK_ENV.set_path_lst(args)
 
-            traj_data = TASK_ENV.load_tran_data(episode_idx)
-            args["left_joint_path"] = traj_data["left_joint_path"]
-            args["right_joint_path"] = traj_data["right_joint_path"]
-            TASK_ENV.set_path_lst(args)
+                info_file_path = os.path.join(args["save_path"], "scene_info.json")
 
-            info_file_path = os.path.join(args["save_path"], "scene_info.json")
+                if not os.path.exists(info_file_path):
+                    with open(info_file_path, "w", encoding="utf-8") as file:
+                        json.dump({}, file, ensure_ascii=False)
 
-            if not os.path.exists(info_file_path):
+                with open(info_file_path, "r", encoding="utf-8") as file:
+                    info_db = json.load(file)
+
+                info = TASK_ENV.play_once()
+                # Attach pert_meta from PerturbationMixin if present (pert tasks only).
+                pert_meta = getattr(TASK_ENV, "_pert_meta", None)
+                if pert_meta is not None:
+                    info["pert_meta"] = {
+                        k: (v if not hasattr(v, "tolist") else v.tolist())
+                        for k, v in pert_meta.items()
+                    }
+                info_db[f"episode_{episode_idx}"] = info
+
                 with open(info_file_path, "w", encoding="utf-8") as file:
-                    json.dump({}, file, ensure_ascii=False)
+                    json.dump(info_db, file, ensure_ascii=False, indent=4)
 
-            with open(info_file_path, "r", encoding="utf-8") as file:
-                info_db = json.load(file)
-
-            info = TASK_ENV.play_once()
-            # Attach pert_meta from PerturbationMixin if present (pert tasks only).
-            pert_meta = getattr(TASK_ENV, "_pert_meta", None)
-            if pert_meta is not None:
-                info["pert_meta"] = {
-                    k: (v if not hasattr(v, "tolist") else v.tolist())
-                    for k, v in pert_meta.items()
-                }
-            info_db[f"episode_{episode_idx}"] = info
-
-            with open(info_file_path, "w", encoding="utf-8") as file:
-                json.dump(info_db, file, ensure_ascii=False, indent=4)
-
-            TASK_ENV.close_env(clear_cache=((episode_idx + 1) % clear_cache_freq == 0))
-            TASK_ENV.merge_pkl_to_hdf5_video()
-            TASK_ENV.remove_data_cache()
-            assert TASK_ENV.check_success(), "Collect Error"
+                TASK_ENV.close_env(clear_cache=((episode_idx + 1) % clear_cache_freq == 0))
+                TASK_ENV.merge_pkl_to_hdf5_video()
+                TASK_ENV.remove_data_cache()
+                assert TASK_ENV.check_success(), "Collect Error"
+            except Exception:
+                _print_gpu_snapshot(tag=f"data_phase_exception episode={episode_idx}")
+                raise
 
         command = f"cd description && bash gen_episode_instructions.sh {args['task_name']} {args['task_config']} {args['language_num']}"
         os.system(command)

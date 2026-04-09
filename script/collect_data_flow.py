@@ -29,6 +29,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -47,7 +48,7 @@ TASK_TO_COLL = [
     "unmove_pillbottle_pad_pert",
 ]
 CFG_TO_COLL = ["demo_clean_pert"]
-GPU_PARALLEL = [0]
+GPU_PARALLEL = [0, 0, 1, 1]
 SUBPROCESS_PRINT = True
 END_RESET_TO_INIT = True
 
@@ -76,12 +77,21 @@ def _worker_process_group_and_sigterm():
         os.setpgid(0, 0)
     except OSError:
         pass
+
     def _kill_process_group(_signum, _frame):
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        pgid = os.getpgrp()
         try:
-            os.killpg(os.getpgrp(), signal.SIGTERM)
+            os.killpg(pgid, signal.SIGTERM)
         except OSError:
             pass
+        # Escalate to SIGKILL to avoid residual GPU-holding children.
+        time.sleep(0.2)
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            pass
+
     signal.signal(signal.SIGTERM, _kill_process_group)
 
 
@@ -100,6 +110,65 @@ def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging
 def load_config():
     """Load TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL from file-level config."""
     return list(TASK_TO_COLL), list(CFG_TO_COLL), list(GPU_PARALLEL)
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _pool_worker_pids(pool) -> list:
+    workers = getattr(pool, "_pool", None) or []
+    pids = []
+    for worker in workers:
+        if worker is None:
+            continue
+        pid = getattr(worker, "pid", None)
+        if isinstance(pid, int) and pid > 0:
+            pids.append(pid)
+    return pids
+
+
+def _kill_worker_groups(pool, log: logging.Logger, grace_sec: float = 2.0) -> None:
+    """
+    Forcefully reclaim worker process groups.
+    Workers are group leaders (pgid == worker pid), so killpg(pid, sig) can terminate
+    worker + collect_data.sh + python descendants that still hold GPU memory.
+    """
+    worker_pids = _pool_worker_pids(pool)
+    if not worker_pids:
+        return
+
+    log.warning("[main] Worker groups to reclaim: %s", worker_pids)
+    for pid in worker_pids:
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+
+    deadline = time.time() + max(0.1, grace_sec)
+    while time.time() < deadline:
+        if not any(_pid_alive(pid) for pid in worker_pids):
+            return
+        time.sleep(0.1)
+
+    survivors = [pid for pid in worker_pids if _pid_alive(pid)]
+    if survivors:
+        log.warning("[main] Escalate SIGKILL for worker groups: %s", survivors)
+    for pid in survivors:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except OSError:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
 
 
 # Repo root (parent of script/); collect_data.sh and logs live here.
@@ -370,8 +439,12 @@ def main() -> int:
     def _terminate_pool_and_exit(exit_code: int) -> None:
         """Kill all child processes (workers and their subprocesses) then exit. No return."""
         log.warning("[main] Shutdown requested; terminating all workers and exiting.")
+        _kill_worker_groups(pool, log, grace_sec=2.0)
         pool.terminate()
-        pool.join()
+        try:
+            pool.join()
+        except Exception:
+            pass
         os._exit(exit_code)
 
     pool = mp.Pool(processes=n_workers, initializer=_worker_init)
