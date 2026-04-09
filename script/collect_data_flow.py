@@ -25,6 +25,7 @@ import logging
 import multiprocessing as mp
 import os
 import re
+import queue
 import signal
 import subprocess
 import sys
@@ -221,6 +222,21 @@ def _timestamp_utc8():
     return datetime.now(UTC8).strftime("%Y%m%d%H%M%S")
 
 
+def _sanitize_log_token(token: str) -> str:
+    """Convert arbitrary token to a filesystem-safe ASCII fragment."""
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", token.strip())
+    return cleaned or "unknown"
+
+
+def _subprocess_log_path(task: str, cfg: str, gpu_id: int) -> Path:
+    """Build per-subprocess log path under LOG_DIR."""
+    task_safe = _sanitize_log_token(task)
+    cfg_safe = _sanitize_log_token(cfg)
+    return LOG_DIR / (
+        f"collect_data_subproc_{task_safe}_{cfg_safe}_gpu{gpu_id}_pid{os.getpid()}_{_timestamp_utc8()}.log"
+    )
+
+
 def setup_logging():
     """
     Configure root logger: file in LOG_DIR named collect_data_flow_<timestamp>.log,
@@ -228,7 +244,7 @@ def setup_logging():
     """
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / f"collect_data_flow_{_timestamp_utc8()}.log"
-    fmt = "%(asctime)s [%(name)s] %(levelname)s %(message)s"
+    fmt = "%(asctime)s [%(name)s] [%(levelname)s] %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
 
     root = logging.getLogger()
@@ -305,17 +321,31 @@ def _run_tag(task: str, cfg: str, use_color: bool = True) -> str:
 
 
 def _read_stdout_and_log_wrapper(
-    proc: subprocess.Popen, state: dict, log: logging.Logger, task: str, cfg: str
+    proc: subprocess.Popen,
+    state: dict,
+    log: logging.Logger,
+    task: str,
+    cfg: str,
+    subprocess_print: bool,
+    output_queue: "queue.Queue[str]",
 ) -> None:
-    """Read subprocess stdout line by line and log wrapper progress messages. Used when SUBPROCESS_PRINT is False."""
+    """Read subprocess stdout, optionally mirror to console, and emit wrapper progress."""
     tag = _run_tag(task, cfg)
-    while True:
-        line = proc.stdout.readline()
-        if not line:
-            break
-        msg = _wrapper_progress_message(line, state)
-        if msg:
-            log.info("%s wrapper: %s", tag, msg)
+    try:
+        while True:
+            line = proc.stdout.readline()
+            if not line:
+                break
+            output_queue.put(line)
+            if subprocess_print:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            else:
+                msg = _wrapper_progress_message(line, state)
+                if msg:
+                    log.info("%s wrapper: %s", tag, msg)
+    finally:
+        output_queue.put(None)
 
 
 def run_collect_data_sh(
@@ -330,18 +360,12 @@ def run_collect_data_sh(
     log = logging.getLogger("run_collect")
     tag = _run_tag(task, cfg)
     cmd = ["bash", str(script_dir / "collect_data.sh"), task, cfg, str(gpu_id)]
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    subproc_log_file = _subprocess_log_path(task, cfg, gpu_id)
     log.info("%s START GPU%s", tag, gpu_id)
+    log.info("%s Subprocess log: %s", tag, subproc_log_file)
     try:
-        if subprocess_print:
-            result = subprocess.run(
-                cmd,
-                cwd=str(script_dir),
-                capture_output=False,
-                text=True,
-                timeout=3600,
-            )
-            out, err = None, None
-        else:
+        with subproc_log_file.open("w", encoding="utf-8") as subproc_log_fp:
             # Do not use start_new_session: keep subprocess in worker's process group
             # so that worker's SIGTERM handler (killpg) terminates this child too.
             proc = subprocess.Popen(
@@ -353,14 +377,31 @@ def run_collect_data_sh(
                 bufsize=1,
             )
             state = {"in_data_collection": False, "data_collection_episode_index": 0}
+            output_queue = queue.Queue()
             reader = threading.Thread(
                 target=_read_stdout_and_log_wrapper,
-                args=(proc, state, log, task, cfg),
+                args=(proc, state, log, task, cfg, subprocess_print, output_queue),
                 daemon=True,
             )
             reader.start()
             try:
-                proc.wait(timeout=3600)
+                deadline = time.time() + 3600
+                stream_done = False
+                while True:
+                    if not stream_done:
+                        try:
+                            line = output_queue.get(timeout=0.2)
+                            if line is None:
+                                stream_done = True
+                            else:
+                                subproc_log_fp.write(line)
+                                subproc_log_fp.flush()
+                        except queue.Empty:
+                            pass
+                    if stream_done and proc.poll() is not None:
+                        break
+                    if time.time() > deadline:
+                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=3600)
             except subprocess.TimeoutExpired:
                 proc.terminate()
                 proc.wait()
@@ -369,7 +410,7 @@ def run_collect_data_sh(
             result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
 
         if result.returncode != 0:
-            log.error("%s FAILED stderr: %s", tag, result.stderr or result.stdout)
+            log.error("%s FAILED. See subprocess log: %s", tag, subproc_log_file)
             return False
         log.success("%s OK", tag)
         return True
