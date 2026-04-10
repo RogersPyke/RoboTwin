@@ -4,6 +4,8 @@ from copy import deepcopy
 import numpy as np
 import transforms3d as t3d
 
+from ._cone_bezier_planner import ConeBezierPlanner
+
 
 class PerturbationMixin:
     """
@@ -25,28 +27,18 @@ class PerturbationMixin:
             "conservative_mode": conservative,
         }
 
-        strategies = planner_cfg.get("strategies", ["waypoint_chain"])
-        if isinstance(strategies, str):
-            strategies = [strategies]
-        strategies = [str(i).strip().lower() for i in strategies if str(i).strip()]
-        if not strategies:
-            strategies = ["waypoint_chain"]
-
         self._plan_aug_cfg = {
             "enabled": bool(planner_cfg.get("enabled", False)),
-            "strategies": strategies,
             "candidate_trials": int(planner_cfg.get("candidate_trials", 6)),
-            "waypoint_count_min": int(planner_cfg.get("waypoint_count_min", 1)),
-            "waypoint_count_max": int(planner_cfg.get("waypoint_count_max", 2)),
-            "waypoint_xy_radius": float(planner_cfg.get("waypoint_xy_radius", 0.08)),
-            "waypoint_z_jitter": float(planner_cfg.get("waypoint_z_jitter", 0.05)),
+            "waypoint_count_min": int(planner_cfg.get("waypoint_count_min", 2)),
+            "waypoint_count_max": int(planner_cfg.get("waypoint_count_max", 4)),
+            "half_angle_deg": float(planner_cfg.get("half_angle_deg", 10.0)),
+            "twist_range_deg": float(planner_cfg.get("twist_range_deg", 45.0)),
             "orientation_jitter_deg": float(planner_cfg.get("orientation_jitter_deg", 10.0)),
-            "rrt_anchor_ratio_min": float(planner_cfg.get("rrt_anchor_ratio_min", 0.25)),
-            "rrt_anchor_ratio_max": float(planner_cfg.get("rrt_anchor_ratio_max", 0.75)),
-            "rrt_lateral_xy": float(planner_cfg.get("rrt_lateral_xy", 0.10)),
-            "rrt_z_jitter": float(planner_cfg.get("rrt_z_jitter", 0.04)),
-            "fallback_to_direct": bool(planner_cfg.get("fallback_to_direct", True)),
-            "conservative_spatial_scale": float(planner_cfg.get("conservative_spatial_scale", 0.7)),
+            "ctrl_axial_range_1": deepcopy(planner_cfg.get("ctrl_axial_range_1", [0.15, 0.45])),
+            "ctrl_axial_range_2": deepcopy(planner_cfg.get("ctrl_axial_range_2", [0.55, 0.85])),
+            "cone_task_types": deepcopy(planner_cfg.get("cone_task_types", {})),
+            "conservative_cone_scale": float(planner_cfg.get("conservative_cone_scale", 0.7)),
             "conservative_orientation_scale": float(planner_cfg.get("conservative_orientation_scale", 0.6)),
         }
         if self._plan_aug_cfg["waypoint_count_min"] < 1:
@@ -56,11 +48,17 @@ class PerturbationMixin:
         if self._plan_aug_cfg["candidate_trials"] < 1:
             self._plan_aug_cfg["candidate_trials"] = 1
 
+        planner_runtime_cfg = deepcopy(self._plan_aug_cfg)
+        if self._pert_cfg.get("conservative_mode", False):
+            planner_runtime_cfg["half_angle_deg"] *= planner_runtime_cfg["conservative_cone_scale"]
+            planner_runtime_cfg["orientation_jitter_deg"] *= planner_runtime_cfg["conservative_orientation_scale"]
+        self._cone_planner = ConeBezierPlanner(planner_runtime_cfg)
+
         self._pert_meta = {
             "enabled": self._pert_cfg["enabled"],
             "conservative_mode": self._pert_cfg["conservative_mode"],
             "planner_augmentation_enabled": self._plan_aug_cfg["enabled"],
-            "planner_augmentation_strategies": deepcopy(self._plan_aug_cfg["strategies"]),
+            "planner_augmentation_strategies": ["cone_cubic_bezier"],
         }
 
     def setup_demo(self, *args, **kwargs):
@@ -107,94 +105,6 @@ class PerturbationMixin:
         q_new = q_new / np.linalg.norm(q_new)
         pose[3:7] = q_new
         return pose.tolist()
-
-    def _build_waypoint_chain_candidates(self, start_pose, target_pose):
-        cfg = self._plan_aug_cfg
-        spatial_scale = 1.0
-        orient_scale = 1.0
-        if self._pert_cfg.get("conservative_mode", False):
-            spatial_scale = cfg["conservative_spatial_scale"]
-            orient_scale = cfg["conservative_orientation_scale"]
-        xy_radius = cfg["waypoint_xy_radius"] * spatial_scale
-        z_jitter = cfg["waypoint_z_jitter"] * spatial_scale
-        orientation_jitter = cfg["orientation_jitter_deg"] * orient_scale
-        candidates = []
-        start_xyz = np.array(start_pose[:3], dtype=np.float64)
-        target_xyz = np.array(target_pose[:3], dtype=np.float64)
-        for _ in range(cfg["candidate_trials"]):
-            wp_num = int(np.random.randint(cfg["waypoint_count_min"], cfg["waypoint_count_max"] + 1))
-            waypoint_chain = []
-            for idx in range(wp_num):
-                ratio = float(idx + 1) / float(wp_num + 1)
-                base_xyz = start_xyz + ratio * (target_xyz - start_xyz)
-                offset = np.array(
-                    [
-                        np.random.uniform(-xy_radius, xy_radius),
-                        np.random.uniform(-xy_radius, xy_radius),
-                        np.random.uniform(-z_jitter, z_jitter),
-                    ],
-                    dtype=np.float64,
-                )
-                waypoint = deepcopy(target_pose)
-                waypoint[:3] = (base_xyz + offset).tolist()
-                waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
-                waypoint_chain.append(waypoint)
-            candidates.append(
-                {
-                    "strategy": "waypoint_chain",
-                    "waypoints": waypoint_chain,
-                }
-            )
-        return candidates
-
-    def _build_rrt_guided_candidates(self, start_pose, target_pose, direct_result):
-        if direct_result is None or direct_result.get("status") != "Success":
-            return []
-        cfg = self._plan_aug_cfg
-        spatial_scale = 1.0
-        orient_scale = 1.0
-        if self._pert_cfg.get("conservative_mode", False):
-            spatial_scale = cfg["conservative_spatial_scale"]
-            orient_scale = cfg["conservative_orientation_scale"]
-        orientation_jitter = cfg["orientation_jitter_deg"] * orient_scale
-        lateral_xy = cfg["rrt_lateral_xy"] * spatial_scale
-        z_jitter = cfg["rrt_z_jitter"] * spatial_scale
-        step_count = max(1, int(direct_result["position"].shape[0]))
-        path_scale = min(1.8, max(0.6, float(step_count) / 200.0))
-        lateral_xy = lateral_xy * path_scale
-
-        start_xyz = np.array(start_pose[:3], dtype=np.float64)
-        target_xyz = np.array(target_pose[:3], dtype=np.float64)
-        direct_vec = target_xyz - start_xyz
-        horizontal_vec = np.array([direct_vec[0], direct_vec[1], 0.0], dtype=np.float64)
-        norm_xy = float(np.linalg.norm(horizontal_vec))
-        if norm_xy < 1e-8:
-            rand = np.random.uniform(-1.0, 1.0, size=2)
-            horizontal_vec = np.array([rand[0], rand[1], 0.0], dtype=np.float64)
-            norm_xy = float(np.linalg.norm(horizontal_vec))
-            if norm_xy < 1e-8:
-                horizontal_vec = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-                norm_xy = 1.0
-        horizontal_vec /= norm_xy
-        orthogonal_vec = np.array([-horizontal_vec[1], horizontal_vec[0], 0.0], dtype=np.float64)
-
-        trial_num = max(2, cfg["candidate_trials"] // 2)
-        candidates = []
-        for _ in range(trial_num):
-            ratio = float(np.random.uniform(cfg["rrt_anchor_ratio_min"], cfg["rrt_anchor_ratio_max"]))
-            lateral = float(np.random.uniform(-lateral_xy, lateral_xy))
-            anchor = start_xyz + ratio * direct_vec + lateral * orthogonal_vec
-            anchor[2] += float(np.random.uniform(-z_jitter, z_jitter))
-            waypoint = deepcopy(target_pose)
-            waypoint[:3] = anchor.tolist()
-            waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
-            candidates.append(
-                {
-                    "strategy": "rrt_guided",
-                    "waypoints": [waypoint],
-                }
-            )
-        return candidates
 
     def _plan_single_segment(self, arm_tag, pose_7d, constraint_pose, last_full_qpos=None, last_arm_qpos=None):
         if arm_tag == "left":
@@ -257,29 +167,20 @@ class PerturbationMixin:
         target_pose = self._normalize_pose_7d(target_pose)
         if start_pose is None or target_pose is None:
             return None
-
-        if arm_tag == "left":
-            now_full_qpos = self.robot.left_entity.get_qpos()
-            direct_result = self.robot.left_plan_path(
-                target_pose,
-                constraint_pose=constraint_pose,
-                last_full_qpos=now_full_qpos,
+        task_name = self.__class__.__name__
+        try:
+            candidates = self._cone_planner.generate_candidates(
+                start_pose_7d=start_pose,
+                target_pose_7d=target_pose,
+                task_name=task_name,
+                rng=np.random,
             )
-        else:
-            now_full_qpos = self.robot.right_entity.get_qpos()
-            direct_result = self.robot.right_plan_path(
-                target_pose,
-                constraint_pose=constraint_pose,
-                last_full_qpos=now_full_qpos,
-            )
-
-        candidates = []
-        for strategy in self._plan_aug_cfg["strategies"]:
-            if strategy == "waypoint_chain":
-                candidates.extend(self._build_waypoint_chain_candidates(start_pose, target_pose))
-            elif strategy == "rrt_guided":
-                candidates.extend(self._build_rrt_guided_candidates(start_pose, target_pose, direct_result))
-        np.random.shuffle(candidates)
+        except Exception:
+            self._pert_meta["planner_augmentation_last"] = {
+                "strategy": "cone_candidate_generation_failed",
+                "waypoint_count": 0,
+            }
+            return None
 
         for candidate in candidates:
             merged = self._try_plan_waypoint_chain(
@@ -296,12 +197,10 @@ class PerturbationMixin:
             }
             return merged
 
-        if self._plan_aug_cfg.get("fallback_to_direct", True):
-            self._pert_meta["planner_augmentation_last"] = {
-                "strategy": "direct_fallback",
-                "waypoint_count": 0,
-            }
-            return direct_result
+        self._pert_meta["planner_augmentation_last"] = {
+            "strategy": "cone_candidates_failed",
+            "waypoint_count": 0,
+        }
         return None
 
     def left_move_to_pose(

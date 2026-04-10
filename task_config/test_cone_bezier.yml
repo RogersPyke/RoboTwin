@@ -1,0 +1,65 @@
+# Test config for ConeBezierPlanner - single episode with video
+render_freq: 1
+episode_num: 1
+use_seed: false
+save_freq: 15
+embodiment: [aloha-agilex]
+language_num: 1
+domain_randomization:
+  random_background: false
+  cluttered_table: false
+  clean_background_rate: 1
+  random_head_camera_dis: 0
+  random_table_height: 0
+  random_light: false
+  crazy_random_light_rate: 0
+camera:
+  head_camera_type: D435
+  wrist_camera_type: D435
+  collect_head_camera: true
+  collect_wrist_camera: true
+data_type:
+  rgb: true
+  third_view: false
+  depth: false
+  pointcloud: false
+  observer: false
+  endpose: true
+  qpos: true
+  mesh_segmentation: false
+  actor_segmentation: false
+pcd_down_sample_num: 1024
+pcd_crop: true
+save_path: ./data
+clear_cache_freq: 5
+collect_data: true
+eval_video_log: true
+
+perturbation:
+  enabled: true
+  grasp_xy_jitter: 0.008
+  grasp_yaw_jitter_deg: 6.0
+  pre_place_xy_jitter: 0.020
+  conservative_xy_scale: 0.6
+  conservative_yaw_scale: 0.5
+  planner_augmentation:
+    enabled: true
+    candidate_trials: 6
+    waypoint_count_min: 2
+    waypoint_count_max: 4
+    half_angle_deg: 10.0
+    twist_range_deg: 45.0
+    orientation_jitter_deg: 10.0
+    ctrl_axial_range_1: [0.15, 0.45]
+    ctrl_axial_range_2: [0.55, 0.85]
+    cone_task_types:
+      convergent:
+        - stack_bowls_three_pert
+        - stack_blocks_three_pert
+        - move_pillbottle_pad_pert
+        - hanging_mug_pert
+      divergent:
+        - unstack_bowls_three_pert
+        - unstack_blocks_three_pert
+        - unmove_pillbottle_pad_pert
+        - unhanging_mug_pert

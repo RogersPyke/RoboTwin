@@ -1,19 +1,4 @@
-from ._pert_mixin import PerturbationMixin
-from .unstack_bowls_three import unstack_bowls_three
-
-
-class unstack_bowls_three_pert(PerturbationMixin, unstack_bowls_three):
-
-    def setup_demo(self, *args, **kwargs):
-        kwargs["conservative_mode"] = True
-        return super().setup_demo(*args, **kwargs)
-# Purpose: Perturbation variant of unstack_bowls_three (conservative mode).
-# Dependencies: _pert_mixin.PerturbationMixin, unstack_bowls_three
-# Usage: ./collect_data.sh unstack_bowls_three_pert demo_clean_pert <gpu_id>
-#   Same-seed: SOURCE_SEED_PATH=./data/unstack_bowls_three/demo_clean/seed.txt \
-#              ./collect_data.sh unstack_bowls_three_pert demo_clean_pert <gpu_id>
-
-from ._pert_mixin import PerturbationMixin
+from ._enh_util._pert_mixin import PerturbationMixin
 from .unstack_bowls_three import unstack_bowls_three
 
 
@@ -39,4 +24,23 @@ class unstack_bowls_three_pert(PerturbationMixin, unstack_bowls_three):
         pert = kwargs.get("perturbation") or {}
         kwargs["perturbation"] = pert
         pert.setdefault("conservative_mode", True)
+        planner = pert.get("planner_augmentation") or {}
+        pert["planner_augmentation"] = planner
+        planner.setdefault(
+            "cone_task_types",
+            {
+                "convergent": [
+                    "stack_bowls_three_pert",
+                    "stack_blocks_three_pert",
+                    "move_pillbottle_pad_pert",
+                    "hanging_mug_pert",
+                ],
+                "divergent": [
+                    "unstack_bowls_three_pert",
+                    "unstack_blocks_three_pert",
+                    "unmove_pillbottle_pad_pert",
+                    "unhanging_mug_pert",
+                ],
+            },
+        )
         return super().setup_demo(*args, **kwargs)

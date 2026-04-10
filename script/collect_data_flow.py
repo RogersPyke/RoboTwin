@@ -49,8 +49,9 @@ TASK_TO_COLL = [
     "unmove_pillbottle_pad_pert",
 ]
 CFG_TO_COLL = ["demo_clean_pert"]
-GPU_PARALLEL = [0, 0, 1, 1]
-SUBPROCESS_PRINT = True
+GPU_PARALLEL = [0, 1]
+# When False, raw subprocess stdout/stderr is not written to the terminal; full stream goes to per-job log files only.
+SUBPROCESS_PRINT = False
 END_RESET_TO_INIT = True
 
 
@@ -96,7 +97,9 @@ def _worker_process_group_and_sigterm():
     signal.signal(signal.SIGTERM, _kill_process_group)
 
 
-def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging.Logger):
+def _main_install_shutdown_handler(
+    shutdown_event: threading.Event, log: logging.Logger
+):
     """
     Install SIGTERM handler so that on external kill (e.g. systemd, kill <pid>), the main
     process sets shutdown_event and then the main loop will terminate the pool and exit.
@@ -107,6 +110,7 @@ def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging
         shutdown_event.set()
 
     signal.signal(signal.SIGTERM, _handler)
+
 
 def load_config():
     """Load TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL from file-level config."""
@@ -189,10 +193,29 @@ RESET = "\033[0m"
 SUCCESS_LEVEL = 25
 logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
 
+
 def success(self, msg, *args, **kwargs):
     if self.isEnabledFor(SUCCESS_LEVEL):
         self._log(SUCCESS_LEVEL, msg, args, **kwargs)
+
+
 logging.Logger.success = success
+
+
+class FlushFileHandler(logging.FileHandler):
+    """File handler that flushes after each record so log files have no write-back delay."""
+
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
+
+
+class FlushStreamHandler(logging.StreamHandler):
+    """Stream handler that flushes after each record (immediate console feedback)."""
+
+    def emit(self, record):
+        super().emit(record)
+        self.flush()
 
 
 class ColoredFormatter(logging.Formatter):
@@ -252,12 +275,12 @@ def setup_logging():
         return str(log_file)
     root.setLevel(logging.DEBUG)
 
-    fh = logging.FileHandler(log_file, encoding="utf-8")
+    fh = FlushFileHandler(log_file, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
     root.addHandler(fh)
 
-    ch = logging.StreamHandler(sys.stdout)
+    ch = FlushStreamHandler(sys.stdout)
     ch.setLevel(logging.INFO)
     ch.setFormatter(ColoredFormatter(fmt=fmt, datefmt=datefmt))
     root.addHandler(ch)
@@ -278,7 +301,9 @@ def _wrapper_progress_message(line: str, state: dict) -> Optional[str]:
     line_plain = re.sub(r"\033\[[\d;]*m", "", line_stripped)
 
     # Seed phase: "simulate data episode X success! (seed = Y)" or "fail! (seed = Y)"
-    m = re.search(r"simulate data episode (\d+) (success|fail)! \(seed = (\d+)\)", line_plain)
+    m = re.search(
+        r"simulate data episode (\d+) (success|fail)! \(seed = (\d+)\)", line_plain
+    )
     if m:
         idx, result, seed = m.group(1), m.group(2), m.group(3)
         return f"Seed test #{idx} (seed={seed}), result: {result}"
@@ -320,6 +345,16 @@ def _run_tag(task: str, cfg: str, use_color: bool = True) -> str:
     return f"[{task}][{cfg}]"
 
 
+def _log_file_signature(path: Path):
+    """Return (mtime_ns, size) for idle detection, or None if stat fails."""
+    try:
+        st = path.stat()
+        mt = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+        return (mt, st.st_size)
+    except OSError:
+        return None
+
+
 def _read_stdout_and_log_wrapper(
     proc: subprocess.Popen,
     state: dict,
@@ -355,17 +390,32 @@ def run_collect_data_sh(
     Run collect_data.sh for one (task, config) pair on the given GPU.
     Input: task/cfg (str), gpu_id (int), script_dir (Path), subprocess_print (bool).
     Output: True on success, False on failure. Logs to module logger.
-    When subprocess_print is False, only wrapper progress (seed test, result, saving video) is printed.
+    When subprocess_print is False, raw child stdout/stderr is not mirrored to the terminal; every line
+    is appended to the per-job subprocess log file (flushed). Wrapper progress lines still go through
+    the main logger (console + collect_data_flow log file).
+
+    Idle timeout: env COLLECT_DATA_IDLE_TIMEOUT_SEC (default 3600). While the child runs, the parent
+    polls subproc_log_file mtime/size; any change resets the idle clock. <=0 disables idle kill.
     """
     log = logging.getLogger("run_collect")
     tag = _run_tag(task, cfg)
     cmd = ["bash", str(script_dir / "collect_data.sh"), task, cfg, str(gpu_id)]
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     subproc_log_file = _subprocess_log_path(task, cfg, gpu_id)
+    idle_timeout_sec = float(os.environ.get("COLLECT_DATA_IDLE_TIMEOUT_SEC", "3600"))
     log.info("%s START GPU%s", tag, gpu_id)
     log.info("%s Subprocess log: %s", tag, subproc_log_file)
+    log.info(
+        "%s idle_timeout_sec=%s (COLLECT_DATA_IDLE_TIMEOUT_SEC, log-file mtime/size)",
+        tag,
+        idle_timeout_sec,
+    )
     try:
-        with subproc_log_file.open("w", encoding="utf-8") as subproc_log_fp:
+        proc_env = os.environ.copy()
+        proc_env.setdefault("PYTHONUNBUFFERED", "1")
+        with subproc_log_file.open(
+            "w", encoding="utf-8", buffering=1
+        ) as subproc_log_fp:
             # Do not use start_new_session: keep subprocess in worker's process group
             # so that worker's SIGTERM handler (killpg) terminates this child too.
             proc = subprocess.Popen(
@@ -375,6 +425,7 @@ def run_collect_data_sh(
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                env=proc_env,
             )
             state = {"in_data_collection": False, "data_collection_episode_index": 0}
             output_queue = queue.Queue()
@@ -385,8 +436,9 @@ def run_collect_data_sh(
             )
             reader.start()
             try:
-                deadline = time.time() + 3600
                 stream_done = False
+                last_sig = _log_file_signature(subproc_log_file)
+                last_change = time.time()
                 while True:
                     if not stream_done:
                         try:
@@ -400,14 +452,26 @@ def run_collect_data_sh(
                             pass
                     if stream_done and proc.poll() is not None:
                         break
-                    if time.time() > deadline:
-                        raise subprocess.TimeoutExpired(cmd=cmd, timeout=3600)
+                    if idle_timeout_sec > 0 and proc.poll() is None:
+                        sig = _log_file_signature(subproc_log_file)
+                        if sig is not None:
+                            if last_sig is None or sig != last_sig:
+                                last_sig = sig
+                                last_change = time.time()
+                            elif time.time() - last_change > idle_timeout_sec:
+                                raise subprocess.TimeoutExpired(
+                                    cmd=cmd, timeout=idle_timeout_sec
+                                )
             except subprocess.TimeoutExpired:
                 proc.terminate()
                 proc.wait()
                 raise
             reader.join(timeout=5.0)
-            result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
+            result = type(
+                "Result",
+                (),
+                {"returncode": proc.returncode, "stdout": None, "stderr": None},
+            )()
 
         if result.returncode != 0:
             log.error("%s FAILED. See subprocess log: %s", tag, subproc_log_file)
@@ -415,7 +479,12 @@ def run_collect_data_sh(
         log.success("%s OK", tag)
         return True
     except subprocess.TimeoutExpired:
-        log.error("%s TIMEOUT", tag)
+        log.error(
+            "%s IDLE_TIMEOUT (no subprocess log change for %ss): %s",
+            tag,
+            idle_timeout_sec,
+            subproc_log_file,
+        )
         return False
     except Exception as e:
         log.exception("%s ERR: %s", tag, e)
@@ -441,7 +510,9 @@ def main() -> int:
     Order: (1) TASK order = TASK_TO_COLL order; (2) for each CFG, collect all TASKs then next CFG
     (i.e. outer loop CFG, inner loop TASK); (3) GPU parallel preserves this order, processing
     multiple jobs simultaneously. Exit 0 if all OK, 1 if any failed.
-    When SUBPROCESS_PRINT is False, only wrapper progress (seed test, result, saving video) is printed.
+    When SUBPROCESS_PRINT is False, raw subprocess output is only written to per-job log files; the
+    terminal still shows high-level wrapper lines and main-process messages. Log handlers flush after
+    each record to avoid delayed writes.
     Each run_collect line is prefixed with [task][cfg] so parallel workers' output can be distinguished.
     """
     task_to_coll, cfg_to_coll, gpu_parallel = load_config()
@@ -451,8 +522,13 @@ def main() -> int:
     log_file = setup_logging()
     log = logging.getLogger("main")
     log.info("[main] Log file: %s", log_file)
-    log.info("[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
-             task_to_coll, cfg_to_coll, gpu_parallel, subprocess_print)
+    log.info(
+        "[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
+        task_to_coll,
+        cfg_to_coll,
+        gpu_parallel,
+        subprocess_print,
+    )
 
     # Order: for each CFG, all TASKs (CFG outer, TASK inner); pair (task, cfg) for run_collect_data_sh.
     product = [(task, cfg) for cfg in cfg_to_coll for task in task_to_coll]

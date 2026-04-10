@@ -23,6 +23,7 @@ from pathlib import Path
 import trimesh
 import imageio
 import glob
+import time
 
 
 from ._GLOBAL_CONFIGS import *
@@ -32,9 +33,11 @@ from typing import Optional, Literal
 current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
 
+# Throttle "saving: episode = ... index = ..." prints (per-frame spam in log files).
+SAVING_PROGRESS_LOG_INTERVAL_SEC = 10.0
+
 
 class Base_Task(gym.Env):
-
     def __init__(self):
         pass
 
@@ -60,6 +63,7 @@ class Base_Task(gym.Env):
         # random.seed(kwags.get('seed', 0))
 
         self.FRAME_IDX = 0
+        self._last_saving_progress_log_ts = 0.0
         self.task_name = kwags.get("task_name")
         self.save_dir = kwags.get("save_path", "data")
         self.ep_num = kwags.get("now_ep_num", 0)
@@ -80,7 +84,11 @@ class Base_Task(gym.Env):
         self.random_table_height = random_setting.get("random_table_height", 0)
         self.random_light = random_setting.get("random_light", False)
         self.crazy_random_light_rate = random_setting.get("crazy_random_light_rate", 0)
-        self.crazy_random_light = (0 if not self.random_light else np.random.rand() < self.crazy_random_light_rate)
+        self.crazy_random_light = (
+            0
+            if not self.random_light
+            else np.random.rand() < self.crazy_random_light_rate
+        )
         self.random_embodiment = random_setting.get("random_embodiment", False)  # TODO
 
         self.file_path = []
@@ -112,7 +120,9 @@ class Base_Task(gym.Env):
         self.record_cluttered_objects = list()  # record cluttered objects info
 
         self.eval_success = False
-        self.table_z_bias = (np.random.uniform(low=-self.random_table_height, high=0) + table_height_bias)  # TODO
+        self.table_z_bias = (
+            np.random.uniform(low=-self.random_table_height, high=0) + table_height_bias
+        )  # TODO
         self.need_plan = kwags.get("need_plan", True)
         self.left_joint_path = kwags.get("left_joint_path", [])
         self.right_joint_path = kwags.get("right_joint_path", [])
@@ -142,7 +152,8 @@ class Base_Task(gym.Env):
         is_stable, unstable_list = self.check_stable()
         if not is_stable:
             raise UnStableError(
-                f'Objects is unstable in seed({kwags.get("seed", 0)}), unstable objects: {", ".join(unstable_list)}')
+                f"Objects is unstable in seed({kwags.get('seed', 0)}), unstable objects: {', '.join(unstable_list)}"
+            )
 
         if self.eval_mode:
             with open(os.path.join(CONFIGS_PATH, "_eval_step_limit.yml"), "r") as f:
@@ -167,11 +178,15 @@ class Base_Task(gym.Env):
         # ========== CUSTOM MODIFICATION ==========
         # Apply end-reset wrapper once per instance (config from kwags); no change needed in collect_data/eval scripts.
         if not getattr(self, "_end_reset_wrapped", False):
-            from ._end_reset_wrapper import with_end_reset, get_end_reset_to_init
+            from ._enh_util._end_reset_wrapper import (
+                with_end_reset,
+                get_end_reset_to_init,
+            )
+
             with_end_reset(self, get_end_reset_to_init(kwags))
             self._end_reset_wrapped = True
         # =========================================
-        
+
     def check_stable(self):
         actors_list, actors_pose_list = [], []
         for actor in self.scene.get_all_actors():
@@ -248,7 +263,9 @@ class Base_Task(gym.Env):
         # default enable shadow unless specified otherwise
         shadow = kwargs.get("shadow", True)
         # default spotlight angle and intensity
-        direction_lights = kwargs.get("direction_lights", [[[0, 0.5, -1], [0.5, 0.5, 0.5]]])
+        direction_lights = kwargs.get(
+            "direction_lights", [[[0, 0.5, -1], [0.5, 0.5, 0.5]]]
+        )
         self.direction_light_lst = []
         for direction_light in direction_lights:
             if self.random_light:
@@ -258,14 +275,23 @@ class Base_Task(gym.Env):
                     np.random.rand(),
                 ]
             self.direction_light_lst.append(
-                self.scene.add_directional_light(direction_light[0], direction_light[1], shadow=shadow))
+                self.scene.add_directional_light(
+                    direction_light[0], direction_light[1], shadow=shadow
+                )
+            )
         # default point lights position and intensity
-        point_lights = kwargs.get("point_lights", [[[1, 0, 1.8], [1, 1, 1]], [[-1, 0, 1.8], [1, 1, 1]]])
+        point_lights = kwargs.get(
+            "point_lights", [[[1, 0, 1.8], [1, 1, 1]], [[-1, 0, 1.8], [1, 1, 1]]]
+        )
         self.point_light_lst = []
         for point_light in point_lights:
             if self.random_light:
                 point_light[1] = [np.random.rand(), np.random.rand(), np.random.rand()]
-            self.point_light_lst.append(self.scene.add_point_light(point_light[0], point_light[1], shadow=shadow))
+            self.point_light_lst.append(
+                self.scene.add_point_light(
+                    point_light[0], point_light[1], shadow=shadow
+                )
+            )
 
         # initialize viewer with camera position and orientation
         if self.render_freq:
@@ -291,10 +317,18 @@ class Base_Task(gym.Env):
             texture_type = "seen" if not self.eval_mode else "unseen"
             directory_path = f"./assets/background_texture/{texture_type}"
             file_count = len(
-                [name for name in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, name))])
+                [
+                    name
+                    for name in os.listdir(directory_path)
+                    if os.path.isfile(os.path.join(directory_path, name))
+                ]
+            )
 
             # wall_texture, table_texture = random.randint(0, file_count - 1), random.randint(0, file_count - 1)
-            wall_texture, table_texture = np.random.randint(0, file_count), np.random.randint(0, file_count)
+            wall_texture, table_texture = (
+                np.random.randint(0, file_count),
+                np.random.randint(0, file_count),
+            )
 
             self.wall_texture, self.table_texture = (
                 f"{texture_type}/{wall_texture}",
@@ -328,7 +362,9 @@ class Base_Task(gym.Env):
             texture_id=self.table_texture,
         )
 
-    def get_cluttered_table(self, cluttered_numbers=10, xlim=[-0.59, 0.59], ylim=[-0.34, 0.34], zlim=[0.741]):
+    def get_cluttered_table(
+        self, cluttered_numbers=10, xlim=[-0.59, 0.59], ylim=[-0.34, 0.34], zlim=[0.741]
+    ):
         self.record_cluttered_objects = []  # record cluttered objects
 
         xlim[0] += self.table_xy_bias[0]
@@ -347,7 +383,9 @@ class Base_Task(gym.Env):
             if actor_name in ["table", "wall", "ground"]:
                 continue
             task_objects_list.append(actor_name)
-        self.obj_names, self.cluttered_item_info = get_available_cluttered_objects(task_objects_list)
+        self.obj_names, self.cluttered_item_info = get_available_cluttered_objects(
+            task_objects_list
+        )
 
         success_count = 0
         max_try = 50
@@ -359,7 +397,9 @@ class Base_Task(gym.Env):
             obj_idx = np.random.randint(len(self.cluttered_item_info[obj_name]["ids"]))
             obj_idx = self.cluttered_item_info[obj_name]["ids"][obj_idx]
             obj_radius = self.cluttered_item_info[obj_name]["params"][obj_idx]["radius"]
-            obj_offset = self.cluttered_item_info[obj_name]["params"][obj_idx]["z_offset"]
+            obj_offset = self.cluttered_item_info[obj_name]["params"][obj_idx][
+                "z_offset"
+            ]
             obj_maxz = self.cluttered_item_info[obj_name]["params"][obj_idx]["z_max"]
 
             success, self.cluttered_obj = rand_create_cluttered_actor(
@@ -387,10 +427,14 @@ class Base_Task(gym.Env):
             pose.append(obj_radius)
             self.size_dict.append(pose)
             success_count += 1
-            self.record_cluttered_objects.append({"object_type": obj_name, "object_index": obj_idx})
+            self.record_cluttered_objects.append(
+                {"object_type": obj_name, "object_index": obj_idx}
+            )
 
         if success_count < cluttered_numbers:
-            print(f"Warning: Only {success_count} cluttered objects are placed on the table.")
+            print(
+                f"Warning: Only {success_count} cluttered objects are placed on the table."
+            )
 
         self.size_dict = None
         self.cluttered_objs = []
@@ -437,13 +481,21 @@ class Base_Task(gym.Env):
         """
         if self.crazy_random_light:
             for renderColor in self.point_light_lst:
-                renderColor.set_color([np.random.rand(), np.random.rand(), np.random.rand()])
+                renderColor.set_color(
+                    [np.random.rand(), np.random.rand(), np.random.rand()]
+                )
             for renderColor in self.direction_light_lst:
-                renderColor.set_color([np.random.rand(), np.random.rand(), np.random.rand()])
+                renderColor.set_color(
+                    [np.random.rand(), np.random.rand(), np.random.rand()]
+                )
             now_ambient_light = self.scene.ambient_light
-            now_ambient_light = np.clip(np.array(now_ambient_light) + np.random.rand(3) * 0.2 - 0.1, 0, 1)
+            now_ambient_light = np.clip(
+                np.array(now_ambient_light) + np.random.rand(3) * 0.2 - 0.1, 0, 1
+            )
             self.scene.set_ambient_light(now_ambient_light)
-        self.cameras.update_wrist_camera(self.robot.left_camera.get_pose(), self.robot.right_camera.get_pose())
+        self.cameras.update_wrist_camera(
+            self.robot.left_camera.get_pose(), self.robot.right_camera.get_pose()
+        )
         self.scene.update_render()
 
     # =========================================================== Basic APIs ===========================================================
@@ -472,12 +524,16 @@ class Base_Task(gym.Env):
         if self.data_type.get("mesh_segmentation", False):
             mesh_segmentation = self.cameras.get_segmentation(level="mesh")
             for camera_name in mesh_segmentation.keys():
-                pkl_dic["observation"][camera_name].update(mesh_segmentation[camera_name])
+                pkl_dic["observation"][camera_name].update(
+                    mesh_segmentation[camera_name]
+                )
         # actor_segmentation
         if self.data_type.get("actor_segmentation", False):
             actor_segmentation = self.cameras.get_segmentation(level="actor")
             for camera_name in actor_segmentation.keys():
-                pkl_dic["observation"][camera_name].update(actor_segmentation[camera_name])
+                pkl_dic["observation"][camera_name].update(
+                    actor_segmentation[camera_name]
+                )
         # depth
         if self.data_type.get("depth", False):
             depth = self.cameras.get_depth()
@@ -497,7 +553,6 @@ class Base_Task(gym.Env):
             pkl_dic["endpose"]["right_gripper"] = norm_gripper_val[1]
         # qpos
         if self.data_type.get("qpos", False):
-
             left_jointstate = self.robot.get_left_arm_jointState()
             right_jointstate = self.robot.get_right_arm_jointState()
 
@@ -505,28 +560,41 @@ class Base_Task(gym.Env):
             pkl_dic["joint_action"]["left_gripper"] = left_jointstate[-1]
             pkl_dic["joint_action"]["right_arm"] = right_jointstate[:-1]
             pkl_dic["joint_action"]["right_gripper"] = right_jointstate[-1]
-            pkl_dic["joint_action"]["vector"] = np.array(left_jointstate + right_jointstate)
+            pkl_dic["joint_action"]["vector"] = np.array(
+                left_jointstate + right_jointstate
+            )
         # pointcloud
         if self.data_type.get("pointcloud", False):
-            pkl_dic["pointcloud"] = self.cameras.get_pcd(self.data_type.get("conbine", False))
+            pkl_dic["pointcloud"] = self.cameras.get_pcd(
+                self.data_type.get("conbine", False)
+            )
 
         self.now_obs = deepcopy(pkl_dic)
         return pkl_dic
 
-    def save_camera_rgb(self, save_path, camera_name='head_camera'):
+    def save_camera_rgb(self, save_path, camera_name="head_camera"):
         self._update_render()
         self.cameras.update_picture()
         rgb = self.cameras.get_rgb()
-        save_img(save_path, rgb[camera_name]['rgb'])
+        save_img(save_path, rgb[camera_name]["rgb"])
 
     def _take_picture(self):  # save data
         if not self.save_data:
             return
 
-        print("saving: episode = ", self.ep_num, " index = ", self.FRAME_IDX, end="\r")
+        now = time.time()
+        if self.FRAME_IDX == 0 or (
+            now - self._last_saving_progress_log_ts >= SAVING_PROGRESS_LOG_INTERVAL_SEC
+        ):
+            print(
+                "saving: episode = ", self.ep_num, " index = ", self.FRAME_IDX, end="\r"
+            )
+            self._last_saving_progress_log_ts = now
 
         if self.FRAME_IDX == 0:
-            self.folder_path = {"cache": f"{self.save_dir}/.cache/episode{self.ep_num}/"}
+            self.folder_path = {
+                "cache": f"{self.save_dir}/.cache/episode{self.ep_num}/"
+            }
 
             for directory in self.folder_path.values():  # remove previous data
                 if os.path.exists(directory):
@@ -535,7 +603,9 @@ class Base_Task(gym.Env):
                         os.remove(directory + file)
 
         pkl_dic = self.get_obs()
-        save_pkl(self.folder_path["cache"] + f"{self.FRAME_IDX}.pkl", pkl_dic)  # use cache
+        save_pkl(
+            self.folder_path["cache"] + f"{self.FRAME_IDX}.pkl", pkl_dic
+        )  # use cache
         self.FRAME_IDX += 1
 
     def save_traj_data(self, idx):
@@ -631,7 +701,9 @@ class Base_Task(gym.Env):
         left_result, right_result = None, None
 
         if set_tag == "left" or set_tag == "together":
-            left_result = self.robot.left_plan_grippers(self.robot.get_left_gripper_val(), left_pos)
+            left_result = self.robot.left_plan_grippers(
+                self.robot.get_left_gripper_val(), left_pos
+            )
             left_gripper_step = left_result["per_step"]
             left_gripper_res = left_result["result"]
             num_step = left_result["num_step"]
@@ -646,7 +718,9 @@ class Base_Task(gym.Env):
                 return left_result
 
         if set_tag == "right" or set_tag == "together":
-            right_result = self.robot.right_plan_grippers(self.robot.get_right_gripper_val(), right_pos)
+            right_result = self.robot.right_plan_grippers(
+                self.robot.get_right_gripper_val(), right_pos
+            )
             right_gripper_step = right_result["per_step"]
             right_gripper_res = right_result["result"]
             num_step = right_result["num_step"]
@@ -667,8 +741,11 @@ class Base_Task(gym.Env):
         actor: Actor | sapien.Entity | sapien.Pose | list | np.ndarray,
         padding=0.01,
     ):
-
-        if (isinstance(actor, sapien.Pose) or isinstance(actor, list) or isinstance(actor, np.ndarray)):
+        if (
+            isinstance(actor, sapien.Pose)
+            or isinstance(actor, list)
+            or isinstance(actor, np.ndarray)
+        ):
             actor_pose = transforms._toPose(actor)
             actor_data = {}
         else:
@@ -679,20 +756,29 @@ class Base_Task(gym.Env):
                 actor_data = {}
 
         scale: float = actor_data.get("scale", 1)
-        origin_bounding_size = (np.array(actor_data.get("extents", [0.1, 0.1, 0.1])) * scale / 2)
-        origin_bounding_pts = (np.array([
-            [-1, -1, -1],
-            [-1, -1, 1],
-            [-1, 1, -1],
-            [-1, 1, 1],
-            [1, -1, -1],
-            [1, -1, 1],
-            [1, 1, -1],
-            [1, 1, 1],
-        ]) * origin_bounding_size)
+        origin_bounding_size = (
+            np.array(actor_data.get("extents", [0.1, 0.1, 0.1])) * scale / 2
+        )
+        origin_bounding_pts = (
+            np.array(
+                [
+                    [-1, -1, -1],
+                    [-1, -1, 1],
+                    [-1, 1, -1],
+                    [-1, 1, 1],
+                    [1, -1, -1],
+                    [1, -1, 1],
+                    [1, 1, -1],
+                    [1, 1, 1],
+                ]
+            )
+            * origin_bounding_size
+        )
 
         actor_matrix = actor_pose.to_transformation_matrix()
-        trans_bounding_pts = actor_matrix[:3, :3] @ origin_bounding_pts.T + actor_matrix[:3, 3].reshape(3, 1)
+        trans_bounding_pts = actor_matrix[
+            :3, :3
+        ] @ origin_bounding_pts.T + actor_matrix[:3, 3].reshape(3, 1)
         x_min = np.min(trans_bounding_pts[0]) - padding
         x_max = np.max(trans_bounding_pts[0]) + padding
         y_min = np.min(trans_bounding_pts[1]) - padding
@@ -722,7 +808,9 @@ class Base_Task(gym.Env):
     # =========================================================== Our APIS ===========================================================
 
     def together_close_gripper(self, save_freq=-1, left_pos=0, right_pos=0):
-        left_result, right_result = self.set_gripper(left_pos=left_pos, right_pos=right_pos, set_tag="together")
+        left_result, right_result = self.set_gripper(
+            left_pos=left_pos, right_pos=right_pos, set_tag="together"
+        )
         control_seq = {
             "left_arm": None,
             "left_gripper": left_result,
@@ -732,7 +820,9 @@ class Base_Task(gym.Env):
         self.take_dense_action(control_seq, save_freq=save_freq)
 
     def together_open_gripper(self, save_freq=-1, left_pos=1, right_pos=1):
-        left_result, right_result = self.set_gripper(left_pos=left_pos, right_pos=right_pos, set_tag="together")
+        left_result, right_result = self.set_gripper(
+            left_pos=left_pos, right_pos=right_pos, set_tag="together"
+        )
         control_seq = {
             "left_arm": None,
             "left_gripper": left_result,
@@ -762,7 +852,9 @@ class Base_Task(gym.Env):
             pose = pose.p.tolist() + pose.q.tolist()
 
         if self.need_plan:
-            left_result = self.robot.left_plan_path(pose, constraint_pose=constraint_pose)
+            left_result = self.robot.left_plan_path(
+                pose, constraint_pose=constraint_pose
+            )
             self.left_joint_path.append(deepcopy(left_result))
         else:
             left_result = deepcopy(self.left_joint_path[self.left_cnt])
@@ -795,7 +887,9 @@ class Base_Task(gym.Env):
             pose = pose.p.tolist() + pose.q.tolist()
 
         if self.need_plan:
-            right_result = self.robot.right_plan_path(pose, constraint_pose=constraint_pose)
+            right_result = self.robot.right_plan_path(
+                pose, constraint_pose=constraint_pose
+            )
             self.right_joint_path.append(deepcopy(right_result))
         else:
             right_result = deepcopy(self.right_joint_path[self.right_cnt])
@@ -829,11 +923,17 @@ class Base_Task(gym.Env):
         if type(left_target_pose) == sapien.Pose:
             left_target_pose = left_target_pose.p.tolist() + left_target_pose.q.tolist()
         if type(right_target_pose) == sapien.Pose:
-            right_target_pose = (right_target_pose.p.tolist() + right_target_pose.q.tolist())
+            right_target_pose = (
+                right_target_pose.p.tolist() + right_target_pose.q.tolist()
+            )
         save_freq = self.save_freq if save_freq == -1 else save_freq
         if self.need_plan:
-            left_result = self.robot.left_plan_path(left_target_pose, constraint_pose=left_constraint_pose)
-            right_result = self.robot.right_plan_path(right_target_pose, constraint_pose=right_constraint_pose)
+            left_result = self.robot.left_plan_path(
+                left_target_pose, constraint_pose=left_constraint_pose
+            )
+            right_result = self.robot.right_plan_path(
+                right_target_pose, constraint_pose=right_constraint_pose
+            )
             self.left_joint_path.append(deepcopy(left_result))
             self.right_joint_path.append(deepcopy(right_result))
         else:
@@ -866,8 +966,14 @@ class Base_Task(gym.Env):
         while now_left_id < left_n_step or now_right_id < right_n_step:
             # set the joint positions and velocities for move group joints only.
             # The others are not the responsibility of the planner
-            if (left_success and now_left_id < left_n_step
-                    and (not right_success or now_left_id / left_n_step <= now_right_id / right_n_step)):
+            if (
+                left_success
+                and now_left_id < left_n_step
+                and (
+                    not right_success
+                    or now_left_id / left_n_step <= now_right_id / right_n_step
+                )
+            ):
                 self.robot.set_arm_joints(
                     left_result["position"][now_left_id],
                     left_result["velocity"][now_left_id],
@@ -875,8 +981,14 @@ class Base_Task(gym.Env):
                 )
                 now_left_id += 1
 
-            if (right_success and now_right_id < right_n_step
-                    and (not left_success or now_right_id / right_n_step <= now_left_id / left_n_step)):
+            if (
+                right_success
+                and now_right_id < right_n_step
+                and (
+                    not left_success
+                    or now_right_id / right_n_step <= now_left_id / left_n_step
+                )
+            ):
                 self.robot.set_arm_joints(
                     right_result["position"][now_right_id],
                     right_result["velocity"][now_right_id],
@@ -933,13 +1045,16 @@ class Base_Task(gym.Env):
         right_actions += [None] * (max_len - len(right_actions))
 
         for left, right in zip(left_actions, right_actions):
+            if (left is not None and left.arm_tag != "left") or (
+                right is not None and right.arm_tag != "right"
+            ):  # check
+                raise ValueError(
+                    f"Invalid arm tag: {left.arm_tag} or {right.arm_tag}. Must be 'left' or 'right'."
+                )
 
-            if (left is not None and left.arm_tag != "left") or (right is not None
-                                                                 and right.arm_tag != "right"):  # check
-                raise ValueError(f"Invalid arm tag: {left.arm_tag} or {right.arm_tag}. Must be 'left' or 'right'.")
-
-            if (left is not None and left.action == "move") and (right is not None
-                                                                 and right.action == "move"):  # together move
+            if (left is not None and left.action == "move") and (
+                right is not None and right.action == "move"
+            ):  # together move
                 self.together_move_to_pose(  # TODO
                     left_target_pose=left.target_pose,
                     right_target_pose=right.target_pose,
@@ -963,7 +1078,9 @@ class Base_Task(gym.Env):
                             constraint_pose=left.args.get("constraint_pose"),
                         )
                     else:  # left.action == 'gripper'
-                        control_seq["left_gripper"] = self.set_gripper(left_pos=left.target_gripper_pos, set_tag="left")
+                        control_seq["left_gripper"] = self.set_gripper(
+                            left_pos=left.target_gripper_pos, set_tag="left"
+                        )
                     if self.plan_success is False:
                         return False
 
@@ -974,8 +1091,9 @@ class Base_Task(gym.Env):
                             constraint_pose=right.args.get("constraint_pose"),
                         )
                     else:  # right.action == 'gripper'
-                        control_seq["right_gripper"] = self.set_gripper(right_pos=right.target_gripper_pos,
-                                                                        set_tag="right")
+                        control_seq["right_gripper"] = self.set_gripper(
+                            right_pos=right.target_gripper_pos, set_tag="right"
+                        )
                     if self.plan_success is False:
                         return False
 
@@ -987,9 +1105,15 @@ class Base_Task(gym.Env):
         contacts = self.scene.get_contacts()
         position_lst = []
         for contact in contacts:
-            if (contact.bodies[0].entity.name == actor_name or contact.bodies[1].entity.name == actor_name):
-                contact_object = (contact.bodies[1].entity.name
-                                  if contact.bodies[0].entity.name == actor_name else contact.bodies[0].entity.name)
+            if (
+                contact.bodies[0].entity.name == actor_name
+                or contact.bodies[1].entity.name == actor_name
+            ):
+                contact_object = (
+                    contact.bodies[1].entity.name
+                    if contact.bodies[0].entity.name == actor_name
+                    else contact.bodies[0].entity.name
+                )
                 if contact_object in self.robot.gripper_name:
                     for point in contact.points:
                         position_lst.append(point.position)
@@ -1003,9 +1127,13 @@ class Base_Task(gym.Env):
         """
         contacts = self.scene.get_contacts()
         for contact in contacts:
-            if (contact.bodies[0].entity.name == actor1
-                    and contact.bodies[1].entity.name == actor2) or (contact.bodies[0].entity.name == actor2
-                                                                     and contact.bodies[1].entity.name == actor1):
+            if (
+                contact.bodies[0].entity.name == actor1
+                and contact.bodies[1].entity.name == actor2
+            ) or (
+                contact.bodies[0].entity.name == actor2
+                and contact.bodies[1].entity.name == actor1
+            ):
                 return True
         return False
 
@@ -1040,7 +1168,9 @@ class Base_Task(gym.Env):
         return now_pose
 
     # test grasp pose of all contact points
-    def _print_all_grasp_pose_of_contact_points(self, actor: Actor, pre_dis: float = 0.1):
+    def _print_all_grasp_pose_of_contact_points(
+        self, actor: Actor, pre_dis: float = 0.1
+    ):
         for i in range(len(actor.config["contact_points_pose"])):
             print(i, self.get_grasp_pose(actor, pre_dis=pre_dis, contact_point_id=i))
 
@@ -1064,17 +1194,24 @@ class Base_Task(gym.Env):
         contact_matrix = actor.get_contact_point(contact_point_id, "matrix")
         if contact_matrix is None:
             return None
-        global_contact_pose_matrix = contact_matrix @ np.array([[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0],
-                                                                [0, 0, 0, 1]])
+        global_contact_pose_matrix = contact_matrix @ np.array(
+            [[0, 0, 1, 0], [-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 1]]
+        )
         global_contact_pose_matrix_q = global_contact_pose_matrix[:3, :3]
-        global_grasp_pose_p = (global_contact_pose_matrix[:3, 3] +
-                               global_contact_pose_matrix_q @ np.array([-0.12 - pre_dis, 0, 0]).T)
+        global_grasp_pose_p = (
+            global_contact_pose_matrix[:3, 3]
+            + global_contact_pose_matrix_q @ np.array([-0.12 - pre_dis, 0, 0]).T
+        )
         global_grasp_pose_q = t3d.quaternions.mat2quat(global_contact_pose_matrix_q)
         res_pose = list(global_grasp_pose_p) + list(global_grasp_pose_q)
-        res_pose = self.choose_best_pose(res_pose, actor.get_contact_point(contact_point_id, "list"), arm_tag)
+        res_pose = self.choose_best_pose(
+            res_pose, actor.get_contact_point(contact_point_id, "list"), arm_tag
+        )
         return res_pose
 
-    def _default_choose_grasp_pose(self, actor: Actor, arm_tag: ArmTag, pre_dis: float) -> list:
+    def _default_choose_grasp_pose(
+        self, actor: Actor, arm_tag: ArmTag, pre_dis: float
+    ) -> list:
         """
         Default grasp pose function.
         - actor: The target actor to be grasped.
@@ -1087,9 +1224,16 @@ class Base_Task(gym.Env):
         for i, contact_point in actor.iter_contact_points("list"):
             pose = self.get_grasp_pose(actor, arm_tag, pre_dis, i)
             now_score = 0
-            if not (contact_point[1] < -0.1 and pose[2] < 0.85 or contact_point[1] > 0.05 and pose[2] > 0.92):
+            if not (
+                contact_point[1] < -0.1
+                and pose[2] < 0.85
+                or contact_point[1] > 0.05
+                and pose[2] > 0.92
+            ):
                 now_score -= 1
-            quat_dis = cal_quat_dis(pose[-4:], GRASP_DIRECTION_DIC[str(arm_tag) + "_arm_perf"])
+            quat_dis = cal_quat_dis(
+                pose[-4:], GRASP_DIRECTION_DIC[str(arm_tag) + "_arm_perf"]
+            )
 
         return self.get_grasp_pose(actor, arm_tag, pre_dis=pre_dis)
 
@@ -1148,13 +1292,21 @@ class Base_Task(gym.Env):
             contact_point_id = actor.iter_contact_points()
 
         for i, _ in contact_point_id:
-            pre_pose = self.get_grasp_pose(actor, arm_tag, contact_point_id=i, pre_dis=pre_dis)
+            pre_pose = self.get_grasp_pose(
+                actor, arm_tag, contact_point_id=i, pre_dis=pre_dis
+            )
             if pre_pose is None:
                 continue
             pose = get_grasp_pose(pre_pose, pre_dis - target_dis)
             now_dis_top_down = cal_quat_dis(
                 pose[-4:],
-                GRASP_DIRECTION_DIC[("top_down_little_left" if arm_tag == "right" else "top_down_little_right")],
+                GRASP_DIRECTION_DIC[
+                    (
+                        "top_down_little_left"
+                        if arm_tag == "right"
+                        else "top_down_little_right"
+                    )
+                ],
             )
             now_dis_side = cal_quat_dis(pose[-4:], GRASP_DIRECTION_DIC[pref_direction])
 
@@ -1246,7 +1398,6 @@ class Base_Task(gym.Env):
         pre_dis: float = 0.1,
         pre_dis_axis: Literal["grasp", "fp"] | np.ndarray | list = "grasp",
     ):
-
         if not self.plan_success:
             return [-1, -1, -1, -1, -1, -1, -1]
 
@@ -1258,7 +1409,11 @@ class Base_Task(gym.Env):
             place_start_pose = actor.get_pose()
             z_transform = True
 
-        end_effector_pose = (self.robot.get_left_ee_pose() if arm_tag == "left" else self.robot.get_right_ee_pose())
+        end_effector_pose = (
+            self.robot.get_left_ee_pose()
+            if arm_tag == "left"
+            else self.robot.get_right_ee_pose()
+        )
 
         if constrain == "auto":
             grasp_direct_vec = place_start_pose.p - end_effector_pose[:3]
@@ -1273,7 +1428,9 @@ class Base_Task(gym.Env):
                     z_transform=z_transform,
                 )
             else:
-                camera_vec = transforms._toPose(end_effector_pose).to_transformation_matrix()[:3, 2]
+                camera_vec = transforms._toPose(
+                    end_effector_pose
+                ).to_transformation_matrix()[:3, 2]
                 place_pose = get_place_pose(
                     place_start_pose,
                     target_pose,
@@ -1293,10 +1450,13 @@ class Base_Task(gym.Env):
                 align_axis=align_axis,
                 z_transform=z_transform,
             )
-        start2target = (transforms._toPose(place_pose).to_transformation_matrix()[:3, :3]
-                        @ place_start_pose.to_transformation_matrix()[:3, :3].T)
-        target_point = (start2target @ (actor_matrix[:3, 3] - place_start_pose.p).reshape(3, 1)).reshape(3) + np.array(
-            place_pose[:3])
+        start2target = (
+            transforms._toPose(place_pose).to_transformation_matrix()[:3, :3]
+            @ place_start_pose.to_transformation_matrix()[:3, :3].T
+        )
+        target_point = (
+            start2target @ (actor_matrix[:3, 3] - place_start_pose.p).reshape(3, 1)
+        ).reshape(3) + np.array(place_pose[:3])
 
         ee_pose_matrix = t3d.quaternions.quat2mat(end_effector_pose[-4:])
         target_grasp_matrix = start2target @ ee_pose_matrix
@@ -1316,9 +1476,13 @@ class Base_Task(gym.Env):
                 pre_dis_axis = [0.0, 0.0, 1.0]
             pre_dis_axis = np.array(pre_dis_axis)
             pre_dis_axis /= np.linalg.norm(pre_dis_axis)
-            target_dis_vec = (target_pose_mat[:3, :3] @ np.array(pre_dis_axis).reshape(3, 1)).reshape(3)
+            target_dis_vec = (
+                target_pose_mat[:3, :3] @ np.array(pre_dis_axis).reshape(3, 1)
+            ).reshape(3)
             target_dis_vec /= np.linalg.norm(target_dis_vec)
-        res_pose = (target_point - grasp_bias - pre_dis * target_dis_vec).tolist() + target_grasp_qpose.tolist()
+        res_pose = (
+            target_point - grasp_bias - pre_dis * target_dis_vec
+        ).tolist() + target_grasp_qpose.tolist()
         return res_pose
 
     def place_actor(
@@ -1448,8 +1612,9 @@ class Base_Task(gym.Env):
             max_control_len = max(max_control_len, right_gripper["num_step"])
 
         for control_idx in range(max_control_len):
-
-            if (left_arm is not None and control_idx < left_arm["position"].shape[0]):  # control left arm
+            if (
+                left_arm is not None and control_idx < left_arm["position"].shape[0]
+            ):  # control left arm
                 self.robot.set_arm_joints(
                     left_arm["position"][control_idx],
                     left_arm["velocity"][control_idx],
@@ -1463,7 +1628,9 @@ class Base_Task(gym.Env):
                     left_gripper["per_step"],
                 )  # TODO
 
-            if (right_arm is not None and control_idx < right_arm["position"].shape[0]):  # control right arm
+            if (
+                right_arm is not None and control_idx < right_arm["position"].shape[0]
+            ):  # control right arm
                 self.robot.set_arm_joints(
                     right_arm["position"][control_idx],
                     right_arm["velocity"][control_idx],
@@ -1492,16 +1659,25 @@ class Base_Task(gym.Env):
 
         return True  # TODO: maybe need try error
 
-    def take_action(self, action, action_type:Literal['qpos', 'ee']='qpos'):  # action_type: qpos or ee
+    def take_action(
+        self, action, action_type: Literal["qpos", "ee"] = "qpos"
+    ):  # action_type: qpos or ee
         if self.take_action_cnt == self.step_lim or self.eval_success:
             return
 
         eval_video_freq = 1  # fixed
-        if (self.eval_video_path is not None and self.take_action_cnt % eval_video_freq == 0):
-            self.eval_video_ffmpeg.stdin.write(self.now_obs["observation"]["head_camera"]["rgb"].tobytes())
+        if (
+            self.eval_video_path is not None
+            and self.take_action_cnt % eval_video_freq == 0
+        ):
+            self.eval_video_ffmpeg.stdin.write(
+                self.now_obs["observation"]["head_camera"]["rgb"].tobytes()
+            )
 
         self.take_action_cnt += 1
-        print(f"step: \033[92m{self.take_action_cnt} / {self.step_lim}\033[0m", end="\r")
+        print(
+            f"step: \033[92m{self.take_action_cnt} / {self.step_lim}\033[0m", end="\r"
+        )
 
         self._update_render()
         if self.render_freq:
@@ -1510,8 +1686,8 @@ class Base_Task(gym.Env):
         actions = np.array([action])
         left_jointstate = self.robot.get_left_arm_jointState()
         right_jointstate = self.robot.get_right_arm_jointState()
-        left_arm_dim = len(left_jointstate) - 1 if action_type == 'qpos' else 7
-        right_arm_dim = len(right_jointstate) - 1 if action_type == 'qpos' else 7
+        left_arm_dim = len(left_jointstate) - 1 if action_type == "qpos" else 7
+        right_arm_dim = len(right_jointstate) - 1 if action_type == "qpos" else 7
         current_jointstate = np.array(left_jointstate + right_jointstate)
 
         left_arm_actions, left_gripper_actions, left_current_qpos, left_path = (
@@ -1532,7 +1708,7 @@ class Base_Task(gym.Env):
             actions[:, left_arm_dim],
         )
         right_arm_actions, right_gripper_actions = (
-            actions[:, left_arm_dim + 1:left_arm_dim + right_arm_dim + 1],
+            actions[:, left_arm_dim + 1 : left_arm_dim + right_arm_dim + 1],
             actions[:, left_arm_dim + right_arm_dim + 1],
         )
         left_current_gripper, right_current_gripper = (
@@ -1543,10 +1719,10 @@ class Base_Task(gym.Env):
         left_gripper_path = np.hstack((left_current_gripper, left_gripper_actions))
         right_gripper_path = np.hstack((right_current_gripper, right_gripper_actions))
 
-        if action_type == 'qpos':
+        if action_type == "qpos":
             left_current_qpos, right_current_qpos = (
                 current_jointstate[:left_arm_dim],
-                current_jointstate[left_arm_dim + 1:left_arm_dim + right_arm_dim + 1],
+                current_jointstate[left_arm_dim + 1 : left_arm_dim + right_arm_dim + 1],
             )
             left_path = np.vstack((left_current_qpos, left_arm_actions))
             right_path = np.vstack((right_current_qpos, right_arm_actions))
@@ -1556,9 +1732,9 @@ class Base_Task(gym.Env):
             topp_left_flag, topp_right_flag = True, True
 
             try:
-                times, left_pos, left_vel, acc, duration = (self.robot.left_mplib_planner.TOPP(left_path,
-                                                                                            1 / 250,
-                                                                                            verbose=True))
+                times, left_pos, left_vel, acc, duration = (
+                    self.robot.left_mplib_planner.TOPP(left_path, 1 / 250, verbose=True)
+                )
                 left_result = dict()
                 left_result["position"], left_result["velocity"] = left_pos, left_vel
                 left_n_step = left_result["position"].shape[0]
@@ -1572,11 +1748,16 @@ class Base_Task(gym.Env):
                 left_n_step = 50  # fixed
 
             try:
-                times, right_pos, right_vel, acc, duration = (self.robot.right_mplib_planner.TOPP(right_path,
-                                                                                                1 / 250,
-                                                                                                verbose=True))
+                times, right_pos, right_vel, acc, duration = (
+                    self.robot.right_mplib_planner.TOPP(
+                        right_path, 1 / 250, verbose=True
+                    )
+                )
                 right_result = dict()
-                right_result["position"], right_result["velocity"] = right_pos, right_vel
+                right_result["position"], right_result["velocity"] = (
+                    right_pos,
+                    right_vel,
+                )
                 right_n_step = right_result["position"].shape[0]
             except Exception as e:
                 # print("right arm TOPP error: ", e)
@@ -1586,19 +1767,18 @@ class Base_Task(gym.Env):
             if right_n_step == 0:
                 topp_right_flag = False
                 right_n_step = 50  # fixed
-        
-        elif action_type == 'ee':
 
+        elif action_type == "ee":
             left_result = self.robot.left_plan_path(left_arm_actions[0])
             right_result = self.robot.right_plan_path(right_arm_actions[0])
             if left_result["status"] != "Success":
                 left_n_step = 50
                 topp_left_flag = False
                 # print("left fail")
-            else: 
+            else:
                 left_n_step = left_result["position"].shape[0]
                 topp_left_flag = True
-            
+
             if right_result["status"] != "Success":
                 right_n_step = 50
                 topp_right_flag = False
@@ -1644,8 +1824,10 @@ class Base_Task(gym.Env):
 
         # ========== Control Loop ==========
         while now_left_id < left_n_step or now_right_id < right_n_step:
-
-            if (now_left_id < left_n_step and now_left_id / left_n_step <= now_right_id / right_n_step):
+            if (
+                now_left_id < left_n_step
+                and now_left_id / left_n_step <= now_right_id / right_n_step
+            ):
                 if topp_left_flag:
                     self.robot.set_arm_joints(
                         left_result["position"][now_left_id],
@@ -1656,7 +1838,10 @@ class Base_Task(gym.Env):
 
                 now_left_id += 1
 
-            if (now_right_id < right_n_step and now_right_id / right_n_step <= now_left_id / left_n_step):
+            if (
+                now_right_id < right_n_step
+                and now_right_id / right_n_step <= now_left_id / left_n_step
+            ):
                 if topp_right_flag:
                     self.robot.set_arm_joints(
                         right_result["position"][now_right_id],
@@ -1669,20 +1854,23 @@ class Base_Task(gym.Env):
 
             self.scene.step()
             self._update_render()
-                
+
             if self.check_success():
                 self.eval_success = True
-                self.get_obs() # update obs
-                if (self.eval_video_path is not None):
-                    self.eval_video_ffmpeg.stdin.write(self.now_obs["observation"]["head_camera"]["rgb"].tobytes())
+                self.get_obs()  # update obs
+                if self.eval_video_path is not None:
+                    self.eval_video_ffmpeg.stdin.write(
+                        self.now_obs["observation"]["head_camera"]["rgb"].tobytes()
+                    )
                 return
 
         self._update_render()
         if self.render_freq:  # UI
             self.viewer.render()
 
-
-    def save_camera_images(self, task_name, step_name, generate_num_id, save_dir="./camera_images"):
+    def save_camera_images(
+        self, task_name, step_name, generate_num_id, save_dir="./camera_images"
+    ):
         """
         Save camera images - patched version to ensure consistent episode numbering across all steps.
 
@@ -1700,17 +1888,17 @@ class Base_Task(gym.Env):
         # Create a subdirectory specific to the task
         task_dir = os.path.join(save_dir, task_name)
         os.makedirs(task_dir, exist_ok=True)
-        
+
         # Create a subdirectory for the given generate_num_id
         generate_dir = os.path.join(task_dir, generate_num_id)
         os.makedirs(generate_dir, exist_ok=True)
-        
+
         obs = self.get_obs()
         cam_obs = obs["observation"]
         image_data = {}
 
         # Extract step number and description from step_name using regex
-        match = re.match(r'(step[_]?\d+)(?:_(.*))?', step_name)
+        match = re.match(r"(step[_]?\d+)(?:_(.*))?", step_name)
         if match:
             step_num = match.group(1)
             step_description = match.group(2) if match.group(2) else ""
@@ -1724,16 +1912,16 @@ class Base_Task(gym.Env):
             rgb = cam_obs[cam_name]["rgb"]
             if rgb.dtype != np.uint8:
                 rgb = (rgb * 255).clip(0, 255).astype(np.uint8)
-            
+
             # Use the instance's ep_num as the episode number
-            episode_num = getattr(self, 'ep_num', 0)
-            
+            episode_num = getattr(self, "ep_num", 0)
+
             # Save image to the subdirectory for the specific generate_num_id
             filename = f"episode{episode_num}_{step_num}_{step_description}.png"
             filepath = os.path.join(generate_dir, filename)
             imageio.imwrite(filepath, rgb)
             image_data[cam_name] = rgb
-            
+
             # print(f"Saving image with episode_num={episode_num}, filename: {filename}, path: {generate_dir}")
-        
+
         return image_data

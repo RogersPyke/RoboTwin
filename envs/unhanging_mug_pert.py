@@ -1,21 +1,4 @@
-from ._pert_mixin import PerturbationMixin
-from .unhanging_mug import unhanging_mug
-
-
-class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
-
-    def setup_demo(self, *args, **kwargs):
-        kwargs["conservative_mode"] = True
-        return super().setup_demo(*args, **kwargs)
-# Purpose: Perturbation variant of unhanging_mug (conservative mode).
-# Conservative mode uses tighter bounds (smaller cone angle, smaller XY offset)
-# to preserve the high success rate required by the more constrained un-task.
-# Dependencies: _pert_mixin.PerturbationMixin, unhanging_mug
-# Usage: ./collect_data.sh unhanging_mug_pert demo_clean_pert <gpu_id>
-#   Same-seed: SOURCE_SEED_PATH=./data/unhanging_mug/demo_clean/seed.txt \
-#              ./collect_data.sh unhanging_mug_pert demo_clean_pert <gpu_id>
-
-from ._pert_mixin import PerturbationMixin
+from ._enh_util._pert_mixin import PerturbationMixin
 from .unhanging_mug import unhanging_mug
 
 
@@ -41,4 +24,23 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
         pert = kwargs.get("perturbation") or {}
         kwargs["perturbation"] = pert
         pert.setdefault("conservative_mode", True)
+        planner = pert.get("planner_augmentation") or {}
+        pert["planner_augmentation"] = planner
+        planner.setdefault(
+            "cone_task_types",
+            {
+                "convergent": [
+                    "stack_bowls_three_pert",
+                    "stack_blocks_three_pert",
+                    "move_pillbottle_pad_pert",
+                    "hanging_mug_pert",
+                ],
+                "divergent": [
+                    "unstack_bowls_three_pert",
+                    "unstack_blocks_three_pert",
+                    "unmove_pillbottle_pad_pert",
+                    "unhanging_mug_pert",
+                ],
+            },
+        )
         return super().setup_demo(*args, **kwargs)
