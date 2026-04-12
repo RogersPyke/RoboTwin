@@ -93,7 +93,7 @@ class PerturbationMixin:
             kwargs: dict, configuration from collect_data.py
         @output: None (sets instance attributes)
         @scenario:
-            Initialize perturbation settings.
+            Initialize perturbation settings and default segment params.
             Note: END_RESET_TO_INIT is handled by _base_task._init_task_env_.
 
         @param kwargs: Configuration dictionary from task config file
@@ -102,13 +102,32 @@ class PerturbationMixin:
 
         self._pert_enabled = bool(cfg.get("enabled", True))
 
+        # Load default segment parameters from config file
+        defaults = cfg.get("defaults", {}) or {}
+        self._pert_defaults = {
+            "xy_jitter": defaults.get("xy_jitter", 0.0),
+            "yaw_jitter_deg": defaults.get("yaw_jitter_deg", 0.0),
+            "waypoint_count_min": defaults.get("waypoint_count_min", 1),
+            "waypoint_count_max": defaults.get("waypoint_count_max", 2),
+            "waypoint_xy_radius": defaults.get("waypoint_xy_radius", 0.08),
+            "waypoint_z_jitter": defaults.get("waypoint_z_jitter", 0.05),
+            "orientation_jitter_deg": defaults.get("orientation_jitter_deg", 10.0),
+            "rrt_anchor_ratio_min": defaults.get("rrt_anchor_ratio_min", 0.25),
+            "rrt_anchor_ratio_max": defaults.get("rrt_anchor_ratio_max", 0.75),
+            "rrt_lateral_xy": defaults.get("rrt_lateral_xy", 0.10),
+            "rrt_z_jitter": defaults.get("rrt_z_jitter", 0.04),
+            "candidate_trials": defaults.get("candidate_trials", 6),
+            "fallback_to_direct": defaults.get("fallback_to_direct", True),
+        }
+
         self._pert_meta = {
             "enabled": self._pert_enabled,
+            "defaults": self._pert_defaults,
         }
 
         logger.debug(
             f"[{self.__class__.__name__}] Perturbation config loaded: "
-            f"enabled={self._pert_enabled}"
+            f"enabled={self._pert_enabled}, defaults={self._pert_defaults}"
         )
 
     def setup_demo(self, *args, **kwargs) -> Any:
@@ -635,7 +654,11 @@ class PerturbationMixin:
         """
         task_name = self.__class__.__name__
         validated_segments = validate_segments_list(
-            segments, "grasp", task_name, expected_count=2
+            segments,
+            "grasp",
+            task_name,
+            expected_count=2,
+            global_defaults=getattr(self, "_pert_defaults", None),
         )
 
         arm, actions = super().grasp_actor(actor, arm_tag=arm_tag, **kwargs)
@@ -694,7 +717,11 @@ class PerturbationMixin:
         """
         task_name = self.__class__.__name__
         validated_segments = validate_segments_list(
-            segments, "place", task_name, expected_count=2
+            segments,
+            "place",
+            task_name,
+            expected_count=2,
+            global_defaults=getattr(self, "_pert_defaults", None),
         )
 
         arm, actions = super().place_actor(actor, arm_tag, target_pose, **kwargs)
@@ -743,7 +770,12 @@ class PerturbationMixin:
             segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0}
         """
         task_name = self.__class__.__name__
-        validated_segment = validate_single_segment(segment, "move", task_name)
+        validated_segment = validate_single_segment(
+            segment,
+            "move",
+            task_name,
+            global_defaults=getattr(self, "_pert_defaults", None),
+        )
 
         arm, actions = super().move_by_displacement(arm_tag, **kwargs)
 
@@ -784,7 +816,10 @@ class PerturbationMixin:
         """
         task_name = self.__class__.__name__
         validated_segment = validate_single_segment(
-            segment, "back_to_origin", task_name
+            segment,
+            "back_to_origin",
+            task_name,
+            global_defaults=getattr(self, "_pert_defaults", None),
         )
 
         arm, actions = super().back_to_origin(arm_tag)

@@ -48,9 +48,56 @@ END_RESET_TO_INIT: true
 # =============================================================================
 # enabled: Global switch for perturbation. If false, no perturbation is applied.
 #
-# Note: Segment-level configuration is defined in each *_pert.py task file.
-#       Each segment MUST specify 'enabled' key explicitly.
-#       See envs/hanging_mug_pert.py for example usage.
+# Segment-level configuration can be set here as defaults, overridden by task files.
+#
+# Parameter Description:
+# ----------------------
+# Position/Orientation Jitter (applied to target pose):
+#   xy_jitter: float (meters) - max random offset for x and y axes
+#              Example: 0.010 means each axis gets random offset in [-0.010, 0.010]
+#   yaw_jitter_deg: float (degrees) - max random yaw rotation
+#                   Example: 8.0 means random rotation in [-8.0, 8.0] degrees
+#
+# Waypoint Chain Parameters (for trajectory planning with intermediate waypoints):
+#   waypoint_count_min: int - minimum number of intermediate waypoints (default: 1)
+#   waypoint_count_max: int - maximum number of intermediate waypoints (default: 2)
+#   waypoint_xy_radius: float (meters) - max lateral distance from direct path
+#                     Example: 0.08 means waypoints can deviate up to 8cm sideways
+#   waypoint_z_jitter: float (meters) - max z offset for waypoints (default: 0.05)
+#   orientation_jitter_deg: float (degrees) - max orientation change (default: 10.0)
+#
+# RRT Anchor Parameters (alternative trajectory generation):
+#   rrt_anchor_ratio_min: float - min ratio along path for anchor (default: 0.25)
+#   rrt_anchor_ratio_max: float - max ratio along path for anchor (default: 0.75)
+#   rrt_lateral_xy: float (meters) - max lateral offset for RRT anchor (default: 0.10)
+#   rrt_z_jitter: float (meters) - max z jitter for RRT anchor (default: 0.04)
+#
+# Planning Parameters:
+#   candidate_trials: int - number of candidate paths to generate (default: 6)
+#   fallback_to_direct: bool - use direct path if all candidates fail (default: true)
+#
+# Usage in task files:
+# --------------------
+# Each segment in *_pert.py can override these defaults:
+#   segments=[
+#       {"enabled": True, "xy_jitter": 0.015, "waypoint_xy_radius": 0.12},
+#       {"enabled": True, "xy_jitter": 0.002},
+#   ]
 # =============================================================================
 perturbation:
   enabled: true
+  # Default parameters (can be overridden in task files)
+  defaults:
+    xy_jitter: 0.008
+    yaw_jitter_deg: 6.0
+    waypoint_count_min: 1
+    waypoint_count_max: 2
+    waypoint_xy_radius: 0.08
+    waypoint_z_jitter: 0.05
+    orientation_jitter_deg: 10.0
+    rrt_anchor_ratio_min: 0.25
+    rrt_anchor_ratio_max: 0.75
+    rrt_lateral_xy: 0.10
+    rrt_z_jitter: 0.04
+    candidate_trials: 6
+    fallback_to_direct: true

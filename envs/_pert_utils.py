@@ -85,6 +85,7 @@ def validate_segment_config(
     segment_cfg: Optional[Dict[str, Any]],
     segment_name: str,
     task_name: str,
+    global_defaults: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Validate a single segment configuration.
@@ -93,6 +94,7 @@ def validate_segment_config(
         segment_cfg: Dict, segment configuration or None
         segment_name: str, name for error messages (e.g., "grasp_segment[0]")
         task_name: str, task class name for error context
+        global_defaults: Dict, global defaults from config file (optional)
     @output:
         Dict, validated and merged configuration with all required keys
     @scenario:
@@ -102,6 +104,12 @@ def validate_segment_config(
     @param segment_cfg: Configuration dict for a single segment
     @param segment_name: Human-readable segment name for error messages
     @param task_name: Task class name for error context
+    @param global_defaults: Global defaults from config file (lower priority than segment_cfg)
+
+    Merge Priority (highest to lowest):
+        1. segment_cfg (task file explicit config)
+        2. global_defaults (config file defaults)
+        3. DEFAULT_SEGMENT_PARAMS (hardcoded defaults)
 
     Example valid input:
         {"enabled": True, "xy_jitter": 0.010}
@@ -128,7 +136,10 @@ def validate_segment_config(
         logger.error(error_msg)
         raise ValueError(error_msg)
 
+    # Merge: hardcoded defaults < config file defaults < segment config
     merged = dict(DEFAULT_SEGMENT_PARAMS)
+    if global_defaults:
+        merged.update(global_defaults)
     merged.update(segment_cfg)
 
     if not isinstance(merged["enabled"], bool):
@@ -150,6 +161,7 @@ def validate_segments_list(
     action_type: str,
     task_name: str,
     expected_count: int = 2,
+    global_defaults: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Validate a list of segment configurations (for grasp/place actions).
@@ -159,6 +171,7 @@ def validate_segments_list(
         action_type: str, "grasp" or "place" for error messages
         task_name: str, task name for error context
         expected_count: int, expected number of segments (default 2)
+        global_defaults: Dict, global defaults from config file (optional)
     @output:
         List[Dict], validated segment configurations
     @scenario:
@@ -168,6 +181,7 @@ def validate_segments_list(
     @param action_type: Type of action ("grasp" or "place")
     @param task_name: Task class name for error context
     @param expected_count: Expected number of segments in the list
+    @param global_defaults: Global defaults from config file
 
     Note:
         - grasp_actor has 2 move segments: approach + descent
@@ -201,7 +215,9 @@ def validate_segments_list(
     validated = []
     for idx, seg in enumerate(segments):
         seg_name = f"{action_type}_segment[{idx}]"
-        validated.append(validate_segment_config(seg, seg_name, task_name))
+        validated.append(
+            validate_segment_config(seg, seg_name, task_name, global_defaults)
+        )
 
     logger.debug(f"[{task_name}] Validated {len(validated)} segments for {action_type}")
     return validated
@@ -211,6 +227,7 @@ def validate_single_segment(
     segment: Optional[Dict[str, Any]],
     action_type: str,
     task_name: str,
+    global_defaults: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Validate a single segment configuration (for move_by_displacement, back_to_origin).
@@ -219,6 +236,7 @@ def validate_single_segment(
         segment: Dict, segment configuration
         action_type: str, action type name for error messages
         task_name: str, task name for error context
+        global_defaults: Dict, global defaults from config file (optional)
     @output:
         Dict, validated segment configuration
     @scenario:
@@ -227,9 +245,10 @@ def validate_single_segment(
     @param segment: Segment configuration dict
     @param action_type: Type of action (e.g., "move", "lift", "retreat")
     @param task_name: Task class name for error context
+    @param global_defaults: Global defaults from config file
     """
     seg_name = f"{action_type}_segment"
-    return validate_segment_config(segment, seg_name, task_name)
+    return validate_segment_config(segment, seg_name, task_name, global_defaults)
 
 
 def merge_segment_config(
