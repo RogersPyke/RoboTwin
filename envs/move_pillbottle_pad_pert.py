@@ -51,19 +51,8 @@ class move_pillbottle_pad_pert(PerturbationMixin, move_pillbottle_pad):
             pre_grasp_dis=0.06,
             gripper_pos=0,
             segments=[
-                {
-                    "enabled": True,
-                    "xy_jitter": 0.010,
-                    "yaw_jitter_deg": 8.0,
-                    "plan_aug_enabled": True,
-                    "waypoint_count_max": 2,
-                },
-                {
-                    "enabled": True,
-                    "xy_jitter": 0.003,
-                    "yaw_jitter_deg": 3.0,
-                    "plan_aug_enabled": False,
-                },
+                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
             ],
         )
 
@@ -88,19 +77,8 @@ class move_pillbottle_pad_pert(PerturbationMixin, move_pillbottle_pad):
             functional_point_id=0,
             pre_dis_axis="fp",
             segments=[
-                {
-                    "enabled": True,
-                    "xy_jitter": 0.012,
-                    "yaw_jitter_deg": 10.0,
-                    "plan_aug_enabled": True,
-                    "waypoint_count_max": 2,
-                },
-                {
-                    "enabled": True,
-                    "xy_jitter": 0.004,
-                    "yaw_jitter_deg": 4.0,
-                    "plan_aug_enabled": False,
-                },
+                {"enabled": True, "xy_jitter": 0.012, "yaw_jitter_deg": 10.0},
+                {"enabled": True, "xy_jitter": 0.004, "yaw_jitter_deg": 4.0},
             ],
         )
 
@@ -119,13 +97,7 @@ class move_pillbottle_pad_pert(PerturbationMixin, move_pillbottle_pad):
         return self._wrap_move(
             arm_tag=arm_tag,
             z=z,
-            segment={
-                "enabled": True,
-                "xy_jitter": 0.008,
-                "yaw_jitter_deg": 6.0,
-                "plan_aug_enabled": True,
-                "waypoint_count_max": 1,
-            },
+            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
         )
 
     def play_once(self):

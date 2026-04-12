@@ -28,18 +28,8 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 
 DEFAULT_SEGMENT_PARAMS: Dict[str, Any] = {
-    "xy_jitter": 0.008,
-    "yaw_jitter_deg": 6.0,
-    "waypoint_count_min": 1,
-    "waypoint_count_max": 2,
-    "waypoint_xy_radius": 0.08,
-    "waypoint_z_jitter": 0.05,
-    "orientation_jitter_deg": 10.0,
-    "rrt_anchor_ratio_min": 0.25,
-    "rrt_anchor_ratio_max": 0.75,
-    "rrt_lateral_xy": 0.10,
-    "rrt_z_jitter": 0.04,
-    "fallback_to_direct": True,
+    "xy_jitter": 0.0,
+    "yaw_jitter_deg": 0.0,
 }
 
 
