@@ -90,9 +90,9 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             Move mug off rack along rack functional point axis.
             High precision required to avoid collision.
 
-        IMPORTANT: Both segments MUST have enabled=True.
-        Moving along rack functional point axis with enabled=False
-        would bypass trajectory perturbation and cause collision with rack.
+        WARNING: enabled=False for both segments.
+        Moving along rack functional point axis with perturbation
+        would cause collision with rack. No trajectory augmentation.
         """
         return self._wrap_place(
             actor=self.mug,
@@ -105,8 +105,8 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             is_open=False,
             pre_dis_axis="fp",
             segments=[
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 2.0},
-                {"enabled": True, "xy_jitter": 0.001, "yaw_jitter_deg": 1.0},
+                {"enabled": False, "xy_jitter": 0.0, "yaw_jitter_deg": 0.0},
+                {"enabled": False, "xy_jitter": 0.0, "yaw_jitter_deg": 0.0},
             ],
         )
 
