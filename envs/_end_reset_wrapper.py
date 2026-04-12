@@ -1,20 +1,20 @@
 """
-Compatibility helpers for END_RESET_TO_INIT option.
+DEPRECATED: This module is no longer used.
 
-This module provides a minimal implementation to satisfy imports from
-envs._base_task while preserving current behavior.
+END_RESET_TO_INIT is now handled directly in _base_task.py:
+    - _init_task_env_() loads END_RESET_TO_INIT from kwargs
+    - _execute_end_reset() handles the reset logic
+    - take_action() calls _execute_end_reset() after check_success()
+
+This file is kept for backward compatibility but does nothing.
 """
 
 
 def get_end_reset_to_init(kwargs):
-    """Read END_RESET_TO_INIT from kwargs with a safe default."""
-    return bool(kwargs.get("END_RESET_TO_INIT", True))
+    """DEPRECATED: Use kwargs.get('END_RESET_TO_INIT', False) directly."""
+    return bool(kwargs.get("END_RESET_TO_INIT", False))
 
 
 def with_end_reset(task_env, end_reset_to_init):
-    """Attach END_RESET_TO_INIT flag to task env.
-
-    Current compatibility behavior is a no-op wrapper that stores the flag.
-    """
-    task_env._end_reset_to_init = bool(end_reset_to_init)
-    return task_env
+    """DEPRECATED: END_RESET_TO_INIT is now handled in _base_task._init_task_env_()."""
+    pass

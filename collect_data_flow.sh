@@ -3,7 +3,7 @@
 # Usage: ./collect_data_flow.sh
 #
 # ---------------------------------------------------------------------------
-# PERTURBATION (Pert) mode -- same-seed diverse data collection
+# PERTURBATION (Pert) mode -- segment-level perturbation for diverse data
 # ---------------------------------------------------------------------------
 # To collect pert data (diverse trajectories) alongside classic data:
 #
@@ -15,16 +15,24 @@
 #        discovery/resume flow just like classic tasks).
 #
 #   Supported pert tasks (must pair with their classic counterparts):
-#     hanging_mug_pert         <- hanging_mug
-#     unhanging_mug_pert       <- unhanging_mug        (conservative mode)
-#     stack_blocks_three_pert  <- stack_blocks_three
-#     unstack_blocks_three_pert<- unstack_blocks_three  (conservative mode)
-#     stack_bowls_three_pert   <- stack_bowls_three
-#     unstack_bowls_three_pert <- unstack_bowls_three   (conservative mode)
-#     move_pillbottle_pad_pert <- move_pillbottle_pad
-#     unmove_pillbottle_pad_pert<- unmove_pillbottle_pad(conservative mode)
+#     hanging_mug_pert          <- hanging_mug
+#     unhanging_mug_pert        <- unhanging_mug
+#     stack_blocks_three_pert   <- stack_blocks_three
+#     unstack_blocks_three_pert <- unstack_blocks_three
+#     stack_bowls_three_pert    <- stack_bowls_three
+#     unstack_bowls_three_pert  <- unstack_bowls_three
+#     move_pillbottle_pad_pert  <- move_pillbottle_pad
+#     unmove_pillbottle_pad_pert<- unmove_pillbottle_pad
 #
-#   Pert config is in task_config/demo_clean_pert.yml (perturbation: block).
+#   Pert config is in task_config/demo_clean_pert.yml:
+#     - enabled: global perturbation switch
+#     - END_RESET_TO_INIT: if true, arms return to origin after task
+#
+#   Segment-level configuration is defined in each *_pert.py task file:
+#     - Each segment MUST specify 'enabled' key explicitly
+#     - grasp_actor: 2 segments (approach, descent)
+#     - place_actor: 2 segments (approach, descent)
+#     - move_by_displacement: 1 segment
 #
 # NOTE: Cross-task seed reuse is removed.
 # Pert tasks no longer read seed.txt from classic task directories.

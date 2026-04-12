@@ -35,3 +35,10 @@ save_path: ./data
 clear_cache_freq: 5
 collect_data: true
 eval_video_log: true
+
+# =============================================================================
+# END_RESET_TO_INIT: Reset robot arms to origin after task completion.
+#                   Works for both pert and non-pert tasks.
+#                   If true, arms return to home position after each episode.
+# =============================================================================
+END_RESET_TO_INIT: false

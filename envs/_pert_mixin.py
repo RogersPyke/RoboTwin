@@ -1,83 +1,170 @@
+"""
+Purpose: Perturbation mixin for *_pert tasks with segment-level control.
+Dependencies:
+    - logging, math, numpy, transforms3d
+    - envs._pert_utils (validation functions)
+    - envs._base_task (parent class)
+    - envs.utils.action (Action class)
+
+Usage Example:
+    # In task file (e.g., hanging_mug_pert.py):
+
+    class hanging_mug_pert(PerturbationMixin, hanging_mug):
+
+        def _grasp_mug_initial(self, arm_tag):
+            return self._wrap_grasp(
+                actor=self.mug, arm_tag=arm_tag, pre_grasp_dis=0.05,
+                segments=[
+                    {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+                    {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+                ]
+            )
+
+        def _lift(self, arm_tag, z):
+            return self._wrap_move(
+                arm_tag=arm_tag, z=z,
+                segment={"enabled": True, "xy_jitter": 0.008}
+            )
+
+        def play_once(self):
+            self.move(self._grasp_mug_initial("left"))
+            self.move(self._lift("left", z=0.1))
+            # ... more actions
+
+@input: kwargs from collect_data.py with perturbation config
+@output: Augmented trajectories with segment-level perturbation
+@scenario: Generate diverse training data for imitation learning.
+
+Design Philosophy:
+    - Segment-level perturbation control
+    - Each segment MUST specify 'enabled' key explicitly
+    - Semantic wrapper functions in task files provide clear configuration
+    - No silent defaults - explicit configuration required
+"""
+
 import math
+import logging
 from copy import deepcopy
+from typing import Dict, List, Optional, Any, Tuple
 
 import numpy as np
 import transforms3d as t3d
 
+from ._pert_utils import (
+    validate_segment_config,
+    validate_segments_list,
+    validate_single_segment,
+    DEFAULT_SEGMENT_PARAMS,
+)
+
+logger = logging.getLogger(__name__)
+
 
 class PerturbationMixin:
     """
-    Lightweight perturbation mixin for *_pert tasks.
+    Mixin class for perturbation tasks with segment-level control.
+
+    This mixin overrides action generation methods to apply perturbation
+    based on segment configurations. Task classes should define semantic
+    wrapper functions that call _wrap_grasp, _wrap_place, _wrap_move.
+
+    Key Design:
+        - grasp_actor: 2 move segments (approach + descent)
+        - place_actor: 2 move segments (approach + descent)
+        - move_by_displacement: 1 move segment
+        - back_to_origin: 1 move segment
+
+    Each segment requires explicit 'enabled' key in configuration.
+
+    Configuration Priority:
+        1. Segment config passed to wrapper function (highest)
+        2. No fallback to global config - must be explicit
     """
 
-    def _load_pert_cfg(self, kwargs):
+    # ==========================================================================
+    # Configuration Loading
+    # ==========================================================================
+
+    def _load_pert_cfg(self, kwargs: dict) -> None:
+        """
+        Load perturbation configuration from kwargs.
+
+        @input:
+            kwargs: dict, configuration from collect_data.py
+        @output: None (sets instance attributes)
+        @scenario:
+            Initialize perturbation settings.
+            Note: END_RESET_TO_INIT is handled by _base_task._init_task_env_.
+
+        @param kwargs: Configuration dictionary from task config file
+        """
         cfg = kwargs.get("perturbation", {}) or {}
-        conservative = bool(kwargs.get("conservative_mode", cfg.get("conservative_mode", False)))
-        planner_cfg = cfg.get("planner_augmentation", {}) or kwargs.get("planner_augmentation", {}) or {}
 
-        self._pert_cfg = {
-            "enabled": bool(cfg.get("enabled", True)),
-            "grasp_xy_jitter": float(cfg.get("grasp_xy_jitter", 0.008)),
-            "grasp_yaw_jitter_deg": float(cfg.get("grasp_yaw_jitter_deg", 6.0)),
-            "pre_place_xy_jitter": float(cfg.get("pre_place_xy_jitter", 0.02)),
-            "conservative_xy_scale": float(cfg.get("conservative_xy_scale", 0.6)),
-            "conservative_yaw_scale": float(cfg.get("conservative_yaw_scale", 0.5)),
-            "conservative_mode": conservative,
-        }
-
-        strategies = planner_cfg.get("strategies", ["waypoint_chain"])
-        if isinstance(strategies, str):
-            strategies = [strategies]
-        strategies = [str(i).strip().lower() for i in strategies if str(i).strip()]
-        if not strategies:
-            strategies = ["waypoint_chain"]
-
-        self._plan_aug_cfg = {
-            "enabled": bool(planner_cfg.get("enabled", False)),
-            "strategies": strategies,
-            "candidate_trials": int(planner_cfg.get("candidate_trials", 6)),
-            "waypoint_count_min": int(planner_cfg.get("waypoint_count_min", 1)),
-            "waypoint_count_max": int(planner_cfg.get("waypoint_count_max", 2)),
-            "waypoint_xy_radius": float(planner_cfg.get("waypoint_xy_radius", 0.08)),
-            "waypoint_z_jitter": float(planner_cfg.get("waypoint_z_jitter", 0.05)),
-            "orientation_jitter_deg": float(planner_cfg.get("orientation_jitter_deg", 10.0)),
-            "rrt_anchor_ratio_min": float(planner_cfg.get("rrt_anchor_ratio_min", 0.25)),
-            "rrt_anchor_ratio_max": float(planner_cfg.get("rrt_anchor_ratio_max", 0.75)),
-            "rrt_lateral_xy": float(planner_cfg.get("rrt_lateral_xy", 0.10)),
-            "rrt_z_jitter": float(planner_cfg.get("rrt_z_jitter", 0.04)),
-            "fallback_to_direct": bool(planner_cfg.get("fallback_to_direct", True)),
-            "conservative_spatial_scale": float(planner_cfg.get("conservative_spatial_scale", 0.7)),
-            "conservative_orientation_scale": float(planner_cfg.get("conservative_orientation_scale", 0.6)),
-        }
-        if self._plan_aug_cfg["waypoint_count_min"] < 1:
-            self._plan_aug_cfg["waypoint_count_min"] = 1
-        if self._plan_aug_cfg["waypoint_count_max"] < self._plan_aug_cfg["waypoint_count_min"]:
-            self._plan_aug_cfg["waypoint_count_max"] = self._plan_aug_cfg["waypoint_count_min"]
-        if self._plan_aug_cfg["candidate_trials"] < 1:
-            self._plan_aug_cfg["candidate_trials"] = 1
+        self._pert_enabled = bool(cfg.get("enabled", True))
 
         self._pert_meta = {
-            "enabled": self._pert_cfg["enabled"],
-            "conservative_mode": self._pert_cfg["conservative_mode"],
-            "planner_augmentation_enabled": self._plan_aug_cfg["enabled"],
-            "planner_augmentation_strategies": deepcopy(self._plan_aug_cfg["strategies"]),
+            "enabled": self._pert_enabled,
         }
 
-    def setup_demo(self, *args, **kwargs):
+        logger.debug(
+            f"[{self.__class__.__name__}] Perturbation config loaded: "
+            f"enabled={self._pert_enabled}"
+        )
+
+    def setup_demo(self, *args, **kwargs) -> Any:
+        """
+        Override setup_demo to load perturbation configuration.
+
+        @input: args, kwargs from parent setup_demo
+        @output: Result from parent setup_demo
+        @scenario: Initialize perturbation before task setup
+        """
         self._load_pert_cfg(kwargs)
         return super().setup_demo(*args, **kwargs)
 
-    def _jitter_xy(self, pose_7d, jitter):
-        if pose_7d is None:
-            return None
+    # ==========================================================================
+    # Pose Perturbation Utilities
+    # ==========================================================================
+
+    def _jitter_xy(self, pose_7d: List[float], jitter: float) -> List[float]:
+        """
+        Apply XY jitter to a 7D pose.
+
+        @input:
+            pose_7d: List[float], [x, y, z, qx, qy, qz, qw]
+            jitter: float, max jitter distance in meters
+        @output:
+            List[float], jittered pose
+        @scenario: Add random XY offset for position diversity
+
+        @param pose_7d: 7D pose [position, quaternion]
+        @param jitter: Maximum jitter distance in meters (uniform distribution)
+        """
+        if pose_7d is None or jitter <= 0:
+            return pose_7d
+
         pose = deepcopy(pose_7d)
         pose[0] += float(np.random.uniform(-jitter, jitter))
         pose[1] += float(np.random.uniform(-jitter, jitter))
         return pose
 
-    def _jitter_yaw(self, pose_7d, jitter_deg):
-        if pose_7d is None:
-            return None
+    def _jitter_yaw(self, pose_7d: List[float], jitter_deg: float) -> List[float]:
+        """
+        Apply yaw jitter to a 7D pose.
+
+        @input:
+            pose_7d: List[float], [x, y, z, qx, qy, qz, qw]
+            jitter_deg: float, max yaw jitter in degrees
+        @output:
+            List[float], jittered pose
+        @scenario: Add random yaw rotation for orientation diversity
+
+        @param pose_7d: 7D pose [position, quaternion]
+        @param jitter_deg: Maximum yaw jitter in degrees (uniform distribution)
+        """
+        if pose_7d is None or jitter_deg <= 0:
+            return pose_7d
+
         pose = np.array(deepcopy(pose_7d), dtype=np.float64)
         yaw = float(np.random.uniform(-jitter_deg, jitter_deg)) * math.pi / 180.0
         q_orig = pose[3:7]
@@ -87,43 +174,132 @@ class PerturbationMixin:
         pose[3:7] = q_new
         return pose.tolist()
 
-    def _is_plan_aug_active(self):
-        return bool(self._plan_aug_cfg.get("enabled", False) and self.need_plan)
+    def _apply_segment_perturbation(
+        self,
+        pose_7d: List[float],
+        segment_cfg: Dict[str, Any],
+    ) -> List[float]:
+        """
+        Apply perturbation to a pose based on segment configuration.
 
-    def _normalize_pose_7d(self, pose_7d):
+        @input:
+            pose_7d: List[float], target pose
+            segment_cfg: Dict, validated segment configuration
+        @output:
+            List[float], perturbed pose
+        @scenario: Apply XY and yaw perturbation if segment is enabled
+
+        @param pose_7d: 7D target pose
+        @param segment_cfg: Validated segment configuration dict
+        """
+        if pose_7d is None:
+            return pose_7d
+
+        if not segment_cfg.get("enabled", False):
+            logger.debug(f"Segment disabled, skipping perturbation")
+            return pose_7d
+
+        pose = deepcopy(pose_7d)
+
+        xy_jitter = segment_cfg.get("xy_jitter", 0)
+        if xy_jitter > 0:
+            pose[0] += float(np.random.uniform(-xy_jitter, xy_jitter))
+            pose[1] += float(np.random.uniform(-xy_jitter, xy_jitter))
+
+        yaw_jitter_deg = segment_cfg.get("yaw_jitter_deg", 0)
+        if yaw_jitter_deg > 0:
+            pose = self._jitter_yaw(pose, yaw_jitter_deg)
+
+        logger.debug(
+            f"Applied perturbation: xy_jitter={xy_jitter}, yaw_jitter_deg={yaw_jitter_deg}"
+        )
+        return pose
+
+    # ==========================================================================
+    # Trajectory Augmentation Utilities
+    # ==========================================================================
+
+    def _normalize_pose_7d(self, pose_7d: Any) -> Optional[List[float]]:
+        """
+        Normalize pose to 7D list format.
+
+        @input:
+            pose_7d: Any, pose in various formats (sapien.Pose, list, np.ndarray)
+        @output:
+            List[float] or None, normalized [x, y, z, qx, qy, qz, qw]
+        @scenario: Convert pose to standard format for processing
+        """
         if pose_7d is None:
             return None
         if hasattr(pose_7d, "p") and hasattr(pose_7d, "q"):
             return pose_7d.p.tolist() + pose_7d.q.tolist()
         return np.array(deepcopy(pose_7d), dtype=np.float64).tolist()
 
-    def _apply_orientation_noise(self, pose_7d, jitter_deg):
-        if pose_7d is None or jitter_deg <= 0.0:
+    def _apply_orientation_noise(
+        self,
+        pose_7d: List[float],
+        jitter_deg: float,
+    ) -> List[float]:
+        """
+        Apply random orientation noise to a pose.
+
+        @input:
+            pose_7d: List[float], 7D pose
+            jitter_deg: float, max jitter in degrees for each Euler angle
+        @output:
+            List[float], pose with orientation noise
+        @scenario: Add random RPY noise for waypoint orientation diversity
+        """
+        if pose_7d is None or jitter_deg <= 0:
             return pose_7d
+
         pose = np.array(deepcopy(pose_7d), dtype=np.float64)
         rpy = np.random.uniform(-jitter_deg, jitter_deg, size=3) * math.pi / 180.0
-        q_delta = t3d.euler.euler2quat(float(rpy[0]), float(rpy[1]), float(rpy[2]), axes="sxyz")
+        q_delta = t3d.euler.euler2quat(
+            float(rpy[0]), float(rpy[1]), float(rpy[2]), axes="sxyz"
+        )
         q_new = t3d.quaternions.qmult(q_delta, pose[3:7])
         q_new = q_new / np.linalg.norm(q_new)
         pose[3:7] = q_new
         return pose.tolist()
 
-    def _build_waypoint_chain_candidates(self, start_pose, target_pose):
-        cfg = self._plan_aug_cfg
-        spatial_scale = 1.0
-        orient_scale = 1.0
-        if self._pert_cfg.get("conservative_mode", False):
-            spatial_scale = cfg["conservative_spatial_scale"]
-            orient_scale = cfg["conservative_orientation_scale"]
-        xy_radius = cfg["waypoint_xy_radius"] * spatial_scale
-        z_jitter = cfg["waypoint_z_jitter"] * spatial_scale
-        orientation_jitter = cfg["orientation_jitter_deg"] * orient_scale
+    def _build_waypoint_chain_candidates(
+        self,
+        start_pose: List[float],
+        target_pose: List[float],
+        segment_cfg: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Build waypoint chain candidates for trajectory augmentation.
+
+        @input:
+            start_pose: List[float], current end-effector pose
+            target_pose: List[float], target pose
+            segment_cfg: Dict, segment configuration
+        @output:
+            List[Dict], list of candidate waypoint chains
+        @scenario: Generate diverse waypoint paths between start and target
+
+        @param start_pose: Starting pose for trajectory
+        @param target_pose: Target pose for trajectory
+        @param segment_cfg: Segment configuration with waypoint parameters
+        """
         candidates = []
+
+        xy_radius = segment_cfg.get("waypoint_xy_radius", 0.08)
+        z_jitter = segment_cfg.get("waypoint_z_jitter", 0.05)
+        orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
+        wp_min = segment_cfg.get("waypoint_count_min", 1)
+        wp_max = segment_cfg.get("waypoint_count_max", 2)
+        trials = segment_cfg.get("candidate_trials", 6)
+
         start_xyz = np.array(start_pose[:3], dtype=np.float64)
         target_xyz = np.array(target_pose[:3], dtype=np.float64)
-        for _ in range(cfg["candidate_trials"]):
-            wp_num = int(np.random.randint(cfg["waypoint_count_min"], cfg["waypoint_count_max"] + 1))
+
+        for _ in range(trials):
+            wp_num = int(np.random.randint(wp_min, wp_max + 1))
             waypoint_chain = []
+
             for idx in range(wp_num):
                 ratio = float(idx + 1) / float(wp_num + 1)
                 base_xyz = start_xyz + ratio * (target_xyz - start_xyz)
@@ -139,26 +315,47 @@ class PerturbationMixin:
                 waypoint[:3] = (base_xyz + offset).tolist()
                 waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
                 waypoint_chain.append(waypoint)
+
             candidates.append(
                 {
                     "strategy": "waypoint_chain",
                     "waypoints": waypoint_chain,
                 }
             )
+
         return candidates
 
-    def _build_rrt_guided_candidates(self, start_pose, target_pose, direct_result):
+    def _build_rrt_guided_candidates(
+        self,
+        start_pose: List[float],
+        target_pose: List[float],
+        direct_result: Optional[Dict],
+        segment_cfg: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Build RRT-guided candidates for trajectory augmentation.
+
+        @input:
+            start_pose: List[float], current end-effector pose
+            target_pose: List[float], target pose
+            direct_result: Dict or None, result from direct path planning
+            segment_cfg: Dict, segment configuration
+        @output:
+            List[Dict], list of RRT-guided candidates
+        @scenario: Generate lateral offset waypoints based on direct path
+        """
         if direct_result is None or direct_result.get("status") != "Success":
             return []
-        cfg = self._plan_aug_cfg
-        spatial_scale = 1.0
-        orient_scale = 1.0
-        if self._pert_cfg.get("conservative_mode", False):
-            spatial_scale = cfg["conservative_spatial_scale"]
-            orient_scale = cfg["conservative_orientation_scale"]
-        orientation_jitter = cfg["orientation_jitter_deg"] * orient_scale
-        lateral_xy = cfg["rrt_lateral_xy"] * spatial_scale
-        z_jitter = cfg["rrt_z_jitter"] * spatial_scale
+
+        candidates = []
+
+        lateral_xy = segment_cfg.get("rrt_lateral_xy", 0.10)
+        z_jitter = segment_cfg.get("rrt_z_jitter", 0.04)
+        orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
+        ratio_min = segment_cfg.get("rrt_anchor_ratio_min", 0.25)
+        ratio_max = segment_cfg.get("rrt_anchor_ratio_max", 0.75)
+        trials = max(2, segment_cfg.get("candidate_trials", 6) // 2)
+
         step_count = max(1, int(direct_result["position"].shape[0]))
         path_scale = min(1.8, max(0.6, float(step_count) / 200.0))
         lateral_xy = lateral_xy * path_scale
@@ -168,6 +365,7 @@ class PerturbationMixin:
         direct_vec = target_xyz - start_xyz
         horizontal_vec = np.array([direct_vec[0], direct_vec[1], 0.0], dtype=np.float64)
         norm_xy = float(np.linalg.norm(horizontal_vec))
+
         if norm_xy < 1e-8:
             rand = np.random.uniform(-1.0, 1.0, size=2)
             horizontal_vec = np.array([rand[0], rand[1], 0.0], dtype=np.float64)
@@ -175,32 +373,57 @@ class PerturbationMixin:
             if norm_xy < 1e-8:
                 horizontal_vec = np.array([1.0, 0.0, 0.0], dtype=np.float64)
                 norm_xy = 1.0
-        horizontal_vec /= norm_xy
-        orthogonal_vec = np.array([-horizontal_vec[1], horizontal_vec[0], 0.0], dtype=np.float64)
 
-        trial_num = max(2, cfg["candidate_trials"] // 2)
-        candidates = []
-        for _ in range(trial_num):
-            ratio = float(np.random.uniform(cfg["rrt_anchor_ratio_min"], cfg["rrt_anchor_ratio_max"]))
+        horizontal_vec /= norm_xy
+        orthogonal_vec = np.array(
+            [-horizontal_vec[1], horizontal_vec[0], 0.0], dtype=np.float64
+        )
+
+        for _ in range(trials):
+            ratio = float(np.random.uniform(ratio_min, ratio_max))
             lateral = float(np.random.uniform(-lateral_xy, lateral_xy))
             anchor = start_xyz + ratio * direct_vec + lateral * orthogonal_vec
             anchor[2] += float(np.random.uniform(-z_jitter, z_jitter))
+
             waypoint = deepcopy(target_pose)
             waypoint[:3] = anchor.tolist()
             waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
+
             candidates.append(
                 {
                     "strategy": "rrt_guided",
                     "waypoints": [waypoint],
                 }
             )
+
         return candidates
 
-    def _plan_single_segment(self, arm_tag, pose_7d, constraint_pose, last_full_qpos=None, last_arm_qpos=None):
+    def _plan_single_segment(
+        self,
+        arm_tag: str,
+        pose_7d: List[float],
+        constraint_pose: Optional[List[float]],
+        last_full_qpos: Optional[np.ndarray] = None,
+        last_arm_qpos: Optional[np.ndarray] = None,
+    ) -> Optional[Dict]:
+        """
+        Plan a single trajectory segment.
+
+        @input:
+            arm_tag: str, "left" or "right"
+            pose_7d: List[float], target pose
+            constraint_pose: List[float] or None, constraint for movement
+            last_full_qpos: np.ndarray or None, previous full qpos
+            last_arm_qpos: np.ndarray or None, previous arm qpos
+        @output:
+            Dict or None, planning result with position and velocity
+        @scenario: Call robot planner for single segment
+        """
         if arm_tag == "left":
             plan_fn = self.robot.left_plan_path
         else:
             plan_fn = self.robot.right_plan_path
+
         return plan_fn(
             pose_7d,
             constraint_pose=constraint_pose,
@@ -208,36 +431,75 @@ class PerturbationMixin:
             last_arm_qpos=last_arm_qpos,
         )
 
-    def _merge_segment_results(self, segment_results):
+    def _merge_segment_results(
+        self,
+        segment_results: List[Dict],
+    ) -> Optional[Dict]:
+        """
+        Merge multiple segment results into a single trajectory.
+
+        @input:
+            segment_results: List[Dict], results from each segment
+        @output:
+            Dict or None, merged trajectory
+        @scenario: Combine waypoint segments into complete trajectory
+        """
         if not segment_results:
             return None
+
         position_list = []
         velocity_list = []
+
         for idx, result in enumerate(segment_results):
             position = result["position"]
             velocity = result["velocity"]
+
             if idx > 0 and position.shape[0] > 0:
                 position = position[1:]
                 velocity = velocity[1:]
+
             if position.shape[0] == 0:
                 continue
+
             position_list.append(position)
             velocity_list.append(velocity)
+
         if not position_list:
             return None
+
         return {
             "status": "Success",
             "position": np.vstack(position_list),
             "velocity": np.vstack(velocity_list),
         }
 
-    def _try_plan_waypoint_chain(self, arm_tag, target_pose, waypoints, constraint_pose):
+    def _try_plan_waypoint_chain(
+        self,
+        arm_tag: str,
+        target_pose: List[float],
+        waypoints: List[List[float]],
+        constraint_pose: Optional[List[float]],
+    ) -> Optional[Dict]:
+        """
+        Try to plan a trajectory through waypoints.
+
+        @input:
+            arm_tag: str, "left" or "right"
+            target_pose: List[float], final target pose
+            waypoints: List[List[float]], intermediate waypoints
+            constraint_pose: List[float] or None, movement constraint
+        @output:
+            Dict or None, merged trajectory result
+        @scenario: Plan through all waypoints to target
+        """
         if arm_tag == "left":
             now_full_qpos = self.robot.left_entity.get_qpos()
         else:
             now_full_qpos = self.robot.right_entity.get_qpos()
+
         segments = []
         now_arm_qpos = None
+
         for pose in list(waypoints) + [target_pose]:
             result = self._plan_single_segment(
                 arm_tag=arm_tag,
@@ -246,15 +508,37 @@ class PerturbationMixin:
                 last_full_qpos=now_full_qpos if len(segments) == 0 else None,
                 last_arm_qpos=None if len(segments) == 0 else now_arm_qpos,
             )
+
             if result is None or result.get("status") != "Success":
                 return None
+
             segments.append(result)
             now_arm_qpos = result["position"][-1]
+
         return self._merge_segment_results(segments)
 
-    def _plan_augmented_result(self, arm_tag, target_pose, constraint_pose):
+    def _plan_augmented_result(
+        self,
+        arm_tag: str,
+        target_pose: List[float],
+        constraint_pose: Optional[List[float]],
+        segment_cfg: Dict[str, Any],
+    ) -> Optional[Dict]:
+        """
+        Plan augmented trajectory based on segment configuration.
+
+        @input:
+            arm_tag: str, "left" or "right"
+            target_pose: List[float], target pose
+            constraint_pose: List[float] or None, movement constraint
+            segment_cfg: Dict, validated segment configuration
+        @output:
+            Dict or None, augmented trajectory result
+        @scenario: Generate diverse trajectory through waypoints
+        """
         start_pose = self._normalize_pose_7d(self.get_arm_pose(arm_tag))
         target_pose = self._normalize_pose_7d(target_pose)
+
         if start_pose is None or target_pose is None:
             return None
 
@@ -273,12 +557,19 @@ class PerturbationMixin:
                 last_full_qpos=now_full_qpos,
             )
 
+        if not segment_cfg.get("enabled", False):
+            return direct_result
+
         candidates = []
-        for strategy in self._plan_aug_cfg["strategies"]:
-            if strategy == "waypoint_chain":
-                candidates.extend(self._build_waypoint_chain_candidates(start_pose, target_pose))
-            elif strategy == "rrt_guided":
-                candidates.extend(self._build_rrt_guided_candidates(start_pose, target_pose, direct_result))
+        candidates.extend(
+            self._build_waypoint_chain_candidates(start_pose, target_pose, segment_cfg)
+        )
+        candidates.extend(
+            self._build_rrt_guided_candidates(
+                start_pose, target_pose, direct_result, segment_cfg
+            )
+        )
+
         np.random.shuffle(candidates)
 
         for candidate in candidates:
@@ -288,52 +579,278 @@ class PerturbationMixin:
                 waypoints=candidate["waypoints"],
                 constraint_pose=constraint_pose,
             )
+
             if merged is None:
                 continue
-            self._pert_meta["planner_augmentation_last"] = {
+
+            self._pert_meta["last_augmentation"] = {
                 "strategy": candidate["strategy"],
                 "waypoint_count": int(len(candidate["waypoints"])),
             }
             return merged
 
-        if self._plan_aug_cfg.get("fallback_to_direct", True):
-            self._pert_meta["planner_augmentation_last"] = {
+        if segment_cfg.get("fallback_to_direct", True):
+            self._pert_meta["last_augmentation"] = {
                 "strategy": "direct_fallback",
                 "waypoint_count": 0,
             }
             return direct_result
+
         return None
+
+    # ==========================================================================
+    # Semantic Wrapper Functions
+    # ==========================================================================
+
+    def _wrap_grasp(
+        self,
+        actor,
+        arm_tag,
+        segments: List[Dict[str, Any]],
+        **kwargs,
+    ):
+        """
+        Wrap grasp_actor with segment-level perturbation configuration.
+
+        @input:
+            actor: Actor, object to grasp
+            arm_tag: str or ArmTag, which arm to use
+            segments: List[Dict], exactly 2 segment configurations
+            **kwargs: Additional args for grasp_actor
+        @output:
+            Tuple[ArmTag, List[Action]], actions with perturbation config
+        @scenario:
+            Apply perturbation to grasp actions based on segment configs.
+            segments[0] = approach phase
+            segments[1] = descent phase (constrained)
+
+        @param segments: List of exactly 2 segment configuration dicts.
+            Each dict MUST contain 'enabled' key.
+
+        Example:
+            segments=[
+                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+            ]
+        """
+        task_name = self.__class__.__name__
+        validated_segments = validate_segments_list(
+            segments, "grasp", task_name, expected_count=2
+        )
+
+        arm, actions = super().grasp_actor(actor, arm_tag=arm_tag, **kwargs)
+
+        if not self._pert_enabled or not self.need_plan:
+            return arm, actions
+
+        if not actions:
+            return arm, actions
+
+        move_idx = 0
+        for action in actions:
+            if action.action == "move":
+                if move_idx < len(validated_segments):
+                    seg_cfg = validated_segments[move_idx]
+                    action.args["segment_cfg"] = seg_cfg
+                    logger.debug(
+                        f"[{task_name}] grasp segment[{move_idx}] config attached"
+                    )
+                move_idx += 1
+
+        return arm, actions
+
+    def _wrap_place(
+        self,
+        actor,
+        arm_tag,
+        target_pose,
+        segments: List[Dict[str, Any]],
+        **kwargs,
+    ):
+        """
+        Wrap place_actor with segment-level perturbation configuration.
+
+        @input:
+            actor: Actor, object to place
+            arm_tag: str or ArmTag, which arm to use
+            target_pose: List[float], target pose for placement
+            segments: List[Dict], exactly 2 segment configurations
+            **kwargs: Additional args for place_actor
+        @output:
+            Tuple[ArmTag, List[Action]], actions with perturbation config
+        @scenario:
+            Apply perturbation to place actions based on segment configs.
+            segments[0] = approach phase
+            segments[1] = descent phase
+
+        @param segments: List of exactly 2 segment configuration dicts.
+            Each dict MUST contain 'enabled' key.
+
+        Example:
+            segments=[
+                {"enabled": True, "xy_jitter": 0.012, "yaw_jitter_deg": 10.0},
+                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+            ]
+        """
+        task_name = self.__class__.__name__
+        validated_segments = validate_segments_list(
+            segments, "place", task_name, expected_count=2
+        )
+
+        arm, actions = super().place_actor(actor, arm_tag, target_pose, **kwargs)
+
+        if not self._pert_enabled or not self.need_plan:
+            return arm, actions
+
+        if not actions:
+            return arm, actions
+
+        move_idx = 0
+        for action in actions:
+            if action.action == "move":
+                if move_idx < len(validated_segments):
+                    seg_cfg = validated_segments[move_idx]
+                    action.args["segment_cfg"] = seg_cfg
+                    logger.debug(
+                        f"[{task_name}] place segment[{move_idx}] config attached"
+                    )
+                move_idx += 1
+
+        return arm, actions
+
+    def _wrap_move(
+        self,
+        arm_tag,
+        segment: Dict[str, Any],
+        **kwargs,
+    ):
+        """
+        Wrap move_by_displacement with segment perturbation configuration.
+
+        @input:
+            arm_tag: str or ArmTag, which arm to use
+            segment: Dict, single segment configuration
+            **kwargs: Additional args for move_by_displacement (x, y, z, etc.)
+        @output:
+            Tuple[ArmTag, List[Action]], actions with perturbation config
+        @scenario:
+            Apply perturbation to single-segment movement actions.
+
+        @param segment: Segment configuration dict.
+            MUST contain 'enabled' key.
+
+        Example:
+            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0}
+        """
+        task_name = self.__class__.__name__
+        validated_segment = validate_single_segment(segment, "move", task_name)
+
+        arm, actions = super().move_by_displacement(arm_tag, **kwargs)
+
+        if not self._pert_enabled or not self.need_plan:
+            return arm, actions
+
+        if not actions:
+            return arm, actions
+
+        for action in actions:
+            if action.action == "move":
+                action.args["segment_cfg"] = validated_segment
+                logger.debug(f"[{task_name}] move segment config attached")
+
+        return arm, actions
+
+    def _wrap_back_to_origin(
+        self,
+        arm_tag,
+        segment: Dict[str, Any],
+    ):
+        """
+        Wrap back_to_origin with segment perturbation configuration.
+
+        @input:
+            arm_tag: str or ArmTag, which arm to use
+            segment: Dict, single segment configuration
+        @output:
+            Tuple[ArmTag, List[Action]], actions with perturbation config
+        @scenario:
+            Apply perturbation to return-to-origin movement.
+
+        @param segment: Segment configuration dict.
+            MUST contain 'enabled' key.
+
+        Example:
+            segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0}
+        """
+        task_name = self.__class__.__name__
+        validated_segment = validate_single_segment(
+            segment, "back_to_origin", task_name
+        )
+
+        arm, actions = super().back_to_origin(arm_tag)
+
+        if not self._pert_enabled or not self.need_plan:
+            return arm, actions
+
+        if not actions:
+            return arm, actions
+
+        for action in actions:
+            if action.action == "move":
+                action.args["segment_cfg"] = validated_segment
+                logger.debug(f"[{task_name}] back_to_origin segment config attached")
+
+        return arm, actions
+
+    # ==========================================================================
+    # Override move_to_pose for Trajectory Augmentation
+    # ==========================================================================
 
     def left_move_to_pose(
         self,
         pose,
         constraint_pose=None,
-        use_point_cloud=False,
-        use_attach=False,
-        save_freq=-1,
+        segment_cfg: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ):
-        if not self._is_plan_aug_active():
+        """
+        Override left_move_to_pose to apply trajectory augmentation.
+
+        @input:
+            pose: target pose
+            constraint_pose: constraint for movement
+            segment_cfg: Dict or None, segment configuration from wrapper
+            **kwargs: Additional arguments
+        @output:
+            Trajectory result or None
+        @scenario:
+            If segment_cfg is provided and enabled, augment trajectory.
+            Otherwise, use direct planning.
+        """
+        if segment_cfg is None or not segment_cfg.get("enabled", False):
             return super().left_move_to_pose(
-                pose=pose,
-                constraint_pose=constraint_pose,
-                use_point_cloud=use_point_cloud,
-                use_attach=use_attach,
-                save_freq=save_freq,
+                pose=pose, constraint_pose=constraint_pose, **kwargs
             )
+
         if not self.plan_success:
-            return
+            return None
+
         target_pose = self._normalize_pose_7d(pose)
         if target_pose is None:
             self.plan_success = False
-            return
+            return None
+
         result = self._plan_augmented_result(
             arm_tag="left",
             target_pose=target_pose,
             constraint_pose=constraint_pose,
+            segment_cfg=segment_cfg,
         )
+
         if result is None or result.get("status") != "Success":
             self.plan_success = False
-            return
+            return None
+
         self.left_joint_path.append(deepcopy(result))
         return result
 
@@ -341,98 +858,159 @@ class PerturbationMixin:
         self,
         pose,
         constraint_pose=None,
-        use_point_cloud=False,
-        use_attach=False,
-        save_freq=-1,
+        segment_cfg: Optional[Dict[str, Any]] = None,
+        **kwargs,
     ):
-        if not self._is_plan_aug_active():
+        """
+        Override right_move_to_pose to apply trajectory augmentation.
+
+        @input:
+            pose: target pose
+            constraint_pose: constraint for movement
+            segment_cfg: Dict or None, segment configuration from wrapper
+            **kwargs: Additional arguments
+        @output:
+            Trajectory result or None
+        @scenario:
+            If segment_cfg is provided and enabled, augment trajectory.
+            Otherwise, use direct planning.
+        """
+        if segment_cfg is None or not segment_cfg.get("enabled", False):
             return super().right_move_to_pose(
-                pose=pose,
-                constraint_pose=constraint_pose,
-                use_point_cloud=use_point_cloud,
-                use_attach=use_attach,
-                save_freq=save_freq,
+                pose=pose, constraint_pose=constraint_pose, **kwargs
             )
+
         if not self.plan_success:
-            return
+            return None
+
         target_pose = self._normalize_pose_7d(pose)
         if target_pose is None:
             self.plan_success = False
-            return
+            return None
+
         result = self._plan_augmented_result(
             arm_tag="right",
             target_pose=target_pose,
             constraint_pose=constraint_pose,
+            segment_cfg=segment_cfg,
         )
+
         if result is None or result.get("status") != "Success":
             self.plan_success = False
-            return
+            return None
+
         self.right_joint_path.append(deepcopy(result))
         return result
 
-    def choose_grasp_pose(self, actor, arm_tag, pre_dis=0.1, target_dis=0, contact_point_id=None):
-        result = super().choose_grasp_pose(
-            actor,
-            arm_tag=arm_tag,
-            pre_dis=pre_dis,
-            target_dis=target_dis,
-            contact_point_id=contact_point_id,
-        )
+    # ==========================================================================
+    # Override move() to pass segment_cfg to move_to_pose
+    # ==========================================================================
 
-        if result is None or not self._pert_cfg.get("enabled", True) or not self.need_plan:
-            return result
-
-        pre_pose, grasp_pose = result
-        xy_jitter = self._pert_cfg["grasp_xy_jitter"]
-        yaw_jitter_deg = self._pert_cfg["grasp_yaw_jitter_deg"]
-
-        if self._pert_cfg.get("conservative_mode", False):
-            xy_jitter *= self._pert_cfg["conservative_xy_scale"]
-            yaw_jitter_deg *= self._pert_cfg["conservative_yaw_scale"]
-
-        pre_pose = self._jitter_xy(pre_pose, xy_jitter)
-        grasp_pose = self._jitter_xy(grasp_pose, xy_jitter)
-        grasp_pose = self._jitter_yaw(grasp_pose, yaw_jitter_deg)
-
-        self._pert_meta["grasp_xy_jitter"] = float(xy_jitter)
-        self._pert_meta["grasp_yaw_jitter_deg"] = float(yaw_jitter_deg)
-
-        return pre_pose, grasp_pose
-
-    def place_actor(
+    def move(
         self,
-        actor,
-        arm_tag,
-        target_pose,
-        functional_point_id=None,
-        pre_dis=0.1,
-        dis=0.02,
-        is_open=True,
-        **args,
+        actions_by_arm1,
+        actions_by_arm2=None,
+        save_freq=-1,
     ):
-        arm, actions = super().place_actor(
-            actor,
-            arm_tag,
-            target_pose,
-            functional_point_id=functional_point_id,
-            pre_dis=pre_dis,
-            dis=dis,
-            is_open=is_open,
-            **args,
-        )
+        """
+        Override move to extract segment_cfg and pass to move_to_pose.
 
-        if not self._pert_cfg.get("enabled", True) or not self.need_plan:
-            return arm, actions
+        @input:
+            actions_by_arm1: Tuple[ArmTag, List[Action]]
+            actions_by_arm2: Tuple[ArmTag, List[Action]] or None
+            save_freq: int, save frequency
+        @output:
+            bool, success status
+        @scenario:
+            Execute actions while passing segment configuration to move_to_pose.
+        """
+        from .utils.action import ArmTag
 
-        if not actions:
-            return arm, actions
+        if self.plan_success is False:
+            return False
 
-        xy_jitter = self._pert_cfg["pre_place_xy_jitter"]
-        if self._pert_cfg.get("conservative_mode", False):
-            xy_jitter *= self._pert_cfg["conservative_xy_scale"]
+        def get_actions(actions, arm_tag: ArmTag) -> list:
+            if actions[1] is None:
+                if actions[0][0] == arm_tag:
+                    return actions[0][1]
+                else:
+                    return []
+            else:
+                if actions[0][0] == actions[0][1]:
+                    raise ValueError("")
+                if actions[0][0] == arm_tag:
+                    return actions[0][1]
+                else:
+                    return actions[1][1]
 
-        if getattr(actions[0], "target_pose", None) is not None:
-            actions[0].target_pose = self._jitter_xy(actions[0].target_pose, xy_jitter)
+        actions = [actions_by_arm1, actions_by_arm2]
+        left_actions = get_actions(actions, "left")
+        right_actions = get_actions(actions, "right")
 
-        self._pert_meta["pre_place_xy_jitter"] = float(xy_jitter)
-        return arm, actions
+        max_len = max(len(left_actions), len(right_actions))
+        left_actions += [None] * (max_len - len(left_actions))
+        right_actions += [None] * (max_len - len(right_actions))
+
+        for left, right in zip(left_actions, right_actions):
+            if (left is not None and left.arm_tag != "left") or (
+                right is not None and right.arm_tag != "right"
+            ):
+                raise ValueError(
+                    f"Invalid arm tag: {left.arm_tag if left else None} or "
+                    f"{right.arm_tag if right else None}. Must be 'left' or 'right'."
+                )
+
+            if (
+                left is not None
+                and left.action == "move"
+                and right is not None
+                and right.action == "move"
+            ):
+                self.together_move_to_pose(
+                    left_target_pose=left.target_pose,
+                    right_target_pose=right.target_pose,
+                    left_constraint_pose=left.args.get("constraint_pose"),
+                    right_constraint_pose=right.args.get("constraint_pose"),
+                )
+                if self.plan_success is False:
+                    return False
+                continue
+            else:
+                control_seq = {
+                    "left_arm": None,
+                    "left_gripper": None,
+                    "right_arm": None,
+                    "right_gripper": None,
+                }
+
+                if left is not None:
+                    if left.action == "move":
+                        control_seq["left_arm"] = self.left_move_to_pose(
+                            pose=left.target_pose,
+                            constraint_pose=left.args.get("constraint_pose"),
+                            segment_cfg=left.args.get("segment_cfg"),
+                        )
+                    else:
+                        control_seq["left_gripper"] = self.set_gripper(
+                            left_pos=left.target_gripper_pos, set_tag="left"
+                        )
+                    if self.plan_success is False:
+                        return False
+
+                if right is not None:
+                    if right.action == "move":
+                        control_seq["right_arm"] = self.right_move_to_pose(
+                            pose=right.target_pose,
+                            constraint_pose=right.args.get("constraint_pose"),
+                            segment_cfg=right.args.get("segment_cfg"),
+                        )
+                    else:
+                        control_seq["right_gripper"] = self.set_gripper(
+                            right_pos=right.target_gripper_pos, set_tag="right"
+                        )
+                    if self.plan_success is False:
+                        return False
+
+            self.take_dense_action(control_seq)
+
+        return True

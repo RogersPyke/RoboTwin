@@ -1,0 +1,219 @@
+"""
+Purpose: Utility functions and constants for perturbation mixin.
+Dependencies: logging
+Usage:
+    - Import segment validation functions
+    - Import default configuration constants
+    - Used by _pert_mixin.py
+
+@input:  segment configuration dict
+@output: validated configuration or raise error
+@scenario: Validate and merge segment configurations for perturbation tasks.
+
+Design Philosophy:
+    - Each segment MUST explicitly specify 'enabled' key
+    - Missing 'enabled' key raises ValueError with clear error message
+    - Other parameters are optional and merged with defaults
+    - No silent defaults for 'enabled' to force explicit configuration
+"""
+
+import logging
+from typing import Dict, List, Optional, Any
+
+logger = logging.getLogger(__name__)
+
+
+# ==============================================================================
+# Default Segment Configuration Constants
+# ==============================================================================
+
+DEFAULT_SEGMENT_PARAMS: Dict[str, Any] = {
+    "xy_jitter": 0.008,
+    "yaw_jitter_deg": 6.0,
+    "waypoint_count_min": 1,
+    "waypoint_count_max": 2,
+    "waypoint_xy_radius": 0.08,
+    "waypoint_z_jitter": 0.05,
+    "orientation_jitter_deg": 10.0,
+    "rrt_anchor_ratio_min": 0.25,
+    "rrt_anchor_ratio_max": 0.75,
+    "rrt_lateral_xy": 0.10,
+    "rrt_z_jitter": 0.04,
+    "fallback_to_direct": True,
+}
+
+
+# ==============================================================================
+# Validation Functions
+# ==============================================================================
+
+
+def validate_segment_config(
+    segment_cfg: Optional[Dict[str, Any]],
+    segment_name: str,
+    task_name: str,
+) -> Dict[str, Any]:
+    """
+    Validate a single segment configuration.
+
+    @input:
+        segment_cfg: Dict, segment configuration or None
+        segment_name: str, name for error messages (e.g., "grasp_segment[0]")
+        task_name: str, task class name for error context
+    @output:
+        Dict, validated and merged configuration with all required keys
+    @scenario:
+        Validate that 'enabled' key exists, merge with defaults for missing keys.
+        Raise ValueError if segment_cfg is None or missing 'enabled'.
+
+    @param segment_cfg: Configuration dict for a single segment
+    @param segment_name: Human-readable segment name for error messages
+    @param task_name: Task class name for error context
+
+    Example valid input:
+        {"enabled": True, "xy_jitter": 0.010}
+    Example invalid input (will raise):
+        None  -> ValueError
+        {}    -> ValueError (missing 'enabled')
+        {"xy_jitter": 0.01} -> ValueError (missing 'enabled')
+    """
+    if segment_cfg is None:
+        error_msg = (
+            f"[{task_name}] Segment '{segment_name}' configuration is None. "
+            f"Each segment MUST specify 'enabled' key explicitly. "
+            f"Set 'enabled: True' or 'enabled: False'."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    if "enabled" not in segment_cfg:
+        error_msg = (
+            f"[{task_name}] Segment '{segment_name}' missing required key 'enabled'. "
+            f"Each segment MUST specify 'enabled: True' or 'enabled: False'. "
+            f"Provided keys: {list(segment_cfg.keys())}"
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    merged = dict(DEFAULT_SEGMENT_PARAMS)
+    merged.update(segment_cfg)
+
+    if not isinstance(merged["enabled"], bool):
+        error_msg = (
+            f"[{task_name}] Segment '{segment_name}' has invalid 'enabled' type. "
+            f"Expected bool, got {type(merged['enabled']).__name__}."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    logger.debug(
+        f"[{task_name}] Segment '{segment_name}' validated: enabled={merged['enabled']}"
+    )
+    return merged
+
+
+def validate_segments_list(
+    segments: Optional[List[Dict[str, Any]]],
+    action_type: str,
+    task_name: str,
+    expected_count: int = 2,
+) -> List[Dict[str, Any]]:
+    """
+    Validate a list of segment configurations (for grasp/place actions).
+
+    @input:
+        segments: List[Dict], list of segment configurations
+        action_type: str, "grasp" or "place" for error messages
+        task_name: str, task name for error context
+        expected_count: int, expected number of segments (default 2)
+    @output:
+        List[Dict], validated segment configurations
+    @scenario:
+        Validate each segment in the list, ensure count matches expected.
+
+    @param segments: List of segment configuration dicts
+    @param action_type: Type of action ("grasp" or "place")
+    @param task_name: Task class name for error context
+    @param expected_count: Expected number of segments in the list
+
+    Note:
+        - grasp_actor has 2 move segments: approach + descent
+        - place_actor has 2 move segments: approach + descent
+    """
+    if segments is None:
+        error_msg = (
+            f"[{task_name}] {action_type.upper()}_SEGMENTS is None. "
+            f"Must provide a list of {expected_count} segment configurations."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    if not isinstance(segments, list):
+        error_msg = (
+            f"[{task_name}] {action_type.upper()}_SEGMENTS must be a list, "
+            f"got {type(segments).__name__}."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    if len(segments) != expected_count:
+        error_msg = (
+            f"[{task_name}] {action_type.upper()}_SEGMENTS has {len(segments)} segments, "
+            f"expected {expected_count}. "
+            f"Each {action_type}_actor has exactly {expected_count} move segments."
+        )
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+
+    validated = []
+    for idx, seg in enumerate(segments):
+        seg_name = f"{action_type}_segment[{idx}]"
+        validated.append(validate_segment_config(seg, seg_name, task_name))
+
+    logger.debug(f"[{task_name}] Validated {len(validated)} segments for {action_type}")
+    return validated
+
+
+def validate_single_segment(
+    segment: Optional[Dict[str, Any]],
+    action_type: str,
+    task_name: str,
+) -> Dict[str, Any]:
+    """
+    Validate a single segment configuration (for move_by_displacement, back_to_origin).
+
+    @input:
+        segment: Dict, segment configuration
+        action_type: str, action type name for error messages
+        task_name: str, task name for error context
+    @output:
+        Dict, validated segment configuration
+    @scenario:
+        Validate single segment for simple movement actions.
+
+    @param segment: Segment configuration dict
+    @param action_type: Type of action (e.g., "move", "lift", "retreat")
+    @param task_name: Task class name for error context
+    """
+    seg_name = f"{action_type}_segment"
+    return validate_segment_config(segment, seg_name, task_name)
+
+
+def merge_segment_config(
+    base_cfg: Dict[str, Any],
+    override_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Merge two segment configurations with override taking precedence.
+
+    @input:
+        base_cfg: Dict, base configuration
+        override_cfg: Dict, override configuration
+    @output:
+        Dict, merged configuration
+    @scenario:
+        Merge configurations when multiple layers need to be combined.
+    """
+    result = dict(base_cfg)
+    result.update(override_cfg)
+    return result
