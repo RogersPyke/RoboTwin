@@ -120,6 +120,10 @@ class hanging_mug_pert(PerturbationMixin, hanging_mug):
         @scenario:
             Final placement on rack. Highest precision required for
             successful hanging. Very small jitter on descent.
+
+        IMPORTANT: Both segments MUST have enabled=True.
+        Moving along rack functional point axis with enabled=False
+        would bypass trajectory perturbation and cause collision.
         """
         return self._wrap_place(
             actor=self.mug,

@@ -15,6 +15,34 @@ Design Philosophy:
     - Missing 'enabled' key raises ValueError with clear error message
     - Other parameters are optional and merged with defaults
     - No silent defaults for 'enabled' to force explicit configuration
+
+Segment Configuration Parameters:
+    Required:
+        - enabled: bool, must be True or False explicitly
+
+    Position/Orientation Jitter (applied to target pose):
+        - xy_jitter: float, max random offset in meters for x and y axes
+                    Example: 0.010 means each axis gets random offset in [-0.010, 0.010]
+        - yaw_jitter_deg: float, max random yaw rotation in degrees
+                         Example: 8.0 means random rotation in [-8.0, 8.0] degrees
+
+    Waypoint Chain Parameters (for trajectory planning):
+        - waypoint_count_min: int, minimum number of intermediate waypoints (default: 1)
+        - waypoint_count_max: int, maximum number of intermediate waypoints (default: 2)
+        - waypoint_xy_radius: float, max lateral distance from direct path in meters (default: 0.08)
+                             Example: 0.08 means waypoints can deviate up to 8cm sideways
+        - waypoint_z_jitter: float, max z offset for waypoints in meters (default: 0.05)
+        - orientation_jitter_deg: float, max orientation change for waypoints in degrees (default: 10.0)
+
+    RRT Anchor Parameters (alternative trajectory generation):
+        - rrt_anchor_ratio_min: float, min ratio along path for anchor point (default: 0.25)
+        - rrt_anchor_ratio_max: float, max ratio along path for anchor point (default: 0.75)
+        - rrt_lateral_xy: float, max lateral offset for RRT anchor in meters (default: 0.10)
+        - rrt_z_jitter: float, max z jitter for RRT anchor in meters (default: 0.04)
+
+    Planning Parameters:
+        - candidate_trials: int, number of candidate paths to generate (default: 6)
+        - fallback_to_direct: bool, use direct path if all candidates fail (default: True)
 """
 
 import logging
@@ -28,8 +56,23 @@ logger = logging.getLogger(__name__)
 # ==============================================================================
 
 DEFAULT_SEGMENT_PARAMS: Dict[str, Any] = {
+    # Position/Orientation Jitter
     "xy_jitter": 0.0,
     "yaw_jitter_deg": 0.0,
+    # Waypoint Chain Parameters
+    "waypoint_count_min": 1,
+    "waypoint_count_max": 2,
+    "waypoint_xy_radius": 0.08,
+    "waypoint_z_jitter": 0.05,
+    "orientation_jitter_deg": 10.0,
+    # RRT Anchor Parameters
+    "rrt_anchor_ratio_min": 0.25,
+    "rrt_anchor_ratio_max": 0.75,
+    "rrt_lateral_xy": 0.10,
+    "rrt_z_jitter": 0.04,
+    # Planning Parameters
+    "candidate_trials": 6,
+    "fallback_to_direct": True,
 }
 
 
