@@ -105,18 +105,38 @@ class unmove_pillbottle_pad_pert(PerturbationMixin, unmove_pillbottle_pad):
         @output: Dict, task info
         @scenario: Complete unmove pillbottle task with segment-level perturbation
         """
-        arm_tag = ArmTag("right" if self.pillbottle.get_pose().p[0] > 0 else "left")
+        if getattr(self, "skip_robot_movement", False):
+            pillbottle_x = self.pillbottle.get_pose().p[0]
+            self._arm_tag = ArmTag("right") if pillbottle_x > 0 else ArmTag("left")
+            self.info["info"] = {
+                "{A}": f"080_pillbottle/base{self.pillbottle_id}",
+                "{B}": "box",
+                "{a}": str(self._arm_tag),
+            }
+            save_data_orig = self.save_data
+            self.save_data = True
+            n = getattr(self, "skip_success_check_video_frames", 100)
+            for _ in range(n):
+                self._take_picture()
+            self.merge_pkl_to_hdf5_video()
+            self.save_data = save_data_orig
+            self.plan_success = True
+            return self.info
+
+        arm_tag = ArmTag("right" if self.pillbottle_tgt_pose[0] > 0 else "left")
 
         self.move(self._grasp_pillbottle_from_pad(arm_tag))
         self.move(self._lift(arm_tag, z=0.05))
-
-        target_pose = self.get_target_pose(arm_tag)
-        self.move(self._place_pillbottle_on_table(arm_tag, target_pose))
+        self.move(self._place_pillbottle_on_table(arm_tag, self.pillbottle_tgt_pose))
 
         self.info["info"] = {
             "{A}": f"080_pillbottle/base{self.pillbottle_id}",
+            "{B}": "box",
             "{a}": str(arm_tag),
         }
+
+        if getattr(self, "skip_success_check", False):
+            self.plan_success = True
 
         result = self.info
 

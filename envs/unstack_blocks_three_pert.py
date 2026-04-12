@@ -44,9 +44,9 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
         return self._wrap_grasp(
             actor=actor,
             arm_tag=arm_tag,
-            contact_point_id=0,
-            pre_grasp_dis=0.08,
+            pre_grasp_dis=0.09,
             grasp_dis=GRASP_MIN_STANDOFF,
+            contact_point_id=[0, 1, 2, 3],
             segments=[
                 {"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
                 {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
@@ -71,9 +71,11 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
             arm_tag=arm_tag,
             target_pose=target_pose,
             functional_point_id=0,
-            pre_dis=0.10,
+            pre_dis=0.05,
             dis=0.0,
-            constrain="free",
+            pre_dis_axis="fp",
+            constrain="align",
+            align_axis=None,
             segments=[
                 {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
                 {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
@@ -114,12 +116,12 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
             segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
         )
 
-    def move_block(self, actor, target_pose, arm_tag=None):
+    def unstack_and_place_block(self, block, target_pose, arm_tag=None):
         """
-        Move a single block from stack to target position.
+        Unstack and place a single block.
 
         @input:
-            actor: Actor, block to move
+            block: Actor, block to move
             target_pose: List[float], target position
             arm_tag: str or ArmTag or None, which arm to use
         @output:
@@ -131,20 +133,20 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
             target_x = target_pose[0] if len(target_pose) >= 1 else 0
             arm_tag = ArmTag("left" if target_x < 0 else "right")
 
-        if self.last_gripper is not None and self.last_gripper != arm_tag:
+        if self.last_gripper is not None and (self.last_gripper != arm_tag):
             self.move(
-                self._grasp_block_from_stack(actor, arm_tag),
+                self._grasp_block_from_stack(block, arm_tag),
                 self._back_to_origin(arm_tag.opposite),
             )
         else:
-            self.move(self._grasp_block_from_stack(actor, arm_tag))
+            self.move(self._grasp_block_from_stack(block, arm_tag))
 
-        self.move(self._lift(arm_tag, z=0.12))
-        self.move(self._place_block(actor, arm_tag, target_pose))
-        self.move(self._lift(arm_tag, z=0.1))
+        self.move(self._lift(arm_tag, z=0.07))
+        self.move(self._place_block(block, arm_tag, target_pose))
+        self.move(self._lift(arm_tag, z=0.07))
 
         self.last_gripper = arm_tag
-        self.last_actor = actor
+        self.last_actor = block
         return str(arm_tag)
 
     def play_once(self):
@@ -158,11 +160,18 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
         self.last_gripper = None
         self.last_actor = None
 
-        self.move_block(self.block3, self.block3_target_pose)
-        self.move_block(self.block2, self.block2_target_pose)
-        self.move_block(self.block1, self.block1_target_pose)
+        arm_tag3 = self.unstack_and_place_block(self.block3, self.block3_target_pose)
+        arm_tag2 = self.unstack_and_place_block(self.block2, self.block2_target_pose)
+        arm_tag1 = self.unstack_and_place_block(self.block1, self.block1_target_pose)
 
-        self.info["info"] = {"{A}": "block"}
+        self.info["info"] = {
+            "{A}": "red block",
+            "{B}": "green block",
+            "{C}": "blue block",
+            "{a}": arm_tag1,
+            "{b}": arm_tag2,
+            "{c}": arm_tag3,
+        }
 
         result = self.info
 

@@ -160,6 +160,19 @@ class stack_bowls_three_pert(PerturbationMixin, stack_bowls_three):
         self.las_arm = None
 
         self.move_bowl(self.bowl1, self.bowl1_target_pose)
-        self.move_bowl(self.bowl2, self.bowl2_target_pose)
-        self.move_bowl(self.bowl3, self.bowl3_target_pose)
-        return self.info
+        self.move_bowl(self.bowl2, self.bowl1.get_pose().p + [0, 0, 0.05])
+        self.move_bowl(self.bowl3, self.bowl2.get_pose().p + [0, 0, 0.05])
+
+        self.info["info"] = {"{A}": f"002_bowl/base3"}
+
+        result = self.info
+
+        if self._end_reset_to_init:
+            self.move(
+                self._wrap_back_to_origin(ArmTag("left"), segment={"enabled": False})
+            )
+            self.move(
+                self._wrap_back_to_origin(ArmTag("right"), segment={"enabled": False})
+            )
+
+        return result

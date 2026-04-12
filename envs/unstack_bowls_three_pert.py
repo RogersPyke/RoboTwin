@@ -14,7 +14,7 @@ Segment Design:
     - move_segment: lift/retreat movement
 
 Note: Each segment MUST specify 'enabled' key explicitly.
-      Unstack requires shallow grasp to avoid lifting multiple bowls.
+       Unstack requires shallow grasp to avoid lifting multiple bowls.
 """
 
 from ._pert_mixin import PerturbationMixin
@@ -27,6 +27,7 @@ from .unstack_bowls_three import (
     GRASP_DIS,
 )
 from .utils.action import ArmTag
+import numpy as np
 
 
 class unstack_bowls_three_pert(PerturbationMixin, unstack_bowls_three):
@@ -144,10 +145,18 @@ class unstack_bowls_three_pert(PerturbationMixin, unstack_bowls_three):
             Complete bowl movement with shallow grasp.
         """
         if arm_tag is None:
-            target_x = target_pose[0] if len(target_pose) >= 1 else 0
+            target_x = (
+                target_pose[0] if len(np.array(target_pose).flatten()) >= 1 else 0
+            )
             arm_tag = ArmTag("left" if target_x < 0 else "right")
 
-        if self.last_gripper is not None and self.last_gripper != arm_tag:
+        flat = np.array(target_pose).flatten()
+        if flat.size >= 7:
+            target_pose_7d = flat[:7].tolist()
+        else:
+            target_pose_7d = flat.tolist() + list(self.quat_of_target_pose)
+
+        if self.last_gripper is not None and (self.last_gripper != arm_tag):
             self.move(
                 self._grasp_bowl_from_stack(actor, arm_tag),
                 self._back_to_origin(arm_tag.opposite),
@@ -156,7 +165,7 @@ class unstack_bowls_three_pert(PerturbationMixin, unstack_bowls_three):
             self.move(self._grasp_bowl_from_stack(actor, arm_tag))
 
         self.move(self._lift(arm_tag, z=0.14))
-        self.move(self._place_bowl(actor, arm_tag, target_pose))
+        self.move(self._place_bowl(actor, arm_tag, target_pose_7d))
         self.move(self._lift(arm_tag, z=0.07))
 
         self.last_gripper = arm_tag

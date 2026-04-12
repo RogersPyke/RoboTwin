@@ -120,4 +120,15 @@ class move_pillbottle_pad_pert(PerturbationMixin, move_pillbottle_pad):
             "{A}": f"080_pillbottle/base{self.pillbottle_id}",
             "{a}": str(arm_tag),
         }
-        return self.info
+
+        result = self.info
+
+        if self._end_reset_to_init:
+            self.move(
+                self._wrap_back_to_origin(ArmTag("left"), segment={"enabled": False})
+            )
+            self.move(
+                self._wrap_back_to_origin(ArmTag("right"), segment={"enabled": False})
+            )
+
+        return result
