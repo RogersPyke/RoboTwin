@@ -325,8 +325,8 @@ def run(TASK_ENV, args, log):
             # Save statistics
             stats_tracker.save()
 
-            # In statistics mode, print summary periodically
-            if statistics_mode and epid % 10 == 0:
+            # Print summary periodically
+            if epid % 10 == 0:
                 stats_tracker.print_summary()
 
             flush_log(log)
@@ -337,9 +337,10 @@ def run(TASK_ENV, args, log):
         write_success_rate_file(suc_num, epid)
 
         # Print final statistics summary
+        stats_tracker.print_summary()
+        stats_tracker.save()
+
         if statistics_mode:
-            stats_tracker.print_summary()
-            stats_tracker.save()
             log.info(f"{GREEN}[STATISTICS MODE COMPLETE]{RESET}")
             log.info(
                 f"Reached target: {suc_num}/{statistics_target_num} successful episodes"

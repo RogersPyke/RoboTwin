@@ -58,19 +58,15 @@ END_RESET_TO_INIT: true
 #   yaw_jitter_deg: float (degrees) - max random yaw rotation
 #                   Example: 8.0 means random rotation in [-8.0, 8.0] degrees
 #
-# Waypoint Chain Parameters (for trajectory planning with intermediate waypoints):
-#   waypoint_xy_radius: float (meters) - max lateral distance from direct path
-#                     Example: 0.08 means waypoints can deviate up to 8cm sideways
-#   waypoint_z_jitter: float (meters) - max z offset for waypoints (default: 0.05)
-#   orientation_jitter_deg: float (degrees) - max orientation change (default: 10.0)
-#
-# RRT Anchor Parameters (alternative trajectory generation):
-#   rrt_lateral_xy: float (meters) - max lateral offset for RRT anchor (default: 0.10)
-#   rrt_z_jitter: float (meters) - max z jitter for RRT anchor (default: 0.04)
-#
 # Common Anchor Parameters (shared by both strategies):
 #   anchor_ratio_min: float - min ratio along path for anchor (default: 0.25)
 #   anchor_ratio_max: float - max ratio along path for anchor (default: 0.75)
+#
+# Offset Parameters:
+#   offset_ratio: float - ratio of path length for max offset (default: 0.15)
+#                        base_offset = offset_ratio * path_length
+#                        actual_offset decays linearly from max at midpoint to 0 at endpoints
+#   orientation_jitter_deg: float (degrees) - max orientation change (default: 10.0)
 #
 # Planning Parameters:
 #   candidate_trials: int - number of candidate paths to generate (default: 6)
@@ -87,16 +83,14 @@ END_RESET_TO_INIT: true
 # =============================================================================
 # Statistics Mode Configuration
 # =============================================================================
-# statistics_mode: If true, only collect success statistics without saving data.
-#                  Useful for validating configuration and planning success rates.
-#                  - Skips actual data collection (no HDF5/video saving)
-#                  - Only runs planning and success validation
-#                  - Records RRT vs Waypoint success statistics separately
-# statistics_target_num: Target number of successful episodes to collect stats for.
-#                        Only used when statistics_mode is true.
+# statistics_mode: If true, skip data collection phase (no HDF5/video saving).
+#                  Only runs planning and success validation.
+#                  Note: Statistics (stats.json) are ALWAYS collected regardless of this flag.
+# statistics_target_num: Target number of successful episodes.
+#                        Used as target in statistics_mode, or as episode_num limit otherwise.
 # =============================================================================
-statistics_mode: false
-statistics_target_num: 50
+statistics_mode: true
+statistics_target_num: 10
 
 perturbation:
   enabled: true
@@ -104,12 +98,12 @@ perturbation:
   defaults:
     xy_jitter: 0.008
     yaw_jitter_deg: 6.0
-    anchor_ratio_min: 0.25
-    anchor_ratio_max: 0.75
-    waypoint_xy_radius: 0.08
-    waypoint_z_jitter: 0.05
     orientation_jitter_deg: 10.0
-    rrt_lateral_xy: 0.10
-    rrt_z_jitter: 0.04
+
+    anchor_ratio_min: 0.2
+    anchor_ratio_max: 0.8
+
+    offset_ratio: 0.2
+
     candidate_trials: 6
     fallback_to_direct: true

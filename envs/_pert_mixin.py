@@ -109,11 +109,8 @@ class PerturbationMixin:
             "yaw_jitter_deg": defaults.get("yaw_jitter_deg", 0.0),
             "anchor_ratio_min": defaults.get("anchor_ratio_min", 0.25),
             "anchor_ratio_max": defaults.get("anchor_ratio_max", 0.75),
-            "waypoint_xy_radius": defaults.get("waypoint_xy_radius", 0.08),
-            "waypoint_z_jitter": defaults.get("waypoint_z_jitter", 0.05),
+            "offset_ratio": defaults.get("offset_ratio", 0.15),
             "orientation_jitter_deg": defaults.get("orientation_jitter_deg", 10.0),
-            "rrt_lateral_xy": defaults.get("rrt_lateral_xy", 0.10),
-            "rrt_z_jitter": defaults.get("rrt_z_jitter", 0.04),
             "candidate_trials": defaults.get("candidate_trials", 6),
             "fallback_to_direct": defaults.get("fallback_to_direct", True),
         }
@@ -280,6 +277,43 @@ class PerturbationMixin:
         pose[3:7] = q_new
         return pose.tolist()
 
+    def _compute_actual_offset(
+        self,
+        anchor_ratio: float,
+        path_length: float,
+        offset_ratio: float,
+    ) -> float:
+        """
+        Compute actual offset with linear decay from midpoint.
+
+        @input:
+            anchor_ratio: float, position ratio along path [0, 1]
+            path_length: float, L2 distance from start to target
+            offset_ratio: float, ratio of path length for max offset
+        @output:
+            float, actual offset distance
+        @scenario:
+            Linear decay: max offset at midpoint (ratio=0.5), zero at endpoints.
+            actual_offset = base_offset * decay_factor
+            decay_factor = 1 - 2 * |anchor_ratio - 0.5|
+            base_offset = offset_ratio * path_length
+
+        @param anchor_ratio: Position along path (0=start, 1=target)
+        @param path_length: Euclidean distance of direct path
+        @param offset_ratio: Ratio determining max offset relative to path length
+        """
+        if path_length < 1e-8 or offset_ratio <= 0:
+            return 0.0
+
+        base_offset = offset_ratio * path_length
+        decay_factor = 1.0 - 2.0 * abs(anchor_ratio - 0.5)
+
+        if decay_factor <= 0:
+            return 0.0
+
+        actual_offset = base_offset * decay_factor
+        return float(np.random.uniform(0, actual_offset))
+
     def _build_waypoint_chain_candidates(
         self,
         start_pose: List[float],
@@ -303,30 +337,40 @@ class PerturbationMixin:
         """
         candidates = []
 
-        xy_radius = segment_cfg.get("waypoint_xy_radius", 0.08)
-        z_jitter = segment_cfg.get("waypoint_z_jitter", 0.05)
         orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
         ratio_min = segment_cfg.get("anchor_ratio_min", 0.25)
         ratio_max = segment_cfg.get("anchor_ratio_max", 0.75)
+        offset_ratio = segment_cfg.get("offset_ratio", 0.15)
         trials = segment_cfg.get("candidate_trials", 6)
 
         start_xyz = np.array(start_pose[:3], dtype=np.float64)
         target_xyz = np.array(target_pose[:3], dtype=np.float64)
         direct_vec = target_xyz - start_xyz
+        path_length = float(np.linalg.norm(direct_vec))
 
         for _ in range(trials):
             ratio = float(np.random.uniform(ratio_min, ratio_max))
             base_xyz = start_xyz + ratio * direct_vec
-            offset = np.array(
-                [
-                    np.random.uniform(-xy_radius, xy_radius),
-                    np.random.uniform(-xy_radius, xy_radius),
-                    np.random.uniform(-z_jitter, z_jitter),
-                ],
-                dtype=np.float64,
+
+            actual_offset = self._compute_actual_offset(
+                ratio, path_length, offset_ratio
             )
+
+            if actual_offset > 1e-8:
+                theta = float(np.random.uniform(0, 2 * math.pi))
+                offset_vec = np.array(
+                    [
+                        actual_offset * math.cos(theta),
+                        actual_offset * math.sin(theta),
+                        0.0,
+                    ],
+                    dtype=np.float64,
+                )
+            else:
+                offset_vec = np.zeros(3, dtype=np.float64)
+
             waypoint = deepcopy(target_pose)
-            waypoint[:3] = (base_xyz + offset).tolist()
+            waypoint[:3] = (base_xyz + offset_vec).tolist()
             waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
 
             candidates.append(
@@ -362,20 +406,17 @@ class PerturbationMixin:
 
         candidates = []
 
-        lateral_xy = segment_cfg.get("rrt_lateral_xy", 0.10)
-        z_jitter = segment_cfg.get("rrt_z_jitter", 0.04)
         orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
         ratio_min = segment_cfg.get("anchor_ratio_min", 0.25)
         ratio_max = segment_cfg.get("anchor_ratio_max", 0.75)
+        offset_ratio = segment_cfg.get("offset_ratio", 0.15)
         trials = segment_cfg.get("candidate_trials", 6)
-
-        step_count = max(1, int(direct_result["position"].shape[0]))
-        path_scale = min(1.8, max(0.6, float(step_count) / 200.0))
-        lateral_xy = lateral_xy * path_scale
 
         start_xyz = np.array(start_pose[:3], dtype=np.float64)
         target_xyz = np.array(target_pose[:3], dtype=np.float64)
         direct_vec = target_xyz - start_xyz
+        path_length = float(np.linalg.norm(direct_vec))
+
         horizontal_vec = np.array([direct_vec[0], direct_vec[1], 0.0], dtype=np.float64)
         norm_xy = float(np.linalg.norm(horizontal_vec))
 
@@ -394,9 +435,18 @@ class PerturbationMixin:
 
         for _ in range(trials):
             ratio = float(np.random.uniform(ratio_min, ratio_max))
-            lateral = float(np.random.uniform(-lateral_xy, lateral_xy))
+
+            actual_offset = self._compute_actual_offset(
+                ratio, path_length, offset_ratio
+            )
+
+            if actual_offset > 1e-8:
+                lateral_sign = float(np.random.choice([-1.0, 1.0]))
+                lateral = actual_offset * lateral_sign
+            else:
+                lateral = 0.0
+
             anchor = start_xyz + ratio * direct_vec + lateral * orthogonal_vec
-            anchor[2] += float(np.random.uniform(-z_jitter, z_jitter))
 
             waypoint = deepcopy(target_pose)
             waypoint[:3] = anchor.tolist()
