@@ -1,7 +1,7 @@
 # if you want to modify the config, please check the following tutorial first:
 # https://robotwin-platform.github.io/doc/usage/configurations.html
 render_freq: 0
-episode_num: 1
+episode_num: 100
 use_seed: false
 save_freq: 15
 embodiment: [aloha-agilex]
@@ -89,7 +89,7 @@ END_RESET_TO_INIT: true
 # statistics_target_num: Target number of successful episodes.
 #                        Used as target in statistics_mode, or as episode_num limit otherwise.
 # =============================================================================
-statistics_mode: true
+statistics_mode: false
 statistics_target_num: 10
 
 perturbation:

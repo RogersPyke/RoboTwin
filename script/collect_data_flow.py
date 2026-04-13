@@ -72,7 +72,7 @@ TASK_TO_COLL = [
     "unmove_pillbottle_pad_pert",
 ]
 CFG_TO_COLL = ["demo_clean_pert"]
-GPU_PARALLEL = [0]
+GPU_PARALLEL = [0, 1]
 SUBPROCESS_PRINT = True
 END_RESET_TO_INIT = True
 
