@@ -48,8 +48,8 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
             grasp_dis=GRASP_MIN_STANDOFF,
             contact_point_id=[0, 1, 2, 3],
             segments=[
-                {"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
-                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+                {"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 1.5},
             ],
         )
 
@@ -77,8 +77,8 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
             constrain="align",
             align_axis=None,
             segments=[
-                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
+                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 2.0},
             ],
         )
 
@@ -97,7 +97,7 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
         return self._wrap_move(
             arm_tag=arm_tag,
             z=z,
-            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
+            segment={"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
         )
 
     def _back_to_origin(self, arm_tag):
@@ -113,7 +113,7 @@ class unstack_blocks_three_pert(PerturbationMixin, unstack_blocks_three):
         """
         return self._wrap_back_to_origin(
             arm_tag=arm_tag,
-            segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+            segment={"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
         )
 
     def unstack_and_place_block(self, block, target_pose, arm_tag=None):

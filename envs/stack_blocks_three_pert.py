@@ -43,8 +43,8 @@ class stack_blocks_three_pert(PerturbationMixin, stack_blocks_three):
             arm_tag=arm_tag,
             pre_grasp_dis=0.09,
             segments=[
-                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
             ],
         )
 
@@ -70,8 +70,8 @@ class stack_blocks_three_pert(PerturbationMixin, stack_blocks_three):
             dis=0.0,
             pre_dis_axis="fp",
             segments=[
-                {"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
-                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+                {"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 1.5},
             ],
         )
 
@@ -90,7 +90,7 @@ class stack_blocks_three_pert(PerturbationMixin, stack_blocks_three):
         return self._wrap_move(
             arm_tag=arm_tag,
             z=z,
-            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
+            segment={"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
         )
 
     def _back_to_origin(self, arm_tag):
@@ -106,7 +106,7 @@ class stack_blocks_three_pert(PerturbationMixin, stack_blocks_three):
         """
         return self._wrap_back_to_origin(
             arm_tag=arm_tag,
-            segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+            segment={"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
         )
 
     def pick_and_place_block(self, block):

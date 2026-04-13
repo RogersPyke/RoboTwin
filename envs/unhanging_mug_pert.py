@@ -51,8 +51,8 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             arm_tag=arm_tag,
             pre_grasp_dis=0.05,
             segments=[
-                {"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 4.0},
-                {"enabled": True, "xy_jitter": 0.001, "yaw_jitter_deg": 1.5},
+                {"enabled": True, "xy_jitter": 0.004, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.001, "yaw_jitter_deg": 1.0},
             ],
         )
 
@@ -72,8 +72,8 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             arm_tag=arm_tag,
             pre_grasp_dis=0.05,
             segments=[
-                {"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
-                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+                {"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 1.5},
             ],
         )
 
@@ -129,8 +129,8 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             dis=0.0,
             constrain="free",
             segments=[
-                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
+                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 2.0},
             ],
         )
 
@@ -154,8 +154,8 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             dis=0.0,
             constrain="free",
             segments=[
-                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
+                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 2.0},
             ],
         )
 
@@ -176,7 +176,7 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
             arm_tag=arm_tag,
             z=z,
             move_axis=move_axis,
-            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
+            segment={"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
         )
 
     def _back_to_origin(self, arm_tag):
@@ -192,7 +192,7 @@ class unhanging_mug_pert(PerturbationMixin, unhanging_mug):
         """
         return self._wrap_back_to_origin(
             arm_tag=arm_tag,
-            segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+            segment={"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
         )
 
     def play_once(self):

@@ -53,8 +53,8 @@ class stack_bowls_three_pert(PerturbationMixin, stack_bowls_three):
             contact_point_id=[0, 2][int(arm_tag == "left")],
             pre_grasp_dis=0.1,
             segments=[
-                {"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
-                {"enabled": True, "xy_jitter": 0.003, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
             ],
         )
 
@@ -80,8 +80,8 @@ class stack_bowls_three_pert(PerturbationMixin, stack_bowls_three):
             dis=0,
             constrain="align",
             segments=[
-                {"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
-                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 2.0},
+                {"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
+                {"enabled": True, "xy_jitter": 0.002, "yaw_jitter_deg": 1.5},
             ],
         )
 
@@ -100,7 +100,7 @@ class stack_bowls_three_pert(PerturbationMixin, stack_bowls_three):
         return self._wrap_move(
             arm_tag=arm_tag,
             z=z,
-            segment={"enabled": True, "xy_jitter": 0.008, "yaw_jitter_deg": 6.0},
+            segment={"enabled": True, "xy_jitter": 0.005, "yaw_jitter_deg": 3.0},
         )
 
     def _back_to_origin(self, arm_tag):
@@ -116,7 +116,7 @@ class stack_bowls_three_pert(PerturbationMixin, stack_bowls_three):
         """
         return self._wrap_back_to_origin(
             arm_tag=arm_tag,
-            segment={"enabled": True, "xy_jitter": 0.010, "yaw_jitter_deg": 8.0},
+            segment={"enabled": True, "xy_jitter": 0.006, "yaw_jitter_deg": 4.0},
         )
 
     def move_bowl(self, actor, target_pose):
