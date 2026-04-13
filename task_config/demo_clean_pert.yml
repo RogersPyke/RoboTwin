@@ -84,6 +84,20 @@ END_RESET_TO_INIT: true
 #       {"enabled": True, "xy_jitter": 0.002},
 #   ]
 # =============================================================================
+# =============================================================================
+# Statistics Mode Configuration
+# =============================================================================
+# statistics_mode: If true, only collect success statistics without saving data.
+#                  Useful for validating configuration and planning success rates.
+#                  - Skips actual data collection (no HDF5/video saving)
+#                  - Only runs planning and success validation
+#                  - Records RRT vs Waypoint success statistics separately
+# statistics_target_num: Target number of successful episodes to collect stats for.
+#                        Only used when statistics_mode is true.
+# =============================================================================
+statistics_mode: false
+statistics_target_num: 50
+
 perturbation:
   enabled: true
   # Default parameters (can be overridden in task files)

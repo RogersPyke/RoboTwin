@@ -19,6 +19,11 @@ Call-chain note (from this script as caller):
       SIGINT/SIGTERM the main process first terminates the pool (workers get SIGTERM); each
       worker's SIGTERM handler kills its entire process group (worker + subprocesses), then
       main joins the pool and exits.
+
+Features:
+  - Per-process logging with immediate flush
+  - Each worker gets its own log file
+  - Parent process has separate log file
 """
 
 import logging
@@ -32,6 +37,26 @@ import threading
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional
+
+# Add script directory to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from log_utils import (
+    setup_parent_process_logging,
+    ImmediateFlushFileHandler,
+    ImmediateFlushStreamHandler,
+    ColoredFormatter,
+    flush_log,
+    log_and_flush,
+    LOG_DIR,
+    UTC8,
+    RED,
+    GREEN,
+    BLUE,
+    YELLOW,
+    RESET,
+    SUCCESS_LEVEL,
+)
 
 # ---------------------------------------------------------------------------
 # Flow config (declare/edit here)
@@ -57,15 +82,6 @@ def _worker_ignore_sigint():
     signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
-def _worker_init():
-    """
-    Pool worker initializer: ignore SIGINT, create own process group, install SIGTERM
-    handler to kill entire group (worker + Popen children) so no orphans on shutdown.
-    """
-    _worker_ignore_sigint()
-    _worker_process_group_and_sigterm()
-
-
 def _worker_process_group_and_sigterm():
     """
     Make this worker the leader of its own process group and install SIGTERM handler
@@ -76,16 +92,29 @@ def _worker_process_group_and_sigterm():
         os.setpgid(0, 0)
     except OSError:
         pass
+
     def _kill_process_group(_signum, _frame):
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         try:
             os.killpg(os.getpgrp(), signal.SIGTERM)
         except OSError:
             pass
+
     signal.signal(signal.SIGTERM, _kill_process_group)
 
 
-def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging.Logger):
+def _worker_init():
+    """
+    Pool worker initializer: ignore SIGINT, create own process group, install SIGTERM
+    handler to kill entire group (worker + Popen children) so no orphans on shutdown.
+    """
+    _worker_ignore_sigint()
+    _worker_process_group_and_sigterm()
+
+
+def _main_install_shutdown_handler(
+    shutdown_event: threading.Event, log: logging.Logger
+):
     """
     Install SIGTERM handler so that on external kill (e.g. systemd, kill <pid>), the main
     process sets shutdown_event and then the main loop will terminate the pool and exit.
@@ -97,6 +126,7 @@ def _main_install_shutdown_handler(shutdown_event: threading.Event, log: logging
 
     signal.signal(signal.SIGTERM, _handler)
 
+
 def load_config():
     """Load TASK_TO_COLL, CFG_TO_COLL, GPU_PARALLEL from file-level config."""
     return list(TASK_TO_COLL), list(CFG_TO_COLL), list(GPU_PARALLEL)
@@ -104,80 +134,11 @@ def load_config():
 
 # Repo root (parent of script/); collect_data.sh and logs live here.
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-LOG_DIR = SCRIPT_DIR / "logs"
-UTC8 = timezone(timedelta(hours=8))
-
-# ANSI
-RED = "\033[31m"
-GREEN = "\033[32m"
-BLUE = "\033[34m"
-YELLOW = "\033[33m"
-RESET = "\033[0m"
-
-
-# Custom level for success messages (green)
-SUCCESS_LEVEL = 25
-logging.addLevelName(SUCCESS_LEVEL, "SUCCESS")
-
-def success(self, msg, *args, **kwargs):
-    if self.isEnabledFor(SUCCESS_LEVEL):
-        self._log(SUCCESS_LEVEL, msg, args, **kwargs)
-logging.Logger.success = success
-
-
-class ColoredFormatter(logging.Formatter):
-    """Format log records with [stage] and color for level (WARNING/ERROR red, SUCCESS green, info blue)."""
-
-    LEVEL_COLORS = {
-        logging.DEBUG: BLUE,
-        logging.INFO: RESET,
-        SUCCESS_LEVEL: GREEN,
-        logging.WARNING: RED,
-        logging.ERROR: RED,
-    }
-
-    def __init__(self, fmt=None, datefmt=None, use_color=True):
-        super().__init__(fmt=fmt, datefmt=datefmt)
-        self.use_color = use_color
-
-    def format(self, record):
-        if self.use_color and record.levelno in self.LEVEL_COLORS:
-            color = self.LEVEL_COLORS[record.levelno]
-            record.msg = f"{color}{record.msg}{RESET}"
-        return super().format(record)
 
 
 def _timestamp_utc8():
     """Return current timestamp string YYYYMMDDHHMMSS in UTC+8."""
     return datetime.now(UTC8).strftime("%Y%m%d%H%M%S")
-
-
-def setup_logging():
-    """
-    Configure root logger: file in LOG_DIR named collect_data_flow_<timestamp>.log,
-    and console with colors. Idempotent for repeated calls in same process.
-    """
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    log_file = LOG_DIR / f"collect_data_flow_{_timestamp_utc8()}.log"
-    fmt = "%(asctime)s [%(name)s] %(levelname)s %(message)s"
-    datefmt = "%Y-%m-%d %H:%M:%S"
-
-    root = logging.getLogger()
-    if root.handlers:
-        return str(log_file)
-    root.setLevel(logging.DEBUG)
-
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
-    root.addHandler(fh)
-
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(ColoredFormatter(fmt=fmt, datefmt=datefmt))
-    root.addHandler(ch)
-
-    return str(log_file)
 
 
 def _wrapper_progress_message(line: str, state: dict) -> Optional[str]:
@@ -193,7 +154,9 @@ def _wrapper_progress_message(line: str, state: dict) -> Optional[str]:
     line_plain = re.sub(r"\033\[[\d;]*m", "", line_stripped)
 
     # Seed phase: "simulate data episode X success! (seed = Y)" or "fail! (seed = Y)"
-    m = re.search(r"simulate data episode (\d+) (success|fail)! \(seed = (\d+)\)", line_plain)
+    m = re.search(
+        r"simulate data episode (\d+) (success|fail)! \(seed = (\d+)\)", line_plain
+    )
     if m:
         idx, result, seed = m.group(1), m.group(2), m.group(3)
         return f"Seed test #{idx} (seed={seed}), result: {result}"
@@ -247,10 +210,16 @@ def _read_stdout_and_log_wrapper(
         msg = _wrapper_progress_message(line, state)
         if msg:
             log.info("%s wrapper: %s", tag, msg)
+            flush_log(log)
 
 
 def run_collect_data_sh(
-    task: str, cfg: str, gpu_id: int, script_dir: Path, subprocess_print: bool
+    task: str,
+    cfg: str,
+    gpu_id: int,
+    script_dir: Path,
+    subprocess_print: bool,
+    worker_log: logging.Logger,
 ) -> bool:
     """
     Run collect_data.sh for one (task, config) pair on the given GPU.
@@ -258,10 +227,10 @@ def run_collect_data_sh(
     Output: True on success, False on failure. Logs to module logger.
     When subprocess_print is False, only wrapper progress (seed test, result, saving video) is printed.
     """
-    log = logging.getLogger("run_collect")
     tag = _run_tag(task, cfg)
     cmd = ["bash", str(script_dir / "collect_data.sh"), task, cfg, str(gpu_id)]
-    log.info("%s START GPU%s", tag, gpu_id)
+    worker_log.info("%s START GPU%s", tag, gpu_id)
+    flush_log(worker_log)
     try:
         if subprocess_print:
             result = subprocess.run(
@@ -286,7 +255,7 @@ def run_collect_data_sh(
             state = {"in_data_collection": False, "data_collection_episode_index": 0}
             reader = threading.Thread(
                 target=_read_stdout_and_log_wrapper,
-                args=(proc, state, log, task, cfg),
+                args=(proc, state, worker_log, task, cfg),
                 daemon=True,
             )
             reader.start()
@@ -297,30 +266,70 @@ def run_collect_data_sh(
                 proc.wait()
                 raise
             reader.join(timeout=5.0)
-            result = type("Result", (), {"returncode": proc.returncode, "stdout": None, "stderr": None})()
+            result = type(
+                "Result",
+                (),
+                {"returncode": proc.returncode, "stdout": None, "stderr": None},
+            )()
 
         if result.returncode != 0:
-            log.error("%s FAILED stderr: %s", tag, result.stderr or result.stdout)
+            worker_log.error(
+                "%s FAILED stderr: %s", tag, result.stderr or result.stdout
+            )
+            flush_log(worker_log)
             return False
-        log.success("%s OK", tag)
+        worker_log.success("%s OK", tag)
+        flush_log(worker_log)
         return True
     except subprocess.TimeoutExpired:
-        log.error("%s TIMEOUT", tag)
+        worker_log.error("%s TIMEOUT", tag)
+        flush_log(worker_log)
         return False
     except Exception as e:
-        log.exception("%s ERR: %s", tag, e)
+        worker_log.exception("%s ERR: %s", tag, e)
+        flush_log(worker_log)
         return False
 
 
-def worker(jobs: list, gpu_id: int, script_dir: Path, subprocess_print: bool) -> int:
+def worker(
+    jobs: list, gpu_id: int, script_dir: Path, subprocess_print: bool, worker_id: int
+) -> int:
     """
     Run a list of (task, cfg) jobs on one GPU. Returns number of failures.
-    Input: jobs list of (task, cfg), gpu_id (int), script_dir (Path), subprocess_print (bool).
+    Input: jobs list of (task, cfg), gpu_id (int), script_dir (Path), subprocess_print (bool), worker_id (int).
     Output: int, count of failed runs.
     """
+    _worker_init()
+
+    # Setup per-worker logging
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_file = LOG_DIR / f"collect_data_flow_worker{worker_id}_{_timestamp_utc8()}.log"
+
+    worker_log = logging.getLogger(f"worker_{worker_id}")
+    worker_log.setLevel(logging.DEBUG)
+    worker_log.handlers = []
+
+    fmt = "%(asctime)s [%(name)s] %(levelname)s %(message)s"
+    datefmt = "%Y-%m-%d %H:%M:%S"
+
+    fh = ImmediateFlushFileHandler(log_file, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
+    worker_log.addHandler(fh)
+
+    ch = ImmediateFlushStreamHandler(sys.stdout)
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(ColoredFormatter(fmt=fmt, datefmt=datefmt))
+    worker_log.addHandler(ch)
+
+    worker_log.info(f"Worker {worker_id} started, GPU {gpu_id}, log: {log_file}")
+    flush_log(worker_log)
+
     failed = 0
     for task, cfg in jobs:
-        if not run_collect_data_sh(task, cfg, gpu_id, script_dir, subprocess_print):
+        if not run_collect_data_sh(
+            task, cfg, gpu_id, script_dir, subprocess_print, worker_log
+        ):
             failed += 1
     return failed
 
@@ -338,11 +347,16 @@ def main() -> int:
     subprocess_print = bool(SUBPROCESS_PRINT)
     os.environ["END_RESET_TO_INIT"] = "true" if END_RESET_TO_INIT else "false"
 
-    log_file = setup_logging()
-    log = logging.getLogger("main")
-    log.info("[main] Log file: %s", log_file)
-    log.info("[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
-             task_to_coll, cfg_to_coll, gpu_parallel, subprocess_print)
+    # Setup parent process logging
+    log = setup_parent_process_logging()
+    log.info(
+        "[main] TASK_TO_COLL=%s CFG_TO_COLL=%s GPU_PARALLEL=%s SUBPROCESS_PRINT=%s",
+        task_to_coll,
+        cfg_to_coll,
+        gpu_parallel,
+        subprocess_print,
+    )
+    flush_log(log)
 
     # Order: for each CFG, all TASKs (CFG outer, TASK inner); pair (task, cfg) for run_collect_data_sh.
     product = [(task, cfg) for cfg in cfg_to_coll for task in task_to_coll]
@@ -356,7 +370,7 @@ def main() -> int:
         worker_jobs[i % n_workers].append(pair)
 
     args_list = [
-        (worker_jobs[i], gpu_parallel[i], SCRIPT_DIR, subprocess_print)
+        (worker_jobs[i], gpu_parallel[i], SCRIPT_DIR, subprocess_print, i)
         for i in range(n_workers)
     ]
     # Process group: main is group leader so we control shutdown; workers get own group in initializer.
@@ -370,6 +384,7 @@ def main() -> int:
     def _terminate_pool_and_exit(exit_code: int) -> None:
         """Kill all child processes (workers and their subprocesses) then exit. No return."""
         log.warning("[main] Shutdown requested; terminating all workers and exiting.")
+        flush_log(log)
         pool.terminate()
         pool.join()
         os._exit(exit_code)
@@ -395,8 +410,10 @@ def main() -> int:
     total_failed = sum(results)
     if total_failed > 0:
         log.error("[main] Done. %s task(s) failed.", total_failed)
+        flush_log(log)
         return 1
     log.success("[main] Done. All tasks completed successfully.")
+    flush_log(log)
     return 0
 
 

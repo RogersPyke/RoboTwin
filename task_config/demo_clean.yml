@@ -37,8 +37,22 @@ collect_data: true
 eval_video_log: true
 
 # =============================================================================
+# Statistics Mode Configuration
+# =============================================================================
+# statistics_mode: If true, only collect success statistics without saving data.
+#                  Useful for validating configuration and planning success rates.
+#                  - Skips actual data collection (no HDF5/video saving)
+#                  - Only runs planning and success validation
+#                  - Records RRT vs Waypoint success statistics separately
+# statistics_target_num: Target number of successful episodes to collect stats for.
+#                        Only used when statistics_mode is true.
+# =============================================================================
+statistics_mode: false
+statistics_target_num: 50
+
+# =============================================================================
 # END_RESET_TO_INIT: Reset robot arms to origin after task completion.
 #                   Works for both pert and non-pert tasks.
 #                   If true, arms return to home position after each episode.
 # =============================================================================
-END_RESET_TO_INIT: false
+END_RESET_TO_INIT: true
