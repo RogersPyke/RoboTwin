@@ -59,18 +59,18 @@ END_RESET_TO_INIT: true
 #                   Example: 8.0 means random rotation in [-8.0, 8.0] degrees
 #
 # Waypoint Chain Parameters (for trajectory planning with intermediate waypoints):
-#   waypoint_count_min: int - minimum number of intermediate waypoints (default: 1)
-#   waypoint_count_max: int - maximum number of intermediate waypoints (default: 2)
 #   waypoint_xy_radius: float (meters) - max lateral distance from direct path
 #                     Example: 0.08 means waypoints can deviate up to 8cm sideways
 #   waypoint_z_jitter: float (meters) - max z offset for waypoints (default: 0.05)
 #   orientation_jitter_deg: float (degrees) - max orientation change (default: 10.0)
 #
 # RRT Anchor Parameters (alternative trajectory generation):
-#   rrt_anchor_ratio_min: float - min ratio along path for anchor (default: 0.25)
-#   rrt_anchor_ratio_max: float - max ratio along path for anchor (default: 0.75)
 #   rrt_lateral_xy: float (meters) - max lateral offset for RRT anchor (default: 0.10)
 #   rrt_z_jitter: float (meters) - max z jitter for RRT anchor (default: 0.04)
+#
+# Common Anchor Parameters (shared by both strategies):
+#   anchor_ratio_min: float - min ratio along path for anchor (default: 0.25)
+#   anchor_ratio_max: float - max ratio along path for anchor (default: 0.75)
 #
 # Planning Parameters:
 #   candidate_trials: int - number of candidate paths to generate (default: 6)
@@ -104,13 +104,11 @@ perturbation:
   defaults:
     xy_jitter: 0.008
     yaw_jitter_deg: 6.0
-    waypoint_count_min: 1
-    waypoint_count_max: 2
+    anchor_ratio_min: 0.25
+    anchor_ratio_max: 0.75
     waypoint_xy_radius: 0.08
     waypoint_z_jitter: 0.05
     orientation_jitter_deg: 10.0
-    rrt_anchor_ratio_min: 0.25
-    rrt_anchor_ratio_max: 0.75
     rrt_lateral_xy: 0.10
     rrt_z_jitter: 0.04
     candidate_trials: 6

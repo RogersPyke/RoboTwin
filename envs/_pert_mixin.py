@@ -107,13 +107,11 @@ class PerturbationMixin:
         self._pert_defaults = {
             "xy_jitter": defaults.get("xy_jitter", 0.0),
             "yaw_jitter_deg": defaults.get("yaw_jitter_deg", 0.0),
-            "waypoint_count_min": defaults.get("waypoint_count_min", 1),
-            "waypoint_count_max": defaults.get("waypoint_count_max", 2),
+            "anchor_ratio_min": defaults.get("anchor_ratio_min", 0.25),
+            "anchor_ratio_max": defaults.get("anchor_ratio_max", 0.75),
             "waypoint_xy_radius": defaults.get("waypoint_xy_radius", 0.08),
             "waypoint_z_jitter": defaults.get("waypoint_z_jitter", 0.05),
             "orientation_jitter_deg": defaults.get("orientation_jitter_deg", 10.0),
-            "rrt_anchor_ratio_min": defaults.get("rrt_anchor_ratio_min", 0.25),
-            "rrt_anchor_ratio_max": defaults.get("rrt_anchor_ratio_max", 0.75),
             "rrt_lateral_xy": defaults.get("rrt_lateral_xy", 0.10),
             "rrt_z_jitter": defaults.get("rrt_z_jitter", 0.04),
             "candidate_trials": defaults.get("candidate_trials", 6),
@@ -308,37 +306,33 @@ class PerturbationMixin:
         xy_radius = segment_cfg.get("waypoint_xy_radius", 0.08)
         z_jitter = segment_cfg.get("waypoint_z_jitter", 0.05)
         orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
-        wp_min = segment_cfg.get("waypoint_count_min", 1)
-        wp_max = segment_cfg.get("waypoint_count_max", 2)
+        ratio_min = segment_cfg.get("anchor_ratio_min", 0.25)
+        ratio_max = segment_cfg.get("anchor_ratio_max", 0.75)
         trials = segment_cfg.get("candidate_trials", 6)
 
         start_xyz = np.array(start_pose[:3], dtype=np.float64)
         target_xyz = np.array(target_pose[:3], dtype=np.float64)
+        direct_vec = target_xyz - start_xyz
 
         for _ in range(trials):
-            wp_num = int(np.random.randint(wp_min, wp_max + 1))
-            waypoint_chain = []
-
-            for idx in range(wp_num):
-                ratio = float(idx + 1) / float(wp_num + 1)
-                base_xyz = start_xyz + ratio * (target_xyz - start_xyz)
-                offset = np.array(
-                    [
-                        np.random.uniform(-xy_radius, xy_radius),
-                        np.random.uniform(-xy_radius, xy_radius),
-                        np.random.uniform(-z_jitter, z_jitter),
-                    ],
-                    dtype=np.float64,
-                )
-                waypoint = deepcopy(target_pose)
-                waypoint[:3] = (base_xyz + offset).tolist()
-                waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
-                waypoint_chain.append(waypoint)
+            ratio = float(np.random.uniform(ratio_min, ratio_max))
+            base_xyz = start_xyz + ratio * direct_vec
+            offset = np.array(
+                [
+                    np.random.uniform(-xy_radius, xy_radius),
+                    np.random.uniform(-xy_radius, xy_radius),
+                    np.random.uniform(-z_jitter, z_jitter),
+                ],
+                dtype=np.float64,
+            )
+            waypoint = deepcopy(target_pose)
+            waypoint[:3] = (base_xyz + offset).tolist()
+            waypoint = self._apply_orientation_noise(waypoint, orientation_jitter)
 
             candidates.append(
                 {
                     "strategy": "waypoint_chain",
-                    "waypoints": waypoint_chain,
+                    "waypoints": [waypoint],
                 }
             )
 
@@ -371,9 +365,9 @@ class PerturbationMixin:
         lateral_xy = segment_cfg.get("rrt_lateral_xy", 0.10)
         z_jitter = segment_cfg.get("rrt_z_jitter", 0.04)
         orientation_jitter = segment_cfg.get("orientation_jitter_deg", 10.0)
-        ratio_min = segment_cfg.get("rrt_anchor_ratio_min", 0.25)
-        ratio_max = segment_cfg.get("rrt_anchor_ratio_max", 0.75)
-        trials = max(2, segment_cfg.get("candidate_trials", 6) // 2)
+        ratio_min = segment_cfg.get("anchor_ratio_min", 0.25)
+        ratio_max = segment_cfg.get("anchor_ratio_max", 0.75)
+        trials = segment_cfg.get("candidate_trials", 6)
 
         step_count = max(1, int(direct_result["position"].shape[0]))
         path_scale = min(1.8, max(0.6, float(step_count) / 200.0))
