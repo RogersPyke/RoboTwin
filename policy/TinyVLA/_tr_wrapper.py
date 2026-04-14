@@ -210,12 +210,35 @@ def _run_from_merged_config(
     combined_config_slug = "__".join(task_configs)
     combined_total_episodes = int(sum(expert_counts))
 
+    dataset_dirs: List[str] = []
+    if "data_folder" in task:
+        data_folder = Path(task["data_folder"])
+        if not data_folder.is_absolute():
+            robotwin_root = Path(tinyvla_dir).parent.parent
+            data_folder = robotwin_root / data_folder
+        dataset_dirs.append(str(data_folder))
+    elif "data_sources" in task:
+        robotwin_root = Path(tinyvla_dir).parent.parent
+        for src in task["data_sources"]:
+            data_folder = Path(src["data_folder"])
+            if not data_folder.is_absolute():
+                data_folder = robotwin_root / data_folder
+            dataset_dirs.append(str(data_folder))
+
+    joint_task_spec = {
+        "task_name": combined_task_slug,
+        "dataset_dir": dataset_dirs,
+        "camera_names": ["head_camera"],
+        "episode_len": 0,
+    }
+
     output_dir = os.path.join(tinyvla_dir, "tinyvla_ckpt", task_id)
 
     train_args: Dict[str, Any] = dict(params)
     train_args["task_name"] = combined_task_slug
     train_args["output_dir"] = output_dir
     train_args.setdefault("logging_dir", os.path.join(output_dir, "log"))
+    train_args["joint_task_spec"] = json.dumps(joint_task_spec)
 
     early_stop = cfg.get("early_stop", {})
     if early_stop.get("eval_steps"):
