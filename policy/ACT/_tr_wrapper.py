@@ -361,8 +361,6 @@ def _run_from_merged_config(
     _maybe_add_arg(cmd, "--early_stop_rel_tol", early_stop_rel_tol)
     _maybe_add_arg(cmd, "--early_stop_patience_evals", early_stop_patience_evals)
     _maybe_add_arg(cmd, "--eval_steps_for_early_stop", eval_steps_for_early_stop)
-    _maybe_add_arg(cmd, "--max_tr_steps", max_tr_steps)
-    _maybe_add_arg(cmd, "--save_interval", save_interval)
     logger.info("Launching training: %s", " ".join(cmd))
     sim_task_root_dir = os.path.join("./processed_data", f"sim-{combined_task_slug}")
     try:

@@ -184,7 +184,15 @@ def _run_from_merged_config(
     model_defaults = cfg.get("model_defaults", {})
     params = dict(model_defaults)
     for key in task:
-        if key not in ("task_id", "data_folder", "data_sources", "_resolved_data"):
+        if key not in (
+            "task_id",
+            "data_folder",
+            "data_sources",
+            "_resolved_data",
+            "task_name",
+            "task_config",
+            "expert_num",
+        ):
             params[key] = task[key]
 
     if "data_folder" in task:
