@@ -44,6 +44,7 @@ logging.Logger.success = success
 class ImmediateFlushFileHandler(logging.FileHandler):
     """
     FileHandler that flushes after every emit.
+    All messages go to file immediately.
     """
 
     def emit(self, record):
@@ -101,15 +102,18 @@ def setup_process_logging(
     task_name: Optional[str] = None,
     cfg_name: Optional[str] = None,
     use_color: bool = True,
+    console_level: int = logging.INFO,
 ) -> logging.Logger:
     """
     Setup logging for a process with immediate flush to file and console.
+    File gets all DEBUG+ messages; console gets INFO+ messages.
 
     @input:
         process_name: str, name of the process (e.g., "collect_data", "collect_data_flow")
         task_name: str or None, task name for child processes
         cfg_name: str or None, config name for child processes
         use_color: bool, whether to use ANSI colors in console
+        console_level: int, minimum level for console output
     @output: logging.Logger, configured logger
     @scenario: Each process gets its own log file in ./logs/
     """
@@ -129,13 +133,15 @@ def setup_process_logging(
     fmt = "%(asctime)s [%(name)s] %(levelname)s %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
 
+    # File handler: all DEBUG+ messages
     fh = ImmediateFlushFileHandler(log_file, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter(fmt=fmt, datefmt=datefmt))
     logger.addHandler(fh)
 
+    # Console handler: INFO+ messages
     ch = ImmediateFlushStreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
+    ch.setLevel(console_level)
     ch.setFormatter(ColoredFormatter(fmt=fmt, datefmt=datefmt, use_color=use_color))
     logger.addHandler(ch)
 

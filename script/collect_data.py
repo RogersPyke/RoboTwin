@@ -17,6 +17,7 @@ Features:
 
 import sys
 import os
+import signal
 import time
 import json
 import traceback
@@ -89,6 +90,15 @@ def main(task_name=None, task_config=None):
 
     # Setup per-process logging
     log = setup_child_process_logging(task_name, task_config)
+
+    def _on_sigterm(_signum, _frame):
+        log.error(
+            "SIGTERM received (e.g. parent job timeout); process will exit — "
+            "data collection may be incomplete."
+        )
+        flush_log(log)
+
+    signal.signal(signal.SIGTERM, _on_sigterm)
 
     # Check if statistics mode is enabled
     statistics_mode = args.get("statistics_mode", False)
@@ -376,8 +386,12 @@ def run(TASK_ENV, args, log):
         while exist_hdf5(st_idx):
             st_idx += 1
 
-        for episode_idx in range(st_idx, args["episode_num"]):
-            log.info(f"{BLUE}Task name: {args['task_name']}{RESET}")
+        total_ep = args["episode_num"]
+        for episode_idx in range(st_idx, total_ep):
+            log.info(
+                f"{BLUE}Task name: {args['task_name']}{RESET} "
+                f"(data collection episode {episode_idx + 1}/{total_ep}, index {episode_idx})"
+            )
 
             TASK_ENV.setup_demo(
                 now_ep_num=episode_idx, seed=seed_list[episode_idx], **args
@@ -411,11 +425,37 @@ def run(TASK_ENV, args, log):
                 json.dump(info_db, file, ensure_ascii=False, indent=4)
 
             TASK_ENV.close_env(clear_cache=((episode_idx + 1) % clear_cache_freq == 0))
+            log.info(
+                "saving: merging episode %d cache to hdf5 and mp4 under %s",
+                episode_idx,
+                args["save_path"],
+            )
+            flush_log(log)
             TASK_ENV.merge_pkl_to_hdf5_video()
             TASK_ENV.remove_data_cache()
             assert TASK_ENV.check_success(), "Collect Error"
 
+            hdf5_path = os.path.join(
+                args["save_path"], "data", f"episode{episode_idx}.hdf5"
+            )
+            video_path = os.path.join(
+                args["save_path"], "video", f"episode{episode_idx}.mp4"
+            )
+            log.success(
+                "saving: episode %d done; hdf5=%s video=%s",
+                episode_idx,
+                hdf5_path,
+                video_path,
+            )
             flush_log(log)
+
+        log.success(
+            "[DATA COLLECTION COMPLETE] episodes %d..%d saved under %s",
+            st_idx,
+            total_ep - 1,
+            args["save_path"],
+        )
+        flush_log(log)
 
         command = f"cd description && bash gen_episode_instructions.sh {args['task_name']} {args['task_config']} {args['language_num']}"
         os.system(command)

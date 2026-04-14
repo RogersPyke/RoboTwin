@@ -7,6 +7,7 @@ gpu_id=${3}
 ./script/.update_path.sh > /dev/null 2>&1
 
 export CUDA_VISIBLE_DEVICES=${gpu_id}
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 
 PYTHONWARNINGS=ignore::UserWarning \
 python3 script/collect_data.py $task_name $task_config

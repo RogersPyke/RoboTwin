@@ -12,6 +12,7 @@ import transforms3d as t3d
 from collections import OrderedDict
 import torch, random
 import logging
+import time
 
 from .utils import *
 import math
@@ -34,6 +35,10 @@ current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
 
 logger = logging.getLogger(__name__)
+
+# Throttled logging state for saving progress
+_saving_log_last_time: float = 0.0
+_saving_log_interval: float = 10.0  # seconds
 
 
 class Base_Task(gym.Env):
@@ -597,7 +602,22 @@ class Base_Task(gym.Env):
         if not self.save_data:
             return
 
-        print("saving: episode = ", self.ep_num, " index = ", self.FRAME_IDX, end="\r")
+        # Throttled progress into collect_data log (same file as collect_data.py), not envs._base_task
+        global _saving_log_last_time
+        current_time = time.time()
+        if current_time - _saving_log_last_time >= _saving_log_interval:
+            collect_log = logging.getLogger("collect_data")
+            if collect_log.handlers:
+                collect_log.info(
+                    "saving: recording episode=%d frame_index=%d",
+                    self.ep_num,
+                    self.FRAME_IDX,
+                )
+            else:
+                logger.debug(
+                    "saving: episode = %d, index = %d", self.ep_num, self.FRAME_IDX
+                )
+            _saving_log_last_time = current_time
 
         if self.FRAME_IDX == 0:
             self.folder_path = {
@@ -640,7 +660,19 @@ class Base_Task(gym.Env):
         # print('Merging pkl to hdf5: ', cache_path, ' -> ', target_file_path)
 
         os.makedirs(f"{self.save_dir}/data", exist_ok=True)
+        collect_log = logging.getLogger("collect_data")
+        if collect_log.handlers:
+            collect_log.info(
+                "saving: encoding episode=%d hdf5=%s mp4=%s",
+                self.ep_num,
+                target_file_path,
+                target_video_path,
+            )
         process_folder_to_hdf5_video(cache_path, target_file_path, target_video_path)
+        if collect_log.handlers:
+            collect_log.info(
+                "saving: finished merge episode=%d", self.ep_num
+            )
 
     def remove_data_cache(self):
         folder_path = self.folder_path["cache"]
