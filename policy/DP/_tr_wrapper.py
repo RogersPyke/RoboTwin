@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-DP multi-task training wrapper.
-Usage: python3 _tr_wrapper.py <cfg_name>
-       python3 _tr_wrapper.py --config <cfg_name>
-Config file: _tr_cfg/<cfg_name>.yaml
+DP Train wrapper.
+
+Usage (new multi-YAML mode):
+    python3 _tr_wrapper.py --task-id <id> --yaml <shared.yaml> --yaml <model.yaml> [--gpu-id N] [--seed N]
+
+Usage (legacy single-YAML mode):
+    python3 _tr_wrapper.py <cfg_name>
+    python3 _tr_wrapper.py --config <cfg_name>
 """
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -16,6 +21,8 @@ import subprocess
 import sys
 import traceback
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import yaml
@@ -42,41 +49,106 @@ def _setup_logger(dp_dir: str) -> logging.Logger:
     return logger
 
 
-def _load_tr_cfg(dp_dir: str, cfg_name: str) -> tuple:
-    base = cfg_name if cfg_name.endswith(".yaml") else f"{cfg_name}.yaml"
-    cfg_path = os.path.join(dp_dir, "_tr_cfg", base)
-    if not os.path.isfile(cfg_path):
-        raise FileNotFoundError(f"No config found: _tr_cfg/{base}")
-    with open(cfg_path, "r", encoding="utf-8") as f:
+def _load_yaml(path: str) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    if not isinstance(cfg, dict) or not cfg:
-        raise ValueError("Config file is empty or invalid.")
-    for key in ("TRAIN_TASKS", "TRAIN_SEED", "TRAIN_GPU_ID", "TRAIN_ACTION_DIM"):
-        if key not in cfg:
-            raise KeyError(f"Missing required key: {key}")
-    return cfg, os.path.abspath(cfg_path)
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Invalid YAML config: {path}")
+    return cfg
 
 
-def _parse_task_rows(cfg: dict, key: str) -> list:
-    rows = cfg.get(key)
-    if not isinstance(rows, list) or not rows:
-        raise ValueError(f"{key} must be a non-empty list of [task_name, task_config, expert_num].")
-    out = []
-    for i, row in enumerate(rows):
-        if not isinstance(row, (list, tuple)) or len(row) != 3:
-            raise ValueError(f"{key}[{i}] must be [task_name, task_config, expert_num], got {row!r}")
-        task_name = str(row[0]).strip()
-        task_config = str(row[1]).strip()
-        expert_num = int(row[2])
-        if not task_name or not task_config:
-            raise ValueError(f"{key}[{i}] has empty task_name/task_config.")
-        if expert_num <= 0:
-            raise ValueError(f"{key}[{i}] expert_num must be > 0.")
-        out.append((task_name, task_config, expert_num))
-    return out
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
-def _ensure_single_task_zarr(dp_dir: str, task_name: str, task_config: str, expert_num: int, logger: logging.Logger) -> str:
+def _merge_yamls(yaml_paths: List[str]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for path in yaml_paths:
+        cfg = _load_yaml(path)
+        merged = _deep_merge(merged, cfg)
+    return merged
+
+
+def _get_task_from_config(
+    cfg: Dict[str, Any], task_id: str
+) -> Optional[Dict[str, Any]]:
+    for task in cfg.get("tr_tasks", []):
+        if task.get("task_id") == task_id:
+            return task
+    return None
+
+
+def _extract_step_from_ckpt_name(name: str) -> int:
+    m = re.search(r"step_(\d+)\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"^(\d+)\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    return -1
+
+
+def _package_checkpoints_for_eval(ckpt_dir: str, logger: logging.Logger) -> None:
+    if not os.path.isdir(ckpt_dir):
+        return
+    ckpts = []
+    for name in sorted(os.listdir(ckpt_dir)):
+        if not name.endswith(".ckpt"):
+            continue
+        src = os.path.join(ckpt_dir, name)
+        if os.path.isfile(src):
+            ckpts.append((name, src))
+    if not ckpts:
+        return
+    bundle_root = os.path.join(ckpt_dir, "step_packages")
+    os.makedirs(bundle_root, exist_ok=True)
+    passthrough_files = ["training_run_manifest.txt", "steps.txt"]
+    for name, src_ckpt in ckpts:
+        step_id = _extract_step_from_ckpt_name(name)
+        if step_id >= 0:
+            folder_name = f"step_{step_id}"
+        else:
+            folder_name = f"step_misc_{os.path.splitext(name)[0]}"
+        dst_dir = os.path.join(bundle_root, folder_name)
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, name))
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, "policy_best.ckpt"))
+        for keep in passthrough_files:
+            src_keep = os.path.join(ckpt_dir, keep)
+            if os.path.isfile(src_keep):
+                shutil.copy2(src_keep, os.path.join(dst_dir, keep))
+    logger.info("Packaged %d checkpoints to %s", len(ckpts), bundle_root)
+
+
+def _find_workspace_checkpoint_dir(dp_dir: str, save_name: str, seed: int) -> str:
+    target_leaf = f"{save_name}-{seed}"
+    outputs_root = os.path.join(dp_dir, "data", "outputs")
+    if not os.path.isdir(outputs_root):
+        return ""
+    found = []
+    for root, dir_names, _ in os.walk(outputs_root):
+        for dir_name in dir_names:
+            if dir_name == target_leaf and os.path.basename(root) == "checkpoints":
+                found.append(os.path.join(root, dir_name))
+    if not found:
+        return ""
+    found.sort(key=os.path.getmtime, reverse=True)
+    return found[0]
+
+
+def _ensure_single_task_zarr(
+    dp_dir: str,
+    task_name: str,
+    task_config: str,
+    expert_num: int,
+    logger: logging.Logger,
+) -> str:
     rel_path = os.path.join("data", f"{task_name}-{task_config}-{expert_num}.zarr")
     abs_path = os.path.join(dp_dir, rel_path)
     if os.path.isdir(abs_path):
@@ -92,16 +164,24 @@ def _ensure_single_task_zarr(dp_dir: str, task_name: str, task_config: str, expe
 def _resolve_src_zarr_paths(dp_dir: str, rows: list, logger: logging.Logger) -> list:
     src_paths = []
     for task_name, task_config, expert_num in rows:
-        src_rel_path = _ensure_single_task_zarr(dp_dir, task_name, task_config, expert_num, logger)
+        src_rel_path = _ensure_single_task_zarr(
+            dp_dir, task_name, task_config, expert_num, logger
+        )
         src_abs_path = os.path.join(dp_dir, src_rel_path)
         if not os.path.isdir(src_abs_path):
             raise FileNotFoundError(f"Source zarr not found: {src_rel_path}")
-        src_paths.append((task_name, task_config, expert_num, src_rel_path, src_abs_path))
+        src_paths.append(
+            (task_name, task_config, expert_num, src_rel_path, src_abs_path)
+        )
     return src_paths
 
 
-def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combined_rel_path: str, logger: logging.Logger) -> None:
-    # Step 2: read source zarrs into memory first.
+def _concat_zarrs_from_src_paths(
+    src_paths: list,
+    combined_abs_path: str,
+    combined_rel_path: str,
+    logger: logging.Logger,
+) -> None:
     src_meta = []
     src_head = []
     src_state = []
@@ -114,7 +194,9 @@ def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combin
         src_ep_ends = root["meta"]["episode_ends"][:]
         if not (len(src_head_arr) == len(src_state_arr) == len(src_action_arr)):
             raise ValueError(f"Inconsistent data length in {src_rel_path}")
-        src_meta.append((task_name, task_config, expert_num, src_rel_path, src_ep_ends.copy()))
+        src_meta.append(
+            (task_name, task_config, expert_num, src_rel_path, src_ep_ends.copy())
+        )
         src_head.append(src_head_arr)
         src_state.append(src_state_arr)
         src_action.append(src_action_arr)
@@ -130,7 +212,6 @@ def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combin
         offset = int(src_ep_ends[-1])
     all_episode_ends = np.concatenate(episode_ends_list, axis=0).astype(np.int64)
 
-    # Step 3: overwrite-write combined zarr.
     if os.path.isdir(combined_abs_path):
         shutil.rmtree(combined_abs_path)
 
@@ -171,234 +252,173 @@ def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combin
     logger.info("Built combined zarr: %s", combined_rel_path)
 
 
-def _extract_step_from_ckpt_name(name: str) -> int:
-    """
-    @input: [str, checkpoint filename]
-    @output: [int, parsed step number or -1]
-    @scenario: [Infer optimizer-step based package folder names]
-    """
-    m = re.search(r"step_(\d+)\.ckpt$", name)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"^(\d+)\.ckpt$", name)
-    if m:
-        return int(m.group(1))
-    return -1
+def _run_from_merged_config(
+    cfg: Dict[str, Any],
+    task_id: str,
+    gpu_id: int,
+    seed: int,
+    logger: logging.Logger,
+    dp_dir: str,
+) -> int:
+    task = _get_task_from_config(cfg, task_id)
+    if task is None:
+        raise ValueError(f"Task not found: {task_id}")
 
+    model_defaults = cfg.get("model_defaults", {})
+    params = dict(model_defaults)
+    for key in task:
+        if key not in ("task_id", "data_folder", "data_sources", "_resolved_data"):
+            params[key] = task[key]
 
-def _package_checkpoints_for_eval(ckpt_dir: str, logger: logging.Logger) -> None:
-    """
-    @input: [str, ckpt_dir], [logging.Logger, logger]
-    @output: [None]
-    @scenario: [Pack each checkpoint into an isolated eval-ready directory]
-    """
-    if not os.path.isdir(ckpt_dir):
-        logger.warning("Checkpoint directory does not exist for packaging: %s", ckpt_dir)
-        return
-    ckpts = []
-    for name in sorted(os.listdir(ckpt_dir)):
-        if not name.endswith(".ckpt"):
-            continue
-        src = os.path.join(ckpt_dir, name)
-        if os.path.isfile(src):
-            ckpts.append((name, src))
-    if not ckpts:
-        logger.warning("No checkpoint files found for packaging under %s", ckpt_dir)
-        return
-    bundle_root = os.path.join(ckpt_dir, "step_packages")
-    os.makedirs(bundle_root, exist_ok=True)
-    passthrough_files = ["training_run_manifest.txt", "steps.txt"]
-    for name, src_ckpt in ckpts:
-        step_id = _extract_step_from_ckpt_name(name)
-        if step_id >= 0:
-            folder_name = f"step_{step_id}"
-        else:
-            folder_name = f"step_misc_{os.path.splitext(name)[0]}"
-        dst_dir = os.path.join(bundle_root, folder_name)
-        os.makedirs(dst_dir, exist_ok=True)
-        shutil.copy2(src_ckpt, os.path.join(dst_dir, name))
-        shutil.copy2(src_ckpt, os.path.join(dst_dir, "policy_best.ckpt"))
-        for keep in passthrough_files:
-            src_keep = os.path.join(ckpt_dir, keep)
-            if os.path.isfile(src_keep):
-                shutil.copy2(src_keep, os.path.join(dst_dir, keep))
-        for file_name in os.listdir(ckpt_dir):
-            if file_name.endswith(".yaml"):
-                src_yaml = os.path.join(ckpt_dir, file_name)
-                if os.path.isfile(src_yaml):
-                    shutil.copy2(src_yaml, os.path.join(dst_dir, file_name))
-    logger.info("Packaged %d checkpoints to %s", len(ckpts), bundle_root)
+    if "data_folder" in task:
+        task_names = [task.get("task_name", task_id)]
+        task_configs = [task.get("task_config", "demo_clean")]
+        expert_counts = [task.get("expert_num", 100)]
+    elif "data_sources" in task:
+        task_names = [src["task_name"] for src in task["data_sources"]]
+        task_configs = [src["task_config"] for src in task["data_sources"]]
+        expert_counts = [src["expert_num"] for src in task["data_sources"]]
+    else:
+        raise ValueError(f"Task {task_id} must have data_folder or data_sources")
 
+    rows = list(zip(task_names, task_configs, expert_counts))
 
-def _find_workspace_checkpoint_dir(dp_dir: str, save_name: str, seed: int) -> str:
-    """
-    @input: [str, dp_dir], [str, save_name], [int, seed]
-    @output: [str, checkpoint directory path or empty string]
-    @scenario: [Locate Hydra workspace checkpoint folder for current run]
-    """
-    target_leaf = f"{save_name}-{seed}"
-    outputs_root = os.path.join(dp_dir, "data", "outputs")
-    if not os.path.isdir(outputs_root):
-        return ""
-    found = []
-    for root, dir_names, _ in os.walk(outputs_root):
-        for dir_name in dir_names:
-            if dir_name == target_leaf and os.path.basename(root) == "checkpoints":
-                found.append(os.path.join(root, dir_name))
-    if not found:
-        return ""
-    found.sort(key=os.path.getmtime, reverse=True)
-    return found[0]
+    action_dim = int(params.get("action_dim", 14))
+    head_camera_type = str(params.get("head_camera_type", "D435"))
+    batch_size = int(params.get("batch_size", 64))
+    num_epochs = int(params.get("num_epochs", 600))
+    checkpoint_every = int(params.get("checkpoint_every", 300))
+    val_ratio = float(params.get("val_ratio", 0.02))
+    learning_rate = float(params.get("lr", 1.0e-4))
+
+    early_stop = cfg.get("early_stop", {})
+    early_stop_patience_evals = early_stop.get("patience_evals", 0)
+    early_stop_rel_tol = early_stop.get("rel_tol", 0.0)
+    eval_steps_for_early_stop = early_stop.get("eval_steps", 1)
+    limits = cfg.get("limits", {})
+    max_tr_steps = limits.get("max_tr_steps")
+    save_interval = limits.get("save_interval")
+
+    logger.info("Task ID: %s", task_id)
+    logger.info("Tasks: %s", task_names)
+    logger.info("Seed: %s", seed)
+    logger.info("GPU ID: %s", gpu_id)
+
+    task_slug = "__".join(task_names)
+    config_slug = "__".join(task_configs)
+    total_episodes = int(sum(expert_counts))
+    combined_rel_path = os.path.join(
+        "data", f"{task_slug}-{config_slug}-{total_episodes}.zarr"
+    )
+    combined_abs_path = os.path.join(dp_dir, combined_rel_path)
+
+    src_paths = _resolve_src_zarr_paths(dp_dir, rows, logger)
+    _concat_zarrs_from_src_paths(
+        src_paths, combined_abs_path, combined_rel_path, logger
+    )
+
+    ckpt_dir = os.path.join(
+        dp_dir, "checkpoints", f"{task_slug}-{config_slug}-{total_episodes}-{seed}"
+    )
+    os.makedirs(ckpt_dir, exist_ok=True)
+    with open(
+        os.path.join(ckpt_dir, "training_run_manifest.txt"), "w", encoding="ascii"
+    ) as mf:
+        mf.write(f"task_id={task_id}\n")
+        mf.write(f"dp_policy_dir={dp_dir}\n")
+        mf.write(f"combined_task_slug={task_slug}\n")
+        mf.write(f"combined_config_slug={config_slug}\n")
+        mf.write(f"combined_total_episodes={total_episodes}\n")
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    env["PYTHONNOUSERSITE"] = "1"
+
+    cmd = [
+        sys.executable,
+        "train.py",
+        f"--config-name=robot_dp_{action_dim}.yaml",
+        f"task.name={task_slug}",
+        f"task.dataset.zarr_path={combined_rel_path}",
+        "training.debug=False",
+        f"training.seed={seed}",
+        "training.device=cuda:0",
+        f"dataloader.batch_size={batch_size}",
+        f"val_dataloader.batch_size={batch_size}",
+        f"task.dataset.val_ratio={val_ratio}",
+        f"optimizer.lr={learning_rate}",
+        f"training.num_epochs={num_epochs}",
+        f"training.checkpoint_every={checkpoint_every}",
+        f"training.early_stop_patience_evals={early_stop_patience_evals}",
+        f"training.early_stop_rel_tol={early_stop_rel_tol}",
+        f"training.eval_steps_for_early_stop={eval_steps_for_early_stop}",
+        f"training.max_tr_steps={max_tr_steps}",
+        f"training.save_interval={save_interval}",
+        f"setting={config_slug}",
+        f"expert_data_num={total_episodes}",
+        f"head_camera_type={head_camera_type}",
+    ]
+    logger.info("Launch training: %s", " ".join(cmd))
+    save_name = os.path.splitext(os.path.basename(combined_rel_path))[0]
+    try:
+        subprocess.run(cmd, check=True, cwd=dp_dir, env=env)
+        workspace_ckpt_dir = _find_workspace_checkpoint_dir(dp_dir, save_name, seed)
+        if workspace_ckpt_dir:
+            _package_checkpoints_for_eval(workspace_ckpt_dir, logger)
+    finally:
+        if os.path.isdir(combined_abs_path):
+            shutil.rmtree(combined_abs_path)
+            logger.info("Deleted combined zarr: %s", combined_rel_path)
+    return 0
 
 
 def main(argv: list) -> int:
-    parser = argparse.ArgumentParser(description="DP multi-task train wrapper (_tr_cfg/*.yaml)")
-    parser.add_argument("cfg_name", nargs="?", type=str, help="Config name (_tr_cfg/<name>.yaml).")
-    parser.add_argument("--config", dest="config", type=str, required=False, help="Legacy cfg arg.")
-    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
-    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
-    parser.add_argument("--max-tr-steps", dest="max_tr_steps", type=int, required=False, help="Optional hard cap for optimizer steps.")
-    parser.add_argument("--save-interval", dest="save_interval", type=int, required=False, help="Optional forced checkpoint interval in optimizer steps.")
+    parser = argparse.ArgumentParser(description="DP train wrapper.")
+    parser.add_argument(
+        "--task-id", dest="task_id", type=str, help="Task ID from tr_tasks.yaml."
+    )
+    parser.add_argument(
+        "--yaml",
+        dest="yaml_paths",
+        action="append",
+        type=str,
+        help="YAML config path (can specify multiple).",
+    )
+    parser.add_argument("--gpu-id", dest="gpu_id", type=int, default=0, help="GPU ID.")
+    parser.add_argument(
+        "--seed", dest="seed", type=int, default=None, help="Random seed."
+    )
+    parser.add_argument("cfg_name", nargs="?", type=str, help="(legacy) Config name.")
+    parser.add_argument(
+        "--config", dest="config", type=str, help="(legacy) Config name."
+    )
     args = parser.parse_args(argv[1:])
 
     dp_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(dp_dir)
     logger = _setup_logger(dp_dir)
-    cfg_name = args.config if args.config is not None else args.cfg_name
-    if not cfg_name:
-        parser.error("Missing cfg_name. Use: python3 _tr_wrapper.py <cfg_name>")
 
     try:
-        cfg, cfg_src_abspath = _load_tr_cfg(dp_dir, cfg_name)
-        rows = _parse_task_rows(cfg, "TRAIN_TASKS")
-        seed = int(cfg["TRAIN_SEED"])
-        seed_source = "YAML:TRAIN_SEED"
-        gpu_id = str(cfg["TRAIN_GPU_ID"])
-        gpu_source = "YAML:TRAIN_GPU_ID"
-        env_seed = os.environ.get("DP_FLOW_SEED", "").strip()
-        env_gpu = os.environ.get("DP_FLOW_GPU", "").strip()
-        if args.seed is not None:
-            seed = int(args.seed)
-            seed_source = "CLI:--seed"
-        elif env_seed:
-            seed = int(env_seed)
-            seed_source = "FLOW_ENV:DP_FLOW_SEED"
-        if args.gpu_id is not None:
-            gpu_id = str(args.gpu_id).strip()
-            gpu_source = "CLI:--gpu-id"
-        elif env_gpu:
-            gpu_id = env_gpu
-            gpu_source = "FLOW_ENV:DP_FLOW_GPU"
-        action_dim = int(cfg["TRAIN_ACTION_DIM"])
-        head_camera_type = str(cfg.get("TRAIN_HEAD_CAMERA_TYPE", "D435"))
-        batch_size = int(cfg.get("TRAIN_BATCH_SIZE", 128))
-        num_epochs = int(cfg.get("TRAIN_NUM_EPOCHS", 600))
-        checkpoint_every = int(cfg.get("TRAIN_CHECKPOINT_EVERY", 300))
-        val_ratio = float(cfg.get("TRAIN_VAL_RATIO", 0.02))
-        learning_rate = float(cfg.get("TRAIN_LR", 1.0e-4))
-        early_stop_patience_evals = int(cfg.get("EARLY_STOP_PATIENCE_EVALS", 0))
-        early_stop_rel_tol = float(cfg.get("EARLY_STOP_REL_TOL", 0.0))
-        eval_steps_for_early_stop = int(cfg.get("EVAL_STEPS_FOR_EARLY_STOP", 1))
-        max_tr_steps = cfg.get("MAX_TR_STEPS", None)
-        save_interval = cfg.get("SAVE_INTERVAL", None)
-        if "DP_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
-            early_stop_patience_evals = int(os.environ["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
-        if "DP_FLOW_EARLY_STOP_REL_TOL" in os.environ:
-            early_stop_rel_tol = float(os.environ["DP_FLOW_EARLY_STOP_REL_TOL"].strip())
-        if "DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
-            eval_steps_for_early_stop = int(os.environ["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
-        if "DP_FLOW_MAX_TR_STEPS" in os.environ:
-            max_tr_steps = int(os.environ["DP_FLOW_MAX_TR_STEPS"].strip())
-        if "DP_FLOW_SAVE_INTERVAL" in os.environ:
-            save_interval = int(os.environ["DP_FLOW_SAVE_INTERVAL"].strip())
-        if args.max_tr_steps is not None:
-            max_tr_steps = int(args.max_tr_steps)
-        if args.save_interval is not None:
-            save_interval = int(args.save_interval)
-        logger.info(
-            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
-            seed,
-            seed_source,
-            gpu_id,
-            gpu_source,
-        )
-        logger.info("Early-stop patience_evals: %s", early_stop_patience_evals)
-        logger.info("Early-stop rel_tol: %s", early_stop_rel_tol)
-        logger.info("Early-stop eval_steps_for_early_stop (optimizer steps): %s", eval_steps_for_early_stop)
-        logger.info("Max training steps: %s", max_tr_steps)
-        logger.info("Forced checkpoint save_interval: %s", save_interval)
+        if args.yaml_paths and args.task_id:
+            cfg = _merge_yamls(args.yaml_paths)
+            seed = args.seed if args.seed is not None else cfg.get("seed", 0)
+            gpu_id = args.gpu_id
+            return _run_from_merged_config(
+                cfg, args.task_id, gpu_id, seed, logger, dp_dir
+            )
 
-        task_slug = "__".join([row[0] for row in rows])
-        config_slug = "__".join([row[1] for row in rows])
-        total_episodes = int(sum([row[2] for row in rows]))
-        combined_rel_path = os.path.join("data", f"{task_slug}-{config_slug}-{total_episodes}.zarr")
-        combined_abs_path = os.path.join(dp_dir, combined_rel_path)
+        cfg_name = args.config or args.cfg_name
+        if cfg_name:
+            cfg_path = os.path.join(dp_dir, "_tr_cfg", f"{cfg_name}.yaml")
+            if not os.path.isfile(cfg_path):
+                cfg_path = os.path.join(dp_dir, "_tr_cfg", cfg_name)
+            cfg = _load_yaml(cfg_path)
+            task_id = cfg.get("tr_tasks", [{}])[0].get("task_id", cfg_name)
+            seed = args.seed if args.seed is not None else cfg.get("seed", 0)
+            gpu_id = args.gpu_id
+            return _run_from_merged_config(cfg, task_id, gpu_id, seed, logger, dp_dir)
 
-        # Step 1: resolve required source zarrs from task parameters.
-        src_paths = _resolve_src_zarr_paths(dp_dir, rows, logger)
-        # Step 2/3: read source zarrs into memory, then overwrite combined.
-        _concat_zarrs_from_src_paths(src_paths, combined_abs_path, combined_rel_path, logger)
-
-        ckpt_dir = os.path.join(dp_dir, "checkpoints", f"{task_slug}-{config_slug}-{total_episodes}-{seed}")
-        os.makedirs(ckpt_dir, exist_ok=True)
-        cfg_basename = os.path.basename(cfg_src_abspath)
-        shutil.copy2(cfg_src_abspath, os.path.join(ckpt_dir, cfg_basename))
-        with open(os.path.join(ckpt_dir, "training_run_manifest.txt"), "w", encoding="ascii") as mf:
-            mf.write(f"training_config_source={cfg_src_abspath}\n")
-            mf.write(f"dp_policy_dir={dp_dir}\n")
-            mf.write(f"combined_task_slug={task_slug}\n")
-            mf.write(f"combined_config_slug={config_slug}\n")
-            mf.write(f"combined_total_episodes={total_episodes}\n")
-            mf.write(f"combined_zarr={combined_rel_path}\n")
-            mf.write(f"copied_yaml={cfg_basename}\n")
-
-        env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = gpu_id
-        env["PYTHONNOUSERSITE"] = "1"
-
-        cmd = [
-            sys.executable,
-            "train.py",
-            f"--config-name=robot_dp_{action_dim}.yaml",
-            f"task.name={task_slug}",
-            f"task.dataset.zarr_path={combined_rel_path}",
-            "training.debug=False",
-            f"training.seed={seed}",
-            "training.device=cuda:0",
-            f"dataloader.batch_size={batch_size}",
-            f"val_dataloader.batch_size={batch_size}",
-            f"task.dataset.val_ratio={val_ratio}",
-            f"optimizer.lr={learning_rate}",
-            f"training.num_epochs={num_epochs}",
-            f"training.checkpoint_every={checkpoint_every}",
-            f"training.early_stop_patience_evals={early_stop_patience_evals}",
-            f"training.early_stop_rel_tol={early_stop_rel_tol}",
-            f"training.eval_steps_for_early_stop={eval_steps_for_early_stop}",
-            f"training.max_tr_steps={max_tr_steps}",
-            f"training.save_interval={save_interval}",
-            f"setting={config_slug}",
-            f"expert_data_num={total_episodes}",
-            f"head_camera_type={head_camera_type}",
-        ]
-        logger.info("Launch training: %s", " ".join(cmd))
-        save_name = os.path.splitext(os.path.basename(combined_rel_path))[0]
-        try:
-            # Step 4: run training loop with combined dataset.
-            subprocess.run(cmd, check=True, cwd=dp_dir, env=env)
-            workspace_ckpt_dir = _find_workspace_checkpoint_dir(dp_dir, save_name, seed)
-            if workspace_ckpt_dir:
-                for keep_name in (cfg_basename, "training_run_manifest.txt"):
-                    src_keep = os.path.join(ckpt_dir, keep_name)
-                    if os.path.isfile(src_keep):
-                        shutil.copy2(src_keep, os.path.join(workspace_ckpt_dir, keep_name))
-                _package_checkpoints_for_eval(workspace_ckpt_dir, logger)
-            else:
-                logger.warning("Could not locate workspace checkpoint directory for save_name=%s seed=%s", save_name, seed)
-        finally:
-            # Step 5: always remove combined created by this run.
-            if os.path.isdir(combined_abs_path):
-                shutil.rmtree(combined_abs_path)
-                logger.info("Deleted combined zarr in finally: %s", combined_rel_path)
-        return 0
+        parser.error("Use --task-id + --yaml, or provide cfg_name.")
     except Exception as exc:
         logger.error("Wrapper failed: %s", str(exc))
         logger.error("Stack trace:\n%s", traceback.format_exc())

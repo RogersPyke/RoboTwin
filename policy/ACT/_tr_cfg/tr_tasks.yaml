@@ -1,0 +1,164 @@
+# ============================================================
+# ACT Training Tasks Configuration
+# ============================================================
+# This file defines all training tasks for the ACT model.
+# Settings here override or extend the shared config in:
+#   policy/config/_tr_cfg_shared.yaml
+#
+# Usage:
+#   bash __flow.sh ACT
+#   python script/__flow.py --model ACT
+# ============================================================
+
+# ------------------------------------------------------------
+# GPU Parallel Configuration
+# ------------------------------------------------------------
+# Defines which GPUs are available for this model's training tasks.
+# Each GPU slot can run one training task in parallel.
+#
+# Example:
+#   gpu_parallel: [0, 1]     # Use GPU 0 and GPU 1, max 2 parallel tasks
+#   gpu_parallel: [0]        # Use only GPU 0, sequential execution
+#   gpu_parallel: [0, 1, 2]  # Use 3 GPUs, max 3 parallel tasks
+gpu_parallel: [0, 1]
+
+# ------------------------------------------------------------
+# Model-Specific Defaults
+# ------------------------------------------------------------
+# These values are used as defaults for all tr_tasks entries.
+# Individual tasks can override any field.
+model_defaults:
+  # --- ACT Architecture Parameters ---
+  
+  # KL divergence weight for variational inference.
+  # Higher values = stronger regularization on latent distribution.
+  kl_weight: 10
+  
+  # Action chunk size: number of action steps predicted per inference.
+  # Larger chunks = smoother trajectories but less reactive.
+  chunk_size: 50
+  
+  # Hidden dimension of the transformer encoder/decoder.
+  # Larger values = more capacity but slower training.
+  hidden_dim: 512
+  
+  # Dimension of feedforward layers in transformer.
+  # Typically 4x to 8x of hidden_dim.
+  dim_feedforward: 3200
+  
+  # --- Training Hyperparameters ---
+  
+  # Batch size for training.
+  # Adjust based on GPU memory availability.
+  batch_size: 32
+  
+  # Learning rate for Adam optimizer.
+  # Typical range: 1e-5 to 1e-4 for ACT.
+  lr: 1.0e-5
+  
+  # Number of training epochs.
+  # Each epoch processes the entire dataset once.
+  num_epochs: 6000
+  
+  # Frequency (in epochs) to save checkpoints.
+  save_freq: 2000
+  
+  # State dimension: robot state vector size.
+  # For ALOHA dual-arm: 7 (left arm) + 7 (right arm) = 14.
+  state_dim: 14
+
+# ------------------------------------------------------------
+# Training Task Queue
+# ------------------------------------------------------------
+# List of training tasks to execute. Tasks run in order, with
+# parallel execution within GPU slots when available.
+#
+# Each task can be:
+#   1. Single-task training: specify data_folder directly
+#   2. Joint training: specify data_sources for multiple datasets
+#
+# Task fields:
+#   task_id: Unique identifier for this training run (used for logging)
+#   task_name: Task identifier for model compatibility
+#   task_config: Configuration variant (e.g., demo_clean, demo_clean_pert)
+#   expert_num: Number of expert demonstrations to use
+#   data_folder: Path to processed data (relative to RoboTwin root)
+#   data_sources: For joint training, list of data source entries
+#   [optional] Override any field from model_defaults
+# ------------------------------------------------------------
+tr_tasks:
+  # --- Single-Task Training Examples ---
+  
+  - task_id: stack_blocks_single
+    task_name: stack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_blocks_single
+    task_name: unstack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: stack_bowls_single
+    task_name: stack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_bowls_single
+    task_name: unstack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: hanging_mug_single
+    task_name: hanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/hanging_mug_pert/demo_clean_pert"
+    
+  - task_id: unhanging_mug_single
+    task_name: unhanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unhanging_mug_pert/demo_clean_pert"
+    
+  - task_id: move_pillbottle_single
+    task_name: move_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/move_pillbottle_pad_pert/demo_clean_pert"
+    
+  - task_id: unmove_pillbottle_single
+    task_name: unmove_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unmove_pillbottle_pad_pert/demo_clean_pert"
+
+  # --- Joint Training Examples (commented out) ---
+  # Joint training combines multiple tasks into a single model.
+  # Uncomment to enable.
+  
+  # - task_id: stack_blocks_joint
+  #   data_sources:
+  #     - task_name: stack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+  #     - task_name: unstack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
+  
+  # - task_id: hanging_mug_joint
+  #   data_sources:
+  #     - task_name: hanging_mug
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/hanging_mug_pert/demo_clean_pert"
+  #     - task_name: unhanging_mug
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/unhanging_mug_pert/demo_clean_pert"

@@ -1,0 +1,203 @@
+# ============================================================
+# TinyVLA Training Tasks Configuration
+# ============================================================
+# This file defines all training tasks for the TinyVLA model.
+# Settings here override or extend the shared config in:
+#   policy/config/_tr_cfg_shared.yaml
+#
+# Usage:
+#   bash __flow.sh TinyVLA
+#   python script/__flow.py --model TinyVLA
+# ============================================================
+
+# ------------------------------------------------------------
+# GPU Parallel Configuration
+# ------------------------------------------------------------
+# Defines which GPUs are available for this model's training tasks.
+# Each GPU slot can run one training task in parallel.
+gpu_parallel: [0, 1]
+
+# ------------------------------------------------------------
+# Model-Specific Defaults
+# ------------------------------------------------------------
+# These values are used as defaults for all tr_tasks entries.
+# Individual tasks can override any field.
+model_defaults:
+  # --- TinyVLA Architecture Parameters ---
+  
+  # Pre-trained vision-language model path.
+  # Relative to TinyVLA directory.
+  model_name_or_path: "model_param/InternVL3-1B/"
+  
+  # Policy head type for action prediction.
+  # Options: unet_diffusion_policy, etc.
+  policy_head_type: unet_diffusion_policy
+  
+  # State dimension: robot state vector size.
+  state_dim: 14
+  
+  # Action dimension: size of action vector per step.
+  action_dim: 14
+  
+  # Action chunk size: number of action steps predicted per inference.
+  chunk_size: 16
+  
+  # Number of noise samples for diffusion training.
+  noise_samples: 2
+  
+  # --- Training Hyperparameters ---
+  
+  # Use Flash Attention for faster training.
+  # Set false if GPU does not support Flash Attention.
+  flash_attn: false
+  
+  # Maximum training steps (optimizer steps).
+  # TinyVLA typically uses more steps than ACT/DP.
+  max_steps: 100000
+  
+  # Batch size per GPU device.
+  per_device_train_batch_size: 16
+  per_device_eval_batch_size: 16
+  
+  # Gradient accumulation steps.
+  # Effective batch size = per_device_train_batch_size * gradient_accumulation_steps
+  gradient_accumulation_steps: 1
+  
+  # Learning rate.
+  learning_rate: 2.0e-5
+  
+  # Weight decay for regularization.
+  weight_decay: 0.0
+  
+  # Learning rate scheduler type.
+  # Options: linear, cosine, constant, etc.
+  lr_scheduler_type: cosine
+  
+  # Warmup ratio: fraction of training for learning rate warmup.
+  warmup_ratio: 0.05
+  
+  # Logging frequency (in steps).
+  logging_steps: 50
+  
+  # Use bfloat16 precision for faster training.
+  # Requires Ampere or newer GPU architecture.
+  bf16: true
+  
+  # Use TF32 precision on Ampere GPUs.
+  tf32: false
+  
+  # Enable gradient checkpointing to save memory.
+  gradient_checkpointing: true
+  
+  # Number of dataloader workers.
+  dataloader_num_workers: 4
+  
+  # Reporting backend for metrics.
+  # Options: none, tensorboard, wandb
+  report_to: none
+  
+  # --- Checkpoint Configuration ---
+  
+  # Save strategy: steps or epochs.
+  save_strategy: steps
+  
+  # Save frequency (in steps).
+  save_steps: 2000
+  
+  # Maximum number of checkpoints to keep.
+  save_total_limit: 3
+  
+  # Evaluation strategy.
+  evaluation_strategy: steps
+  
+  # Evaluation frequency (in steps).
+  eval_steps: 1000
+  
+  # --- Model Freezing Options ---
+  
+  # Freeze vision tower during training.
+  freeze_vision_tower: false
+  
+  # Freeze backbone (LLM) during training.
+  freeze_backbone: false
+
+# ------------------------------------------------------------
+# DeepSpeed Configuration (Optional)
+# ------------------------------------------------------------
+# Enable for multi-GPU distributed training.
+# Set enabled: true and configure num_gpus.
+deepspeed:
+  enabled: false
+  num_gpus: 8
+  master_port: 29604
+  zero2_json: scripts/zero2.json
+
+# ------------------------------------------------------------
+# Training Task Queue
+# ------------------------------------------------------------
+# List of training tasks to execute. Tasks run in order, with
+# parallel execution within GPU slots when available.
+# ------------------------------------------------------------
+tr_tasks:
+  # --- Single-Task Training ---
+  
+  - task_id: stack_blocks_single
+    task_name: stack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_blocks_single
+    task_name: unstack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: stack_bowls_single
+    task_name: stack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_bowls_single
+    task_name: unstack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: hanging_mug_single
+    task_name: hanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/hanging_mug_pert/demo_clean_pert"
+    
+  - task_id: unhanging_mug_single
+    task_name: unhanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unhanging_mug_pert/demo_clean_pert"
+    
+  - task_id: move_pillbottle_single
+    task_name: move_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/move_pillbottle_pad_pert/demo_clean_pert"
+    
+  - task_id: unmove_pillbottle_single
+    task_name: unmove_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unmove_pillbottle_pad_pert/demo_clean_pert"
+
+  # --- Joint Training Examples (commented out) ---
+  
+  # - task_id: stack_blocks_joint
+  #   data_sources:
+  #     - task_name: stack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+  #     - task_name: unstack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"

@@ -1,0 +1,132 @@
+# ============================================================
+# DP (Diffusion Policy) Training Tasks Configuration
+# ============================================================
+# This file defines all training tasks for the DP model.
+# Settings here override or extend the shared config in:
+#   policy/config/_tr_cfg_shared.yaml
+#
+# Usage:
+#   bash __flow.sh DP
+#   python script/__flow.py --model DP
+# ============================================================
+
+# ------------------------------------------------------------
+# GPU Parallel Configuration
+# ------------------------------------------------------------
+# Defines which GPUs are available for this model's training tasks.
+# Each GPU slot can run one training task in parallel.
+gpu_parallel: [0, 1]
+
+# ------------------------------------------------------------
+# Model-Specific Defaults
+# ------------------------------------------------------------
+# These values are used as defaults for all tr_tasks entries.
+# Individual tasks can override any field.
+model_defaults:
+  # --- DP Architecture Parameters ---
+  
+  # Action dimension: size of action vector per step.
+  # For ALOHA dual-arm: 7 (left arm) + 7 (right arm) = 14.
+  action_dim: 14
+  
+  # Head camera type for vision encoder.
+  # Options: D435, D405, etc.
+  head_camera_type: D435
+  
+  # --- Training Hyperparameters ---
+  
+  # Batch size for training.
+  # DP typically uses larger batch sizes than ACT.
+  batch_size: 64
+  
+  # Learning rate for optimizer.
+  # DP often uses higher learning rates than ACT.
+  lr: 1.0e-4
+  
+  # Number of training epochs.
+  num_epochs: 6000
+  
+  # Frequency (in epochs) to save checkpoints.
+  checkpoint_every: 2000
+  
+  # Validation split ratio.
+  # 0.02 = 2% of data for validation.
+  val_ratio: 0.02
+  
+  # Whether to delete combined zarr after training.
+  # Set true to save disk space for joint training.
+  delete_combined_zarr_after_train: true
+
+# ------------------------------------------------------------
+# Training Task Queue
+# ------------------------------------------------------------
+# List of training tasks to execute. Tasks run in order, with
+# parallel execution within GPU slots when available.
+#
+# Each task can be:
+#   1. Single-task training: specify data_folder directly
+#   2. Joint training: specify data_sources for multiple datasets
+# ------------------------------------------------------------
+tr_tasks:
+  # --- Single-Task Training ---
+  
+  - task_id: stack_blocks_single
+    task_name: stack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_blocks_single
+    task_name: unstack_blocks_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
+    
+  - task_id: stack_bowls_single
+    task_name: stack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/stack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: unstack_bowls_single
+    task_name: unstack_bowls_three
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unstack_bowls_three_pert/demo_clean_pert"
+    
+  - task_id: hanging_mug_single
+    task_name: hanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/hanging_mug_pert/demo_clean_pert"
+    
+  - task_id: unhanging_mug_single
+    task_name: unhanging_mug
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unhanging_mug_pert/demo_clean_pert"
+    
+  - task_id: move_pillbottle_single
+    task_name: move_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/move_pillbottle_pad_pert/demo_clean_pert"
+    
+  - task_id: unmove_pillbottle_single
+    task_name: unmove_pillbottle_pad
+    task_config: demo_clean
+    expert_num: 100
+    data_folder: "data/unmove_pillbottle_pad_pert/demo_clean_pert"
+
+  # --- Joint Training Examples (commented out) ---
+  
+  # - task_id: stack_blocks_joint
+  #   data_sources:
+  #     - task_name: stack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+  #     - task_name: unstack_blocks_three
+  #       task_config: demo_clean
+  #       expert_num: 100
+  #       data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"

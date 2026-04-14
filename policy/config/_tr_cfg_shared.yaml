@@ -1,0 +1,76 @@
+# ============================================================
+# Shared Training Configuration
+# ============================================================
+# This file defines global settings inherited by all models (ACT/DP/TinyVLA).
+# Each model can override these settings in their own tr_tasks.yaml.
+#
+# Precedence: Model config > Shared config
+# ============================================================
+
+# ------------------------------------------------------------
+# Global Random Seed
+# ------------------------------------------------------------
+# Used for reproducibility across all training runs.
+# Each model can override via model_defaults.seed or CLI --seed.
+seed: 0
+
+# ------------------------------------------------------------
+# Early Stopping Configuration
+# ------------------------------------------------------------
+# Controls when to stop training early based on validation loss.
+# Set any field to null to disable early stopping entirely.
+early_stop:
+  # Number of optimizer steps between validation evaluations.
+  # Higher values = less frequent evaluation = faster training.
+  eval_steps: 100
+  
+  # Number of consecutive evaluations without improvement before stopping.
+  # Higher values = more patience = longer training before early stop.
+  patience_evals: 20
+  
+  # Relative tolerance for improvement detection.
+  # If (new_loss < best_loss * (1 - rel_tol)), considered an improvement.
+  # Example: 0.001 means 0.1% improvement threshold.
+  rel_tol: 0.001
+
+# ------------------------------------------------------------
+# Training Limits
+# ------------------------------------------------------------
+# Hard limits on training duration. Set to null for unlimited.
+limits:
+  # Maximum number of optimizer steps (gradient updates).
+  # Training will stop early if this limit is reached.
+  # Useful for quick experiments or resource-constrained runs.
+  max_tr_steps: 30000
+  
+  # Interval (in optimizer steps) between checkpoint saves.
+  # Smaller values = more frequent saves = more disk usage.
+  save_interval: 10000
+
+# ------------------------------------------------------------
+# Task Config Aliases
+# ------------------------------------------------------------
+# Maps a canonical task_config name to a list of equivalent configs.
+# When training specifies task_config: demo_clean, the system will
+# accept data folders with either demo_clean or demo_clean_pert.
+#
+# This allows training on perturbed data while using the same
+# task_config identifier for model compatibility.
+#
+# Example:
+#   task_config_aliases:
+#     demo_clean: [demo_clean, demo_clean_pert]
+#     demo_messy: [demo_messy, demo_messy_pert]
+task_config_aliases:
+  demo_clean: [demo_clean, demo_clean_pert]
+
+# ------------------------------------------------------------
+# Data Path Configuration
+# ------------------------------------------------------------
+# Base paths for data resolution. All relative paths in tr_tasks
+# are resolved relative to the RoboTwin root directory.
+paths:
+  # Root directory for all data folders.
+  # Relative paths like "data/stack_blocks_three_pert/demo_clean_pert"
+  # will be resolved as: <RoboTwin_root>/data/stack_blocks_three_pert/demo_clean_pert
+  data_root: "data"
