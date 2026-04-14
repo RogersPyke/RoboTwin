@@ -54,6 +54,8 @@ def main(args):
     early_stop_patience_evals = args.get("early_stop_patience_evals", 0)
     early_stop_rel_tol = args.get("early_stop_rel_tol", 0.0)
     eval_steps_for_early_stop = args.get("eval_steps_for_early_stop", 100)
+    max_tr_steps = args.get("max_tr_steps", None)
+    save_interval = args.get("save_interval", None)
 
     # get task parameters
     is_sim = task_name[:4] == "sim-"
@@ -120,6 +122,8 @@ def main(args):
         "early_stop_patience_evals": early_stop_patience_evals,
         "early_stop_rel_tol": early_stop_rel_tol,
         "eval_steps_for_early_stop": eval_steps_for_early_stop,
+        "max_tr_steps": max_tr_steps,
+        "save_interval": save_interval,
     }
 
     if is_eval:
@@ -395,6 +399,10 @@ def train_bc(train_dataloader, val_dataloader, config):
     early_stop_patience_evals = int(config.get("early_stop_patience_evals", 0))
     early_stop_rel_tol = float(config.get("early_stop_rel_tol", 0.0))
     eval_steps_for_early_stop = int(config.get("eval_steps_for_early_stop", 100))
+    max_tr_steps = config.get("max_tr_steps", None)
+    save_interval = config.get("save_interval", None)
+    max_tr_steps = int(max_tr_steps) if max_tr_steps is not None else None
+    save_interval = int(save_interval) if save_interval is not None else None
 
     set_seed(seed)
 
@@ -429,6 +437,10 @@ def train_bc(train_dataloader, val_dataloader, config):
             f"Early stopping enabled: patience_evals={early_stop_patience_evals}, "
             f"rel_tol={early_stop_rel_tol}, eval_steps_for_early_stop={eval_steps_for_early_stop}"
         )
+    if max_tr_steps is not None:
+        print(f"[INFO] Max training steps hard cap enabled: {max_tr_steps}")
+    if save_interval is not None and save_interval > 0:
+        print(f"[INFO] Forced checkpoint save interval (steps): {save_interval}")
 
     for epoch in tqdm(range(num_epochs)):
         epochs_run = epoch + 1
@@ -498,6 +510,10 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
             total_train_steps += 1
+            if save_interval is not None and save_interval > 0 and (total_train_steps % save_interval == 0):
+                forced_ckpt = os.path.join(ckpt_dir, f"policy_step_{total_train_steps}.ckpt")
+                torch.save(policy.state_dict(), forced_ckpt)
+                print(f"[INFO] Forced save at step={total_train_steps}: {forced_ckpt}")
 
             # ==== Early stop eval cadence (FIX) ====
             # The CLI param is named eval_steps_for_early_stop, so we evaluate on optimizer steps.
@@ -554,6 +570,14 @@ def train_bc(train_dataloader, val_dataloader, config):
             # ==== Early stop eval cadence (FIX) ====
 
             if stop_training:
+                break
+            if max_tr_steps is not None and total_train_steps >= max_tr_steps:
+                stop_reason = "max_tr_steps_reached"
+                stop_training = True
+                print(
+                    f"[WARN] Reached max_tr_steps={max_tr_steps}; forcing training stop.",
+                    flush=True,
+                )
                 break
 
         if stop_training:
@@ -707,6 +731,22 @@ if __name__ == "__main__":
         type=int,
         help="dim_feedforward",
         required=False,
+    )
+    parser.add_argument(
+        "--max_tr_steps",
+        action="store",
+        type=int,
+        help="hard cap for optimizer steps; when reached training stops and saves ckpt",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--save_interval",
+        action="store",
+        type=int,
+        help="force-save ckpt every K optimizer steps",
+        required=False,
+        default=None,
     )
     parser.add_argument("--temporal_agg", action="store_true")
 

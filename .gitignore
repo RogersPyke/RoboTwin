@@ -1,5 +1,5 @@
 /data/**
-/data-rev/**
+/data-*/**
 !data/process_stuck.py
 __pycache__/
 **/__pycache__/**

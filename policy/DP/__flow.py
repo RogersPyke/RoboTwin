@@ -14,9 +14,10 @@ CLI args > FLOW env injected by this file > YAML config defaults.
 This file only injects flow-level env values and process orchestration:
 - DP_FLOW_GPU      from PARALLEL slot gpu id
 - DP_FLOW_SEED     from FLOW_SEED (optional)
-- DP_FLOW_TEST_NUM from FLOW_TEST_NUM (optional)
 - DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP, DP_FLOW_EARLY_STOP_PATIENCE_EVALS,
   DP_FLOW_EARLY_STOP_REL_TOL from matching FLOW constants (optional, None skips)
+- DP_FLOW_MAX_TR_STEPS, DP_FLOW_SAVE_INTERVAL from matching FLOW constants
+  (optional, None skips)
 """
 
 import atexit
@@ -51,10 +52,11 @@ TASK_CONFIG = "demo_clean"
 EXPERT_NUM = "100"
 PARALLEL = [1, 1]
 FLOW_SEED = 0
-FLOW_TEST_NUM = 50
-EVAL_STEPS_FOR_EARLY_STOP = 1000
-EARLY_STOP_PATIENCE_EVALS = 40
+EVAL_STEPS_FOR_EARLY_STOP = 100
+EARLY_STOP_PATIENCE_EVALS = 20
 EARLY_STOP_REL_TOL = 1e-3
+MAX_TR_STEPS = 30000
+SAVE_INTERVAL = 10000
 
 # Explicit demo-processing task names (process_data.sh first argument).
 TASK_DATA = [
@@ -212,14 +214,16 @@ def start_slot_job(
     slot_env["DP_FLOW_PHASE"] = phase
     if FLOW_SEED is not None:
         slot_env["DP_FLOW_SEED"] = str(FLOW_SEED)
-    if FLOW_TEST_NUM is not None:
-        slot_env["DP_FLOW_TEST_NUM"] = str(FLOW_TEST_NUM)
     if EVAL_STEPS_FOR_EARLY_STOP is not None:
         slot_env["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"] = str(EVAL_STEPS_FOR_EARLY_STOP)
     if EARLY_STOP_PATIENCE_EVALS is not None:
         slot_env["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"] = str(EARLY_STOP_PATIENCE_EVALS)
     if EARLY_STOP_REL_TOL is not None:
         slot_env["DP_FLOW_EARLY_STOP_REL_TOL"] = str(EARLY_STOP_REL_TOL)
+    if MAX_TR_STEPS is not None:
+        slot_env["DP_FLOW_MAX_TR_STEPS"] = str(MAX_TR_STEPS)
+    if SAVE_INTERVAL is not None:
+        slot_env["DP_FLOW_SAVE_INTERVAL"] = str(SAVE_INTERVAL)
 
     logs = ensure_logs_dir(BASE_DIR)
     ts = utc8_now_str()
@@ -283,7 +287,7 @@ def main() -> int:
     env = inject_flow_child_env(os.environ.copy())
     print(
         f"[flow] main TASK_CONFIG={TASK_CONFIG} EXPERT_NUM={EXPERT_NUM} "
-        f"PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} FLOW_TEST_NUM={FLOW_TEST_NUM} "
+        f"PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} "
         f"TASK_DATA={len(TASK_DATA)} TASK_SEQ={len(TASK_SEQ)} "
         f"(source=FLOW constants)",
         flush=True,

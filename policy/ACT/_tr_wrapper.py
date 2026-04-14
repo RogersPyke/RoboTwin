@@ -10,6 +10,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +65,75 @@ def _maybe_add_arg(cmd: list, flag: str, value) -> None:
     if value is None:
         return
     cmd.extend([flag, str(value)])
+
+
+def _extract_step_from_ckpt_name(name: str) -> int:
+    """
+    @input: [str, checkpoint filename]
+    @output: [int, parsed step number or -1]
+    @scenario: [Infer training step for checkpoint package folder naming]
+    """
+    m = re.search(r"policy_step_(\d+)\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"policy_epoch_(\d+)_seed_\d+\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    if name == "policy_best.ckpt":
+        return -2
+    if name == "policy_last.ckpt":
+        return -3
+    return -1
+
+
+def _package_checkpoints_for_eval(ckpt_dir: str, logger: logging.Logger) -> None:
+    """
+    @input: [str, ckpt_dir], [logging.Logger, logger]
+    @output: [None]
+    @scenario: [Pack each checkpoint into an isolated eval-ready directory]
+    """
+    entries = []
+    for name in sorted(os.listdir(ckpt_dir)):
+        if not name.endswith(".ckpt"):
+            continue
+        src_path = os.path.join(ckpt_dir, name)
+        if os.path.isfile(src_path):
+            entries.append((name, src_path))
+    if not entries:
+        logger.warning("No checkpoint files found for packaging under %s", ckpt_dir)
+        return
+
+    bundle_root = os.path.join(ckpt_dir, "step_packages")
+    os.makedirs(bundle_root, exist_ok=True)
+    passthrough_files = [
+        "dataset_stats.pkl",
+        "training_run_manifest.txt",
+        "steps.txt",
+    ]
+    for name, src_ckpt in entries:
+        step_id = _extract_step_from_ckpt_name(name)
+        if step_id >= 0:
+            folder_name = f"step_{step_id}"
+        elif step_id == -2:
+            folder_name = "step_best"
+        elif step_id == -3:
+            folder_name = "step_last"
+        else:
+            folder_name = f"step_misc_{os.path.splitext(name)[0]}"
+        dst_dir = os.path.join(bundle_root, folder_name)
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, name))
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, "policy_best.ckpt"))
+        for keep_name in passthrough_files:
+            src = os.path.join(ckpt_dir, keep_name)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(dst_dir, keep_name))
+        for file_name in os.listdir(ckpt_dir):
+            if file_name.endswith(".yaml"):
+                src_yaml = os.path.join(ckpt_dir, file_name)
+                if os.path.isfile(src_yaml):
+                    shutil.copy2(src_yaml, os.path.join(dst_dir, file_name))
+    logger.info("Packaged %d checkpoints to %s", len(entries), bundle_root)
 
 
 def _has_only_symlink_files_recursive(path: str) -> bool:
@@ -151,6 +221,20 @@ def main(argv: list) -> int:
     )
     parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
     parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
+    parser.add_argument(
+        "--max-tr-steps",
+        dest="max_tr_steps",
+        type=int,
+        required=False,
+        help="Optional hard cap for optimizer steps (CLI highest priority).",
+    )
+    parser.add_argument(
+        "--save-interval",
+        dest="save_interval",
+        type=int,
+        required=False,
+        help="Optional forced checkpoint interval in optimizer steps (CLI highest priority).",
+    )
     args = parser.parse_args(argv[1:])
 
     act_dir = os.path.dirname(os.path.abspath(__file__))
@@ -199,12 +283,22 @@ def main(argv: list) -> int:
         early_stop_patience_evals = cfg.get("EARLY_STOP_PATIENCE_EVALS", None)
         early_stop_rel_tol = cfg.get("EARLY_STOP_REL_TOL", None)
         eval_steps_for_early_stop = cfg.get("EVAL_STEPS_FOR_EARLY_STOP", None)
+        max_tr_steps = _get_cfg_opt(cfg, "MAX_TR_STEPS", None)
+        save_interval = _get_cfg_opt(cfg, "SAVE_INTERVAL", None)
         if "ACT_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
             early_stop_patience_evals = int(os.environ["ACT_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
         if "ACT_FLOW_EARLY_STOP_REL_TOL" in os.environ:
             early_stop_rel_tol = float(os.environ["ACT_FLOW_EARLY_STOP_REL_TOL"].strip())
         if "ACT_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
             eval_steps_for_early_stop = int(os.environ["ACT_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
+        if "ACT_FLOW_MAX_TR_STEPS" in os.environ:
+            max_tr_steps = int(os.environ["ACT_FLOW_MAX_TR_STEPS"].strip())
+        if "ACT_FLOW_SAVE_INTERVAL" in os.environ:
+            save_interval = int(os.environ["ACT_FLOW_SAVE_INTERVAL"].strip())
+        if args.max_tr_steps is not None:
+            max_tr_steps = int(args.max_tr_steps)
+        if args.save_interval is not None:
+            save_interval = int(args.save_interval)
         logger.info(
             "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
             global_seed,
@@ -236,6 +330,8 @@ def main(argv: list) -> int:
         logger.info("Early-stop patience_evals: %s", early_stop_patience_evals)
         logger.info("Early-stop rel_tol: %s", early_stop_rel_tol)
         logger.info("Early-stop eval_steps_for_early_stop: %s", eval_steps_for_early_stop)
+        logger.info("Max training steps: %s", max_tr_steps)
+        logger.info("Forced checkpoint save_interval: %s", save_interval)
 
         sim_cfg_path = "./SIM_TASK_CONFIGS.json"
         if not os.path.isfile(sim_cfg_path):
@@ -356,10 +452,13 @@ def main(argv: list) -> int:
         _maybe_add_arg(cmd, "--early_stop_rel_tol", early_stop_rel_tol)
         _maybe_add_arg(cmd, "--early_stop_patience_evals", early_stop_patience_evals)
         _maybe_add_arg(cmd, "--eval_steps_for_early_stop", eval_steps_for_early_stop)
+        _maybe_add_arg(cmd, "--max_tr_steps", max_tr_steps)
+        _maybe_add_arg(cmd, "--save_interval", save_interval)
         logger.info("Launching training: %s", " ".join(cmd))
         sim_task_root_dir = os.path.join("./processed_data", f"sim-{combined_task_slug}")
         try:
             subprocess.run(cmd, check=True, env=env)
+            _package_checkpoints_for_eval(ckpt_dir, logger)
         finally:
             if os.path.isdir(sim_task_root_dir) and _has_only_symlink_files_recursive(sim_task_root_dir):
                 shutil.rmtree(sim_task_root_dir)

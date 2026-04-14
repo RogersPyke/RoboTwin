@@ -16,6 +16,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -387,12 +388,75 @@ def _snapshot_training_metadata(
             json.dump(joint_contract["joint_task_spec"], f, indent=2)
 
 
+def _extract_step_from_tinyvla_name(name: str) -> int:
+    """
+    @input: [str, checkpoint folder or file name]
+    @output: [int, parsed step number or -1]
+    @scenario: [Infer step id for checkpoint package folder names]
+    """
+    m = re.search(r"checkpoint-(\d+)$", name)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"step_(\d+)$", name)
+    if m:
+        return int(m.group(1))
+    return -1
+
+
+def _package_checkpoints_for_eval(output_dir: str) -> None:
+    """
+    @input: [str, output_dir]
+    @output: [None]
+    @scenario: [Pack TinyVLA checkpoints into isolated eval-ready directories]
+    """
+    if not os.path.isdir(output_dir):
+        return
+    candidates = []
+    for name in sorted(os.listdir(output_dir)):
+        path = os.path.join(output_dir, name)
+        if name.startswith("checkpoint-") and os.path.isdir(path):
+            candidates.append((name, path))
+        elif name == "policy_best" and os.path.isdir(path):
+            candidates.append((name, path))
+    if not candidates:
+        return
+
+    bundle_root = os.path.join(output_dir, "step_packages")
+    os.makedirs(bundle_root, exist_ok=True)
+    passthrough_files = ["training_run_manifest.txt", "steps.txt", "joint_task_spec.json"]
+    for name, src_path in candidates:
+        step_id = _extract_step_from_tinyvla_name(name)
+        if step_id >= 0:
+            folder_name = f"step_{step_id}"
+        elif name == "policy_best":
+            folder_name = "step_best"
+        else:
+            folder_name = f"step_misc_{name.replace('/', '_')}"
+        dst_dir = os.path.join(bundle_root, folder_name)
+        os.makedirs(dst_dir, exist_ok=True)
+        model_dir = os.path.join(dst_dir, "model")
+        shutil.copytree(src_path, model_dir, dirs_exist_ok=True)
+        for keep in passthrough_files:
+            src_keep = os.path.join(output_dir, keep)
+            if os.path.isfile(src_keep):
+                shutil.copy2(src_keep, os.path.join(dst_dir, keep))
+        for file_name in os.listdir(output_dir):
+            if file_name.endswith(".yaml"):
+                src_yaml = os.path.join(output_dir, file_name)
+                if os.path.isfile(src_yaml):
+                    shutil.copy2(src_yaml, os.path.join(dst_dir, file_name))
+    if LOGGER is not None:
+        LOGGER.info("Packaged %d TinyVLA checkpoints to %s", len(candidates), bundle_root)
+
+
 @log_exceptions
 def _run_training(
     tinyvla_dir: str,
     cfg_name: str,
     cli_seed: Optional[int] = None,
     cli_gpu_id: Optional[str] = None,
+    cli_max_tr_steps: Optional[int] = None,
+    cli_save_interval: Optional[int] = None,
 ) -> int:
     """
     @input: [str, tinyvla_dir], [str, cfg_name], [Optional[int], cli_seed], [Optional[str], cli_gpu_id]
@@ -414,6 +478,16 @@ def _run_training(
         cfg["EARLY_STOP_REL_TOL"] = float(os.environ["TVLA_FLOW_EARLY_STOP_REL_TOL"].strip())
     if "TVLA_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
         cfg["EVAL_STEPS_FOR_EARLY_STOP"] = int(os.environ["TVLA_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
+    max_tr_steps = cfg.get("MAX_TR_STEPS", None)
+    save_interval = cfg.get("SAVE_INTERVAL", None)
+    if "TVLA_FLOW_MAX_TR_STEPS" in os.environ:
+        max_tr_steps = int(os.environ["TVLA_FLOW_MAX_TR_STEPS"].strip())
+    if "TVLA_FLOW_SAVE_INTERVAL" in os.environ:
+        save_interval = int(os.environ["TVLA_FLOW_SAVE_INTERVAL"].strip())
+    if cli_max_tr_steps is not None:
+        max_tr_steps = int(cli_max_tr_steps)
+    if cli_save_interval is not None:
+        save_interval = int(cli_save_interval)
 
     train_seed = int(cfg["TRAIN_SEED"])
     train_gpu_id = str(cfg["TRAIN_GPU_ID"]).strip()
@@ -444,6 +518,11 @@ def _run_training(
         )
 
     train_args, output_dir, joint_contract = _prepare_train_args(tinyvla_dir, cfg)
+    if max_tr_steps is not None:
+        train_args["max_steps"] = int(max_tr_steps)
+    if save_interval is not None:
+        train_args["save_steps"] = int(save_interval)
+        train_args["save_strategy"] = "steps"
 
     deepspeed_cfg = cfg.get("DEEPSPEED", None)
     use_deepspeed = bool(
@@ -488,9 +567,12 @@ def _run_training(
         LOGGER.info("Launching training with config=%s", cfg_base)
         LOGGER.info("CUDA_VISIBLE_DEVICES=%s", train_gpu_id)
         LOGGER.info("Output dir=%s", output_dir)
+        LOGGER.info("Max training steps=%s", max_tr_steps)
+        LOGGER.info("Forced checkpoint save_interval=%s", save_interval)
         LOGGER.info("Command: %s", " ".join(cmd))
 
     subprocess.run(cmd, check=True, env=env, cwd=tinyvla_dir)
+    _package_checkpoints_for_eval(output_dir)
     return 0
 
 
@@ -516,6 +598,8 @@ def main(argv: List[str]) -> int:
     )
     parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
     parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
+    parser.add_argument("--max-tr-steps", dest="max_tr_steps", type=int, required=False, help="Optional hard cap for optimizer steps.")
+    parser.add_argument("--save-interval", dest="save_interval", type=int, required=False, help="Optional forced checkpoint interval in optimizer steps.")
     args = parser.parse_args(argv[1:])
 
     tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
@@ -526,7 +610,14 @@ def main(argv: List[str]) -> int:
         parser.error("Missing cfg_name. Use: python3 _tr_wrapper.py <cfg_name> (or --config <cfg_name>)")
 
     try:
-        return _run_training(tinyvla_dir, cfg, cli_seed=args.seed, cli_gpu_id=args.gpu_id)
+        return _run_training(
+            tinyvla_dir,
+            cfg,
+            cli_seed=args.seed,
+            cli_gpu_id=args.gpu_id,
+            cli_max_tr_steps=args.max_tr_steps,
+            cli_save_interval=args.save_interval,
+        )
     except Exception:
         if LOGGER is not None:
             LOGGER.error("Top-level wrapper exit due to failure.")

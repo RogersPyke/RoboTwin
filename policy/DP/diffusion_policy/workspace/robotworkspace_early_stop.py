@@ -106,6 +106,10 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
         early_stop_patience_evals = int(getattr(cfg.training, "early_stop_patience_evals", 0))
         early_stop_rel_tol = float(getattr(cfg.training, "early_stop_rel_tol", 0.0))
         eval_steps_for_early_stop = int(getattr(cfg.training, "eval_steps_for_early_stop", 1))
+        max_tr_steps = getattr(cfg.training, "max_tr_steps", None)
+        save_interval = getattr(cfg.training, "save_interval", None)
+        max_tr_steps = int(max_tr_steps) if max_tr_steps is not None else None
+        save_interval = int(save_interval) if save_interval is not None else None
         early_stop_tracker = RelativeEarlyStopTracker(
             patience_evals=early_stop_patience_evals,
             rel_tol=early_stop_rel_tol,
@@ -198,6 +202,17 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
                             self.train_optimizer_steps += 1
+                            if (
+                                save_interval is not None
+                                and save_interval > 0
+                                and self.train_optimizer_steps % save_interval == 0
+                            ):
+                                forced_ckpt_rel_path = f"{ckpt_rel_dir}/step_{self.train_optimizer_steps}.ckpt"
+                                self.save_checkpoint(path=forced_ckpt_rel_path, use_thread=False)
+                                print(
+                                    f"[INFO] Forced save at opt_step={self.train_optimizer_steps}: {forced_ckpt_rel_path}",
+                                    flush=True,
+                                )
                             # ==== Early stop ====
                             if (
                                 early_stop_enabled
@@ -280,6 +295,22 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                         )
                                         return
                             # ==== Early stop ====
+                            if max_tr_steps is not None and self.train_optimizer_steps >= max_tr_steps:
+                                self.early_stop_stop_reason = "max_tr_steps_reached"
+                                forced_last_rel_path = f"{ckpt_rel_dir}/step_{self.train_optimizer_steps}.ckpt"
+                                self.save_checkpoint(path=forced_last_rel_path, use_thread=False)
+                                print(
+                                    f"[WARN] Reached max_tr_steps={max_tr_steps}; stop with checkpoint {forced_last_rel_path}",
+                                    flush=True,
+                                )
+                                self._write_training_summary(
+                                    ckpt_rel_dir=ckpt_rel_dir,
+                                    stop_reason=self.early_stop_stop_reason,
+                                    last_val_loss=last_val_loss,
+                                    last_train_loss=last_train_loss,
+                                    tracker=early_stop_tracker,
+                                )
+                                return
 
                         if cfg.training.use_ema:
                             ema.step(self.model)

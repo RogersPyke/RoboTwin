@@ -10,6 +10,7 @@ Config file: _tr_cfg/<cfg_name>.yaml
 import argparse
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -170,12 +171,94 @@ def _concat_zarrs_from_src_paths(src_paths: list, combined_abs_path: str, combin
     logger.info("Built combined zarr: %s", combined_rel_path)
 
 
+def _extract_step_from_ckpt_name(name: str) -> int:
+    """
+    @input: [str, checkpoint filename]
+    @output: [int, parsed step number or -1]
+    @scenario: [Infer optimizer-step based package folder names]
+    """
+    m = re.search(r"step_(\d+)\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"^(\d+)\.ckpt$", name)
+    if m:
+        return int(m.group(1))
+    return -1
+
+
+def _package_checkpoints_for_eval(ckpt_dir: str, logger: logging.Logger) -> None:
+    """
+    @input: [str, ckpt_dir], [logging.Logger, logger]
+    @output: [None]
+    @scenario: [Pack each checkpoint into an isolated eval-ready directory]
+    """
+    if not os.path.isdir(ckpt_dir):
+        logger.warning("Checkpoint directory does not exist for packaging: %s", ckpt_dir)
+        return
+    ckpts = []
+    for name in sorted(os.listdir(ckpt_dir)):
+        if not name.endswith(".ckpt"):
+            continue
+        src = os.path.join(ckpt_dir, name)
+        if os.path.isfile(src):
+            ckpts.append((name, src))
+    if not ckpts:
+        logger.warning("No checkpoint files found for packaging under %s", ckpt_dir)
+        return
+    bundle_root = os.path.join(ckpt_dir, "step_packages")
+    os.makedirs(bundle_root, exist_ok=True)
+    passthrough_files = ["training_run_manifest.txt", "steps.txt"]
+    for name, src_ckpt in ckpts:
+        step_id = _extract_step_from_ckpt_name(name)
+        if step_id >= 0:
+            folder_name = f"step_{step_id}"
+        else:
+            folder_name = f"step_misc_{os.path.splitext(name)[0]}"
+        dst_dir = os.path.join(bundle_root, folder_name)
+        os.makedirs(dst_dir, exist_ok=True)
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, name))
+        shutil.copy2(src_ckpt, os.path.join(dst_dir, "policy_best.ckpt"))
+        for keep in passthrough_files:
+            src_keep = os.path.join(ckpt_dir, keep)
+            if os.path.isfile(src_keep):
+                shutil.copy2(src_keep, os.path.join(dst_dir, keep))
+        for file_name in os.listdir(ckpt_dir):
+            if file_name.endswith(".yaml"):
+                src_yaml = os.path.join(ckpt_dir, file_name)
+                if os.path.isfile(src_yaml):
+                    shutil.copy2(src_yaml, os.path.join(dst_dir, file_name))
+    logger.info("Packaged %d checkpoints to %s", len(ckpts), bundle_root)
+
+
+def _find_workspace_checkpoint_dir(dp_dir: str, save_name: str, seed: int) -> str:
+    """
+    @input: [str, dp_dir], [str, save_name], [int, seed]
+    @output: [str, checkpoint directory path or empty string]
+    @scenario: [Locate Hydra workspace checkpoint folder for current run]
+    """
+    target_leaf = f"{save_name}-{seed}"
+    outputs_root = os.path.join(dp_dir, "data", "outputs")
+    if not os.path.isdir(outputs_root):
+        return ""
+    found = []
+    for root, dir_names, _ in os.walk(outputs_root):
+        for dir_name in dir_names:
+            if dir_name == target_leaf and os.path.basename(root) == "checkpoints":
+                found.append(os.path.join(root, dir_name))
+    if not found:
+        return ""
+    found.sort(key=os.path.getmtime, reverse=True)
+    return found[0]
+
+
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="DP multi-task train wrapper (_tr_cfg/*.yaml)")
     parser.add_argument("cfg_name", nargs="?", type=str, help="Config name (_tr_cfg/<name>.yaml).")
     parser.add_argument("--config", dest="config", type=str, required=False, help="Legacy cfg arg.")
     parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
     parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional train seed override.")
+    parser.add_argument("--max-tr-steps", dest="max_tr_steps", type=int, required=False, help="Optional hard cap for optimizer steps.")
+    parser.add_argument("--save-interval", dest="save_interval", type=int, required=False, help="Optional forced checkpoint interval in optimizer steps.")
     args = parser.parse_args(argv[1:])
 
     dp_dir = os.path.dirname(os.path.abspath(__file__))
@@ -215,12 +298,22 @@ def main(argv: list) -> int:
         early_stop_patience_evals = int(cfg.get("EARLY_STOP_PATIENCE_EVALS", 0))
         early_stop_rel_tol = float(cfg.get("EARLY_STOP_REL_TOL", 0.0))
         eval_steps_for_early_stop = int(cfg.get("EVAL_STEPS_FOR_EARLY_STOP", 1))
+        max_tr_steps = cfg.get("MAX_TR_STEPS", None)
+        save_interval = cfg.get("SAVE_INTERVAL", None)
         if "DP_FLOW_EARLY_STOP_PATIENCE_EVALS" in os.environ:
             early_stop_patience_evals = int(os.environ["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"].strip())
         if "DP_FLOW_EARLY_STOP_REL_TOL" in os.environ:
             early_stop_rel_tol = float(os.environ["DP_FLOW_EARLY_STOP_REL_TOL"].strip())
         if "DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP" in os.environ:
             eval_steps_for_early_stop = int(os.environ["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"].strip())
+        if "DP_FLOW_MAX_TR_STEPS" in os.environ:
+            max_tr_steps = int(os.environ["DP_FLOW_MAX_TR_STEPS"].strip())
+        if "DP_FLOW_SAVE_INTERVAL" in os.environ:
+            save_interval = int(os.environ["DP_FLOW_SAVE_INTERVAL"].strip())
+        if args.max_tr_steps is not None:
+            max_tr_steps = int(args.max_tr_steps)
+        if args.save_interval is not None:
+            save_interval = int(args.save_interval)
         logger.info(
             "Resolved runtime: seed=%s (%s), gpu_id=%s (%s)",
             seed,
@@ -231,6 +324,8 @@ def main(argv: list) -> int:
         logger.info("Early-stop patience_evals: %s", early_stop_patience_evals)
         logger.info("Early-stop rel_tol: %s", early_stop_rel_tol)
         logger.info("Early-stop eval_steps_for_early_stop (optimizer steps): %s", eval_steps_for_early_stop)
+        logger.info("Max training steps: %s", max_tr_steps)
+        logger.info("Forced checkpoint save_interval: %s", save_interval)
 
         task_slug = "__".join([row[0] for row in rows])
         config_slug = "__".join([row[1] for row in rows])
@@ -278,14 +373,26 @@ def main(argv: list) -> int:
             f"training.early_stop_patience_evals={early_stop_patience_evals}",
             f"training.early_stop_rel_tol={early_stop_rel_tol}",
             f"training.eval_steps_for_early_stop={eval_steps_for_early_stop}",
+            f"training.max_tr_steps={max_tr_steps}",
+            f"training.save_interval={save_interval}",
             f"setting={config_slug}",
             f"expert_data_num={total_episodes}",
             f"head_camera_type={head_camera_type}",
         ]
         logger.info("Launch training: %s", " ".join(cmd))
+        save_name = os.path.splitext(os.path.basename(combined_rel_path))[0]
         try:
             # Step 4: run training loop with combined dataset.
             subprocess.run(cmd, check=True, cwd=dp_dir, env=env)
+            workspace_ckpt_dir = _find_workspace_checkpoint_dir(dp_dir, save_name, seed)
+            if workspace_ckpt_dir:
+                for keep_name in (cfg_basename, "training_run_manifest.txt"):
+                    src_keep = os.path.join(ckpt_dir, keep_name)
+                    if os.path.isfile(src_keep):
+                        shutil.copy2(src_keep, os.path.join(workspace_ckpt_dir, keep_name))
+                _package_checkpoints_for_eval(workspace_ckpt_dir, logger)
+            else:
+                logger.warning("Could not locate workspace checkpoint directory for save_name=%s seed=%s", save_name, seed)
         finally:
             # Step 5: always remove combined created by this run.
             if os.path.isdir(combined_abs_path):
