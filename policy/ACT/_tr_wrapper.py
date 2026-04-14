@@ -188,9 +188,19 @@ def _run_from_merged_config(
 
     if "data_folder" in task:
         data_folder = _resolve_data_folder(task["data_folder"], robotwin_root)
-        task_names = [task.get("task_name", task_id)]
-        task_configs = [task.get("task_config", "demo_clean")]
-        expert_counts = [task.get("expert_num", 100)]
+        folder_name = data_folder.name
+        parent_name = data_folder.parent.name
+        if parent_name.startswith("sim-"):
+            task_names = [parent_name[4:]]
+        else:
+            task_names = [task.get("task_name", task_id)]
+        parts = folder_name.rsplit("-", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            task_configs = [parts[0]]
+            expert_counts = [int(parts[1])]
+        else:
+            task_configs = [task.get("task_config", "demo_clean")]
+            expert_counts = [task.get("expert_num", 100)]
     elif "data_sources" in task:
         task_names = []
         task_configs = []

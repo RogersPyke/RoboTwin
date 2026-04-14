@@ -69,40 +69,27 @@ model_defaults:
 # ------------------------------------------------------------
 tr_tasks:
   # --- Single-Task Training ---
-  
+
   - task_id: stack_blocks_100
     task_name: stack_blocks_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_blocks_three/demo_clean"
-    
+    data_folder: "policy/DP/data/stack_blocks_three-demo_clean-100.zarr"
+
   - task_id: stack_bowls_100
     task_name: stack_bowls_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_bowls_three/demo_clean"
-    
+    data_folder: "policy/DP/data/stack_bowls_three-demo_clean-100.zarr"
+
   - task_id: hanging_mug_100
     task_name: hanging_mug
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/hanging_mug/demo_clean"
-  
+    data_folder: "policy/DP/data/hanging_mug-demo_clean-100.zarr"
+
   - task_id: move_pillbottle_100
     task_name: move_pillbottle_pad
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/move_pillbottle_pad/demo_clean"
-
-  # --- Joint Training Examples (commented out) ---
-  
-  # - task_id: stack_blocks_joint
-  #   data_sources:
-  #     - task_name: stack_blocks_three
-  #       task_config: demo_clean
-  #       expert_num: 100
-  #       data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
-  #     - task_name: unstack_blocks_three
-  #       task_config: demo_clean
-  #       expert_num: 100
-  #       data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
+    data_folder: "policy/DP/data/move_pillbottle_pad-demo_clean-100.zarr"

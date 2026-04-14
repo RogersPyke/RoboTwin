@@ -87,31 +87,31 @@ model_defaults:
 #   [optional] Override any field from model_defaults
 # ------------------------------------------------------------
 tr_tasks:
-  # --- Single-Task Training Examples ---
-  
+  # --- Single-Task Training ---
+
   - task_id: stack_blocks_100
     task_name: stack_blocks_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_blocks_three/demo_clean"
-    
+    data_folder: "policy/ACT/processed_data/sim-stack_blocks_three/demo_clean-100"
+
   - task_id: stack_bowls_100
     task_name: stack_bowls_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_bowls_three/demo_clean"
-    
+    data_folder: "policy/ACT/processed_data/sim-stack_bowls_three/demo_clean-100"
+
   - task_id: hanging_mug_100
     task_name: hanging_mug
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/hanging_mug/demo_clean"
-    
+    data_folder: "policy/ACT/processed_data/sim-hanging_mug/demo_clean-100"
+
   - task_id: move_pillbottle_100
     task_name: move_pillbottle_pad
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/move_pillbottle_pad/demo_clean"
+    data_folder: "policy/ACT/processed_data/sim-move_pillbottle_pad/demo_clean-100"
 
   # --- Joint Training Examples (commented out) ---
   # Joint training combines multiple tasks into a single model.

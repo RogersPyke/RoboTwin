@@ -271,9 +271,21 @@ def _run_from_merged_config(
             params[key] = task[key]
 
     if "data_folder" in task:
-        task_names = [task.get("task_name", task_id)]
-        task_configs = [task.get("task_config", "demo_clean")]
-        expert_counts = [task.get("expert_num", 100)]
+        data_folder = Path(task["data_folder"])
+        folder_name = data_folder.name
+        if folder_name.endswith(".zarr"):
+            folder_name = folder_name[:-5]
+        parts = folder_name.rsplit("-", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            task_names = [parts[0].rsplit("-", 1)[0] if "-" in parts[0] else parts[0]]
+            task_configs = [
+                parts[0].rsplit("-", 1)[1] if "-" in parts[0] else "demo_clean"
+            ]
+            expert_counts = [int(parts[1])]
+        else:
+            task_names = [task.get("task_name", task_id)]
+            task_configs = [task.get("task_config", "demo_clean")]
+            expert_counts = [task.get("expert_num", 100)]
     elif "data_sources" in task:
         task_names = [src["task_name"] for src in task["data_sources"]]
         task_configs = [src["task_config"] for src in task["data_sources"]]
