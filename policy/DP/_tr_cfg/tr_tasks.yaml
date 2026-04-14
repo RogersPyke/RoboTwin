@@ -15,7 +15,7 @@
 # ------------------------------------------------------------
 # Defines which GPUs are available for this model's training tasks.
 # Each GPU slot can run one training task in parallel.
-gpu_parallel: [0, 1]
+gpu_parallel: [1, 1]
 
 # ------------------------------------------------------------
 # Model-Specific Defaults
@@ -70,53 +70,29 @@ model_defaults:
 tr_tasks:
   # --- Single-Task Training ---
   
-  - task_id: stack_blocks_single
+  - task_id: stack_blocks_100
     task_name: stack_blocks_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_blocks_three_pert/demo_clean_pert"
+    data_folder: "data/stack_blocks_three/demo_clean"
     
-  - task_id: unstack_blocks_single
-    task_name: unstack_blocks_three
-    task_config: demo_clean
-    expert_num: 100
-    data_folder: "data/unstack_blocks_three_pert/demo_clean_pert"
-    
-  - task_id: stack_bowls_single
+  - task_id: stack_bowls_100
     task_name: stack_bowls_three
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/stack_bowls_three_pert/demo_clean_pert"
+    data_folder: "data/stack_bowls_three/demo_clean"
     
-  - task_id: unstack_bowls_single
-    task_name: unstack_bowls_three
-    task_config: demo_clean
-    expert_num: 100
-    data_folder: "data/unstack_bowls_three_pert/demo_clean_pert"
-    
-  - task_id: hanging_mug_single
+  - task_id: hanging_mug_100
     task_name: hanging_mug
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/hanging_mug_pert/demo_clean_pert"
-    
-  - task_id: unhanging_mug_single
-    task_name: unhanging_mug
-    task_config: demo_clean
-    expert_num: 100
-    data_folder: "data/unhanging_mug_pert/demo_clean_pert"
-    
-  - task_id: move_pillbottle_single
+    data_folder: "data/hanging_mug/demo_clean"
+  
+  - task_id: move_pillbottle_100
     task_name: move_pillbottle_pad
     task_config: demo_clean
     expert_num: 100
-    data_folder: "data/move_pillbottle_pad_pert/demo_clean_pert"
-    
-  - task_id: unmove_pillbottle_single
-    task_name: unmove_pillbottle_pad
-    task_config: demo_clean
-    expert_num: 100
-    data_folder: "data/unmove_pillbottle_pad_pert/demo_clean_pert"
+    data_folder: "data/move_pillbottle_pad/demo_clean"
 
   # --- Joint Training Examples (commented out) ---
   

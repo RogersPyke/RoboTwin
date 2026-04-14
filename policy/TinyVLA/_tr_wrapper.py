@@ -202,12 +202,7 @@ def _run_from_merged_config(
     combined_config_slug = "__".join(task_configs)
     combined_total_episodes = int(sum(expert_counts))
 
-    output_dir = os.path.join(
-        tinyvla_dir,
-        "tinyvla_ckpt",
-        f"tinyvla-{combined_task_slug}",
-        f"{combined_config_slug}-{combined_total_episodes}",
-    )
+    output_dir = os.path.join(tinyvla_dir, "tinyvla_ckpt", task_id)
 
     train_args: Dict[str, Any] = dict(params)
     train_args["task_name"] = combined_task_slug

@@ -317,9 +317,7 @@ def _run_from_merged_config(
         src_paths, combined_abs_path, combined_rel_path, logger
     )
 
-    ckpt_dir = os.path.join(
-        dp_dir, "checkpoints", f"{task_slug}-{config_slug}-{total_episodes}-{seed}"
-    )
+    ckpt_dir = os.path.join(dp_dir, "checkpoints", task_id)
     os.makedirs(ckpt_dir, exist_ok=True)
     with open(
         os.path.join(ckpt_dir, "training_run_manifest.txt"), "w", encoding="ascii"

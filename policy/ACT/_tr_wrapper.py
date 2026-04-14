@@ -314,7 +314,7 @@ def _run_from_merged_config(
         with open(sim_cfg_path, "w") as f:
             json.dump(sim_task_configs, f, indent=4)
 
-    ckpt_dir = f"./act_ckpt/act-{combined_task_slug}/{combined_config_slug}-{combined_total_episodes}"
+    ckpt_dir = f"./act_ckpt/{task_id}"
     os.makedirs(ckpt_dir, exist_ok=True)
     manifest_path = os.path.join(ckpt_dir, "training_run_manifest.txt")
     with open(manifest_path, "w", encoding="ascii") as mf:
