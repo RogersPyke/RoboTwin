@@ -228,7 +228,7 @@ def _run_from_merged_config(
     joint_task_spec = {
         "task_name": combined_task_slug,
         "dataset_dir": dataset_dirs,
-        "camera_names": ["head_camera"],
+        "camera_names": ["cam_high", "cam_left_wrist", "cam_right_wrist"],
         "episode_len": 0,
     }
 
