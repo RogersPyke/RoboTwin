@@ -45,6 +45,12 @@ model_defaults:
   # Number of noise samples for diffusion training.
   noise_samples: 2
   
+  # --- Data Loading Options ---
+  
+  # Skip mirrored data (left/right arm swap).
+  # If true, skips HDF5 files with 'mirror' in filename.
+  skip_mirrored_data: false
+  
   # --- Training Hyperparameters ---
   
   # Use Flash Attention for faster training.
