@@ -80,9 +80,11 @@ def _get_ev_task_ids(cfg: Dict[str, Any]) -> List[str]:
 
 
 def _resolve_checkpoint_dir(task: Dict[str, Any]) -> str:
+    if "ckpt_dir" in task and task["ckpt_dir"]:
+        return task["ckpt_dir"]
     train_tasks = task.get("train_tasks", [])
     if not train_tasks:
-        raise ValueError("train_tasks is required")
+        raise ValueError("Either ckpt_dir or train_tasks is required")
     names = [str(row[0]).strip() for row in train_tasks]
     cfgs = [str(row[1]).strip() for row in train_tasks]
     nums = [int(row[2]) for row in train_tasks]

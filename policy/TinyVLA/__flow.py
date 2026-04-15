@@ -80,9 +80,11 @@ def _get_ev_task_ids(cfg: Dict[str, Any]) -> List[str]:
 
 
 def _resolve_output_dir(task: Dict[str, Any]) -> str:
+    if "output_dir" in task and task["output_dir"]:
+        return task["output_dir"]
     train_tasks = task.get("train_tasks", [])
     if not train_tasks:
-        raise ValueError("train_tasks is required")
+        raise ValueError("Either output_dir or train_tasks is required")
     names = [str(row[0]).strip() for row in train_tasks]
     cfgs = [str(row[1]).strip() for row in train_tasks]
     nums = [int(row[2]) for row in train_tasks]
