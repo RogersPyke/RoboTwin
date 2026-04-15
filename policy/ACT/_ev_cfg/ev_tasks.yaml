@@ -1,129 +1,34 @@
 # ============================================================
 # ACT Evaluation Tasks Configuration
 # ============================================================
-# This file defines all evaluation tasks for the ACT model.
-# Settings here override or extend the shared config in:
-#   policy/config/_ev_cfg_shared.yaml
-#
-# Usage:
-#   bash __flow.sh
-#   python __flow.py
+# Checkpoints located at: policy/ACT/ckpt/
+# GPU: 0 (ACT uses card 0)
 # ============================================================
 
-# ------------------------------------------------------------
-# GPU Parallel Configuration
-# ------------------------------------------------------------
-# Defines which GPUs are available for this model's evaluation tasks.
-# Each GPU slot can run one evaluation task in parallel.
-gpu_parallel: [0, 0]
+gpu_parallel: [0]
 
-# ------------------------------------------------------------
-# Model-Specific Defaults
-# ------------------------------------------------------------
-# These values are used as defaults for all ev_tasks entries.
-# Individual tasks can override any field.
 model_defaults:
   test_num: 50
   end_reset_to_init: true
   seed: 0
 
-# ------------------------------------------------------------
-# Evaluation Task Queue
-# ------------------------------------------------------------
-# List of evaluation tasks to execute. Tasks run in order, with
-# parallel execution within GPU slots when available.
-#
-# Task fields:
-#   task_id: Unique identifier for this evaluation run
-#   train_tasks: List of [task_name, task_config, expert_num] used for training
-#                 (used to locate checkpoint directory)
-#   eval_tasks: List of [task_name, task_config, expert_num] to evaluate
-#   seed: Random seed for evaluation
-#   test_num: Number of test rollouts
-#   end_reset_to_init: Whether to reset to init at end
-# ------------------------------------------------------------
-
 ev_tasks:
-  # --- Single-Task Evaluation ---
-  
-  - task_id: flow_single_move_pillbottle_pad
-    train_tasks:
-      - [move_pillbottle_pad, demo_clean, 100]
+  - task_id: move_pillbottle_pad
+    ckpt_dir: policy/ACT/ckpt/move_pillbottle_100
     eval_tasks:
       - [move_pillbottle_pad, demo_clean, 100]
 
-  - task_id: flow_single_unmove_pillbottle_pad
-    train_tasks:
-      - [unmove_pillbottle_pad, demo_clean, 100]
-    eval_tasks:
-      - [unmove_pillbottle_pad, demo_clean, 100]
-
-  - task_id: flow_single_stack_bowls_three
-    train_tasks:
-      - [stack_bowls_three, demo_clean, 100]
-    eval_tasks:
-      - [stack_bowls_three, demo_clean, 100]
-
-  - task_id: flow_single_unstack_bowls_three
-    train_tasks:
-      - [unstack_bowls_three, demo_clean, 100]
-    eval_tasks:
-      - [unstack_bowls_three, demo_clean, 100]
-
-  - task_id: flow_single_stack_blocks_three
-    train_tasks:
-      - [stack_blocks_three, demo_clean, 100]
-    eval_tasks:
-      - [stack_blocks_three, demo_clean, 100]
-
-  - task_id: flow_single_unstack_blocks_three
-    train_tasks:
-      - [unstack_blocks_three, demo_clean, 100]
-    eval_tasks:
-      - [unstack_blocks_three, demo_clean, 100]
-
-  - task_id: flow_single_hanging_mug
-    train_tasks:
-      - [hanging_mug, demo_clean, 100]
+  - task_id: hanging_mug
+    ckpt_dir: policy/ACT/ckpt/hanging_mug_100
     eval_tasks:
       - [hanging_mug, demo_clean, 100]
 
-  - task_id: flow_single_unhanging_mug
-    train_tasks:
-      - [unhanging_mug, demo_clean, 100]
-    eval_tasks:
-      - [unhanging_mug, demo_clean, 100]
-
-  # --- Joint-Task Evaluation ---
-
-  - task_id: flow_joint_move_pillbottle_pad
-    train_tasks:
-      - [move_pillbottle_pad, demo_clean, 100]
-      - [unmove_pillbottle_pad, demo_clean, 100]
-    eval_tasks:
-      - [move_pillbottle_pad, demo_clean, 100]
-      - [unmove_pillbottle_pad, demo_clean, 100]
-
-  - task_id: flow_joint_stack_bowls_three
-    train_tasks:
-      - [stack_bowls_three, demo_clean, 100]
-      - [unstack_bowls_three, demo_clean, 100]
-    eval_tasks:
-      - [stack_bowls_three, demo_clean, 100]
-      - [unstack_bowls_three, demo_clean, 100]
-
-  - task_id: flow_joint_stack_blocks_three
-    train_tasks:
-      - [stack_blocks_three, demo_clean, 100]
-      - [unstack_blocks_three, demo_clean, 100]
+  - task_id: stack_blocks_three
+    ckpt_dir: policy/ACT/ckpt/stack_blocks_100
     eval_tasks:
       - [stack_blocks_three, demo_clean, 100]
-      - [unstack_blocks_three, demo_clean, 100]
 
-  - task_id: flow_joint_hanging_mug
-    train_tasks:
-      - [hanging_mug, demo_clean, 100]
-      - [unhanging_mug, demo_clean, 100]
+  - task_id: stack_bowls_three
+    ckpt_dir: policy/ACT/ckpt/stack_bowls_100
     eval_tasks:
-      - [hanging_mug, demo_clean, 100]
-      - [unhanging_mug, demo_clean, 100]
+      - [stack_bowls_three, demo_clean, 100]

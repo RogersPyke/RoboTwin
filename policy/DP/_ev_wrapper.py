@@ -126,28 +126,29 @@ def _run_from_merged_config(
         "eval_head_camera_type", model_defaults.get("eval_head_camera_type", "D435")
     )
 
-    train_tasks = task.get("train_tasks", [])
     eval_tasks = task.get("eval_tasks", [])
-
-    if not train_tasks:
-        raise ValueError(f"Task {task_id} must have train_tasks")
     if not eval_tasks:
         raise ValueError(f"Task {task_id} must have eval_tasks")
 
-    train_rows = _parse_task_rows(train_tasks)
     eval_rows = _parse_task_rows(eval_tasks)
 
-    names = [r[0] for r in train_rows]
-    cfgs = [r[1] for r in train_rows]
-    nums = [r[2] for r in train_rows]
+    if "ckpt_dir" in task and task["ckpt_dir"]:
+        ckpt_dir = task["ckpt_dir"]
+    else:
+        train_tasks = task.get("train_tasks", [])
+        if not train_tasks:
+            raise ValueError(f"Task {task_id} must have either ckpt_dir or train_tasks")
+        train_rows = _parse_task_rows(train_tasks)
+        names = [r[0] for r in train_rows]
+        cfgs = [r[1] for r in train_rows]
+        nums = [r[2] for r in train_rows]
+        train_task_slug = "__".join(names)
+        train_config_slug = "__".join(cfgs)
+        train_total = int(sum(nums))
+        ckpt_dir = (
+            f"policy/DP/checkpoints/{train_task_slug}-{train_config_slug}-{train_total}"
+        )
 
-    train_task_slug = "__".join(names)
-    train_config_slug = "__".join(cfgs)
-    train_total = int(sum(nums))
-
-    ckpt_dir = (
-        f"policy/DP/checkpoints/{train_task_slug}-{train_config_slug}-{train_total}"
-    )
     repo_root = os.path.abspath(os.path.join(dp_dir, "..", ".."))
 
     env = os.environ.copy()
