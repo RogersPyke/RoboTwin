@@ -9,7 +9,7 @@ gpu_parallel: [0]
 
 model_defaults:
   test_num: 50
-  end_reset_to_init: true
+  end_reset_to_init: false
   seed: 0
 
 ev_tasks:

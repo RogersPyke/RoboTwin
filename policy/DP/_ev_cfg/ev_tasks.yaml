@@ -9,7 +9,7 @@ gpu_parallel: [1]
 
 model_defaults:
   test_num: 50
-  end_reset_to_init: true
+  end_reset_to_init: false
   seed: 0
   checkpoint_num: 10000
   eval_head_camera_type: D435
