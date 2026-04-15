@@ -168,7 +168,7 @@ def _run_from_merged_config(
     )
     logger.info("Checkpoint: %s", ckpt_dir)
 
-    for task_name, task_config in eval_rows:
+    for task_name, task_config, _expert_num in eval_rows:
         cmd = [
             sys.executable,
             "script/eval_policy.py",
@@ -290,7 +290,7 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
     )
     logger.info("Checkpoint: %s", ckpt_dir)
 
-    for task_name, task_config in eval_rows:
+    for task_name, task_config, _expert_num in eval_rows:
         cmd = [
             sys.executable,
             "script/eval_policy.py",

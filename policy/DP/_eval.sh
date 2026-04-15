@@ -2,22 +2,33 @@
 set -euo pipefail
 export PYTHONNOUSERSITE=1
 
-# Recommended entrypoint for DP evaluation (config under _ev_cfg/<cfg_name>.yaml).
+# Single-task evaluation entrypoint for DP.
 #
-# Usage:
-#   bash _eval.sh <cfg_name>
+# Usage modes:
+#
+# 1. Legacy mode (requires _ev_cfg/<cfg_name>.yaml):
+#    bash _eval.sh <cfg_name>
+#    bash _eval.sh --config <cfg_name>
+#
+# 2. Task-id mode (uses ev_tasks.yaml):
+#    bash _eval.sh --task-id <task_id>
+#
+# 3. Direct mode (specify checkpoint and task directly):
+#    bash _eval.sh --ckpt-dir <path> --task-name <name> --task-config <config>
+#    bash _eval.sh --ckpt-dir policy/DP/ckpt/move_pillbottle_100 \
+#        --task-name move_pillbottle_pad --task-config demo_clean
+#
+# Optional arguments:
+#    --gpu-id <id>       GPU ID (default: 0)
+#    --seed <n>          Random seed (default: 0)
+#    --test-num <n>      Number of test rollouts (default: 50)
+#    --checkpoint-num <n> Checkpoint number (default: 10000)
+#    --head-camera-type <type> Head camera type (default: D435)
+#    --end-reset-to-init <true|false>
 #
 # Notes:
 # - This script runs from DP/ directory (it cd's to its own folder).
-# - The config file must exist at: _ev_cfg/<cfg_name>.yaml
-
-if [[ $# -lt 1 || -z "${1:-}" ]]; then
-  echo "Usage: bash _eval.sh <cfg_name>"
-  echo "Example: bash _eval.sh hanging_mug_pair_dryrun"
-  exit 2
-fi
-
-cfg_name="$1"
+# - For batch evaluation of all tasks, use: bash __flow.sh
 
 cd "$(dirname "$0")"
-python3 ./_ev_wrapper.py "${cfg_name}"
+python3 ./_ev_wrapper.py "$@"
