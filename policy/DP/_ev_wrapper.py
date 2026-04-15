@@ -21,7 +21,7 @@ import sys
 import traceback
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 
@@ -120,7 +120,7 @@ def _run_from_merged_config(
         "end_reset_to_init", model_defaults.get("end_reset_to_init", True)
     )
     checkpoint_num = task.get(
-        "checkpoint_num", model_defaults.get("checkpoint_num", 600)
+        "checkpoint_num", model_defaults.get("checkpoint_num", None)
     )
     head_camera_type = task.get(
         "eval_head_camera_type", model_defaults.get("eval_head_camera_type", "D435")
@@ -134,6 +134,7 @@ def _run_from_merged_config(
 
     if "ckpt_dir" in task and task["ckpt_dir"]:
         ckpt_dir = task["ckpt_dir"]
+        ckpt_setting = Path(ckpt_dir).name
     else:
         train_tasks = task.get("train_tasks", [])
         if not train_tasks:
@@ -148,6 +149,7 @@ def _run_from_merged_config(
         ckpt_dir = (
             f"policy/DP/checkpoints/{train_task_slug}-{train_config_slug}-{train_total}"
         )
+        ckpt_setting = Path(ckpt_dir).name
 
     repo_root = os.path.abspath(os.path.join(dp_dir, "..", ".."))
 
@@ -157,12 +159,12 @@ def _run_from_merged_config(
     env["PYTHONNOUSERSITE"] = "1"
 
     logger.info(
-        "Task ID: %s | GPU: %d | Seed: %d | Test Num: %d | Checkpoint Num: %d | Head Camera: %s | END_RESET_TO_INIT: %s",
+        "Task ID: %s | GPU: %d | Seed: %d | Test Num: %d | Checkpoint Num: %s | Head Camera: %s | END_RESET_TO_INIT: %s",
         task_id,
         gpu_id,
         seed,
         test_num,
-        checkpoint_num,
+        checkpoint_num if checkpoint_num is not None else "auto",
         head_camera_type,
         _to_cli_bool(end_reset_to_init),
     )
@@ -173,25 +175,31 @@ def _run_from_merged_config(
             sys.executable,
             "script/eval_policy.py",
             "--config",
-            "policy/DP/diffusion_policy/config/robot_dp_14.yaml",
+            "policy/DP/deploy_policy.yml",
             "--overrides",
             "--task_name",
             task_name,
             "--task_config",
             task_config,
+            "--ckpt_setting",
+            ckpt_setting,
             "--ckpt_dir",
             ckpt_dir,
             "--seed",
             str(seed),
             "--test_num",
             str(test_num),
-            "--checkpoint_num",
-            str(checkpoint_num),
-            "--eval_head_camera_type",
-            head_camera_type,
-            "--END_RESET_TO_INIT",
-            _to_cli_bool(end_reset_to_init),
         ]
+        checkpoint_arg = "None" if checkpoint_num is None else str(checkpoint_num)
+        cmd.extend(["--checkpoint_num", checkpoint_arg])
+        cmd.extend(
+            [
+                "--eval_head_camera_type",
+                head_camera_type,
+                "--END_RESET_TO_INIT",
+                _to_cli_bool(end_reset_to_init),
+            ]
+        )
         logger.info("Eval: task_name=%s task_config=%s", task_name, task_config)
         logger.info("Run: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env, cwd=repo_root)
@@ -234,7 +242,9 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
     seed = int(cfg["EVAL_SEED"])
     gpu_id = int(cfg["EVAL_GPU_ID"])
     test_num = int(cfg.get("TEST_NUM", 100))
-    checkpoint_num = int(cfg.get("CHECKPOINT_NUM", 600))
+    checkpoint_num = cfg.get("CHECKPOINT_NUM", None)
+    if checkpoint_num is not None:
+        checkpoint_num = int(checkpoint_num)
     head_camera_type = cfg.get("EVAL_HEAD_CAMERA_TYPE", "D435")
     end_reset_to_init = _to_cli_bool(cfg["END_RESET_TO_INIT"])
 
@@ -257,9 +267,9 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
     elif env_test_num:
         test_num = int(env_test_num)
     if args.checkpoint_num is not None:
-        checkpoint_num = int(args.checkpoint_num)
+        checkpoint_num = args.checkpoint_num
     elif env_checkpoint_num:
-        checkpoint_num = int(env_checkpoint_num)
+        checkpoint_num = env_checkpoint_num
     if args.head_camera_type is not None:
         head_camera_type = args.head_camera_type
     elif env_head_camera:
@@ -272,6 +282,7 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
     ckpt_dir = (
         f"policy/DP/checkpoints/{train_task_slug}-{train_config_slug}-{train_total}"
     )
+    ckpt_setting = Path(ckpt_dir).name
     repo_root = os.path.abspath(os.path.join(dp_dir, "..", ".."))
 
     env = os.environ.copy()
@@ -280,11 +291,11 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
     env["PYTHONNOUSERSITE"] = "1"
 
     logger.info(
-        "Legacy mode: seed=%d, gpu_id=%d, test_num=%d, checkpoint_num=%d, head_camera=%s, END_RESET_TO_INIT=%s",
+        "Legacy mode: seed=%d, gpu_id=%d, test_num=%d, checkpoint_num=%s, head_camera=%s, END_RESET_TO_INIT=%s",
         seed,
         gpu_id,
         test_num,
-        checkpoint_num,
+        checkpoint_num if checkpoint_num is not None else "auto",
         head_camera_type,
         end_reset_to_init,
     )
@@ -295,25 +306,31 @@ def _run_legacy_mode(cfg_name: str, dp_dir: str, logger: logging.Logger, args) -
             sys.executable,
             "script/eval_policy.py",
             "--config",
-            "policy/DP/diffusion_policy/config/robot_dp_14.yaml",
+            "policy/DP/deploy_policy.yml",
             "--overrides",
             "--task_name",
             task_name,
             "--task_config",
             task_config,
+            "--ckpt_setting",
+            ckpt_setting,
             "--ckpt_dir",
             ckpt_dir,
             "--seed",
             str(seed),
             "--test_num",
             str(test_num),
-            "--checkpoint_num",
-            str(checkpoint_num),
-            "--eval_head_camera_type",
-            head_camera_type,
-            "--END_RESET_TO_INIT",
-            end_reset_to_init,
         ]
+        checkpoint_arg = "None" if checkpoint_num is None else str(checkpoint_num)
+        cmd.extend(["--checkpoint_num", checkpoint_arg])
+        cmd.extend(
+            [
+                "--eval_head_camera_type",
+                head_camera_type,
+                "--END_RESET_TO_INIT",
+                end_reset_to_init,
+            ]
+        )
         logger.info("Eval: task_name=%s task_config=%s", task_name, task_config)
         logger.info("Run: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env, cwd=repo_root)
@@ -328,7 +345,7 @@ def _run_direct_mode(
     gpu_id: int,
     seed: int,
     test_num: int,
-    checkpoint_num: int,
+    checkpoint_num: Optional[Union[str, int]],
     head_camera_type: str,
     end_reset_to_init: bool,
     logger: logging.Logger,
@@ -345,41 +362,48 @@ def _run_direct_mode(
     env["PYTHONNOUSERSITE"] = "1"
 
     logger.info(
-        "Direct mode: ckpt_dir=%s, task_name=%s, task_config=%s, gpu=%d, seed=%d, test_num=%d, checkpoint_num=%d, head_camera=%s, END_RESET_TO_INIT=%s",
+        "Direct mode: ckpt_dir=%s, task_name=%s, task_config=%s, gpu=%d, seed=%d, test_num=%d, checkpoint_num=%s, head_camera=%s, END_RESET_TO_INIT=%s",
         ckpt_dir,
         task_name,
         task_config,
         gpu_id,
         seed,
         test_num,
-        checkpoint_num,
+        checkpoint_num if checkpoint_num is not None else "auto",
         head_camera_type,
         _to_cli_bool(end_reset_to_init),
     )
 
+    ckpt_setting = Path(ckpt_dir).name
     cmd = [
         sys.executable,
         "script/eval_policy.py",
         "--config",
-        "policy/DP/diffusion_policy/config/robot_dp_14.yaml",
+        "policy/DP/deploy_policy.yml",
         "--overrides",
         "--task_name",
         task_name,
         "--task_config",
         task_config,
+        "--ckpt_setting",
+        ckpt_setting,
         "--ckpt_dir",
         ckpt_dir,
         "--seed",
         str(seed),
         "--test_num",
         str(test_num),
-        "--checkpoint_num",
-        str(checkpoint_num),
-        "--eval_head_camera_type",
-        head_camera_type,
-        "--END_RESET_TO_INIT",
-        _to_cli_bool(end_reset_to_init),
     ]
+    checkpoint_arg = "None" if checkpoint_num is None else str(checkpoint_num)
+    cmd.extend(["--checkpoint_num", checkpoint_arg])
+    cmd.extend(
+        [
+            "--eval_head_camera_type",
+            head_camera_type,
+            "--END_RESET_TO_INIT",
+            _to_cli_bool(end_reset_to_init),
+        ]
+    )
     logger.info("Run: %s", " ".join(cmd))
     subprocess.run(cmd, check=True, env=env, cwd=repo_root)
 
@@ -468,9 +492,7 @@ def main(argv: list) -> int:
             gpu_id = args.gpu_id if args.gpu_id is not None else 0
             seed = args.seed if args.seed is not None else 0
             test_num = args.test_num if args.test_num is not None else 50
-            checkpoint_num = (
-                args.checkpoint_num if args.checkpoint_num is not None else 600
-            )
+            checkpoint_num = args.checkpoint_num
             head_camera_type = (
                 args.head_camera_type if args.head_camera_type is not None else "D435"
             )

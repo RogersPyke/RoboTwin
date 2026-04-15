@@ -1,10 +1,18 @@
 import torch.nn as nn
 import os
+import sys
 import torch
 import numpy as np
 import pickle
 from torch.nn import functional as F
 import torchvision.transforms as transforms
+
+_policy_util_root = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "policy_util")
+)
+if _policy_util_root not in sys.path:
+    sys.path.insert(0, _policy_util_root)
+from ckpt_util import resolve_act_checkpoint, get_checkpoint_info
 
 try:
     from detr.main import (
@@ -22,7 +30,6 @@ e = IPython.embed
 
 
 class ACTPolicy(nn.Module):
-
     def __init__(self, args_override, RoboTwin_Config=None):
         super().__init__()
         model, optimizer = build_ACT_model_and_optimizer(args_override, RoboTwin_Config)
@@ -33,13 +40,17 @@ class ACTPolicy(nn.Module):
 
     def __call__(self, qpos, image, actions=None, is_pad=None):
         env_state = None
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
         image = normalize(image)
         if actions is not None:  # training time
-            actions = actions[:, :self.model.num_queries]
-            is_pad = is_pad[:, :self.model.num_queries]
+            actions = actions[:, : self.model.num_queries]
+            is_pad = is_pad[:, : self.model.num_queries]
 
-            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, env_state, actions, is_pad)
+            a_hat, is_pad_hat, (mu, logvar) = self.model(
+                qpos, image, env_state, actions, is_pad
+            )
             total_kld, dim_wise_kld, mean_kld = kl_divergence(mu, logvar)
             loss_dict = dict()
             all_l1 = F.l1_loss(actions, a_hat, reduction="none")
@@ -49,7 +60,9 @@ class ACTPolicy(nn.Module):
             loss_dict["loss"] = loss_dict["l1"] + loss_dict["kl"] * self.kl_weight
             return loss_dict
         else:  # inference time
-            a_hat, _, (_, _) = self.model(qpos, image, env_state)  # no action, sample from prior
+            a_hat, _, (_, _) = self.model(
+                qpos, image, env_state
+            )  # no action, sample from prior
             return a_hat
 
     def configure_optimizers(self):
@@ -57,7 +70,6 @@ class ACTPolicy(nn.Module):
 
 
 class CNNMLPPolicy(nn.Module):
-
     def __init__(self, args_override):
         super().__init__()
         model, optimizer = build_CNNMLP_model_and_optimizer(args_override)
@@ -66,7 +78,9 @@ class CNNMLPPolicy(nn.Module):
 
     def __call__(self, qpos, image, actions=None, is_pad=None):
         env_state = None  # TODO
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        normalize = transforms.Normalize(
+            mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+        )
         image = normalize(image)
         if actions is not None:  # training time
             actions = actions[:, 0]
@@ -101,7 +115,6 @@ def kl_divergence(mu, logvar):
 
 
 class ACT:
-
     def __init__(self, args_override=None, RoboTwin_Config=None):
         if args_override is None:
             args_override = {
@@ -116,7 +129,9 @@ class ACT:
         # Temporal aggregation settings
         self.temporal_agg = args_override.get("temporal_agg", False)
         self.num_queries = args_override["chunk_size"]
-        self.state_dim = RoboTwin_Config.action_dim  # Standard joint dimension for bimanual robot
+        self.state_dim = (
+            RoboTwin_Config.action_dim
+        )  # Standard joint dimension for bimanual robot
         self.max_timesteps = 3000  # Large enough for deployment
 
         # Set query frequency based on temporal_agg - matching imitate_episodes.py logic
@@ -124,19 +139,19 @@ class ACT:
         if self.temporal_agg:
             self.query_frequency = 1
             # Initialize with zeros matching imitate_episodes.py format
-            self.all_time_actions = torch.zeros([
-                self.max_timesteps,
-                self.max_timesteps + self.num_queries,
-                self.state_dim,
-            ]).to(self.device)
+            self.all_time_actions = torch.zeros(
+                [
+                    self.max_timesteps,
+                    self.max_timesteps + self.num_queries,
+                    self.state_dim,
+                ]
+            ).to(self.device)
             print(f"Temporal aggregation enabled with {self.num_queries} queries")
 
-        self.t = 0  # Current timestep
+        self.t = 0
 
-        # Load statistics for normalization
         ckpt_dir = args_override.get("ckpt_dir", "")
         if ckpt_dir:
-            # Load dataset stats for normalization
             stats_path = os.path.join(ckpt_dir, "dataset_stats.pkl")
             if os.path.exists(stats_path):
                 with open(stats_path, "rb") as f:
@@ -146,15 +161,17 @@ class ACT:
                 print(f"Warning: Could not find stats file at {stats_path}")
                 self.stats = None
 
-            # Load policy weights
-            ckpt_path = os.path.join(ckpt_dir, "policy_last.ckpt")
-            print("current pwd:", os.getcwd())
-            if os.path.exists(ckpt_path):
-                loading_status = self.policy.load_state_dict(torch.load(ckpt_path))
-                print(f"Loaded policy weights from {ckpt_path}")
+            checkpoint_num = args_override.get("checkpoint_num")
+            seed = args_override.get("seed", 0)
+            ckpt_file = resolve_act_checkpoint(ckpt_dir, checkpoint_num, seed)
+            print(f"[ACT] Resolved checkpoint: {ckpt_file}")
+
+            if os.path.exists(ckpt_file):
+                loading_status = self.policy.load_state_dict(torch.load(ckpt_file))
+                print(f"Loaded policy weights from {ckpt_file}")
                 print(f"Loading status: {loading_status}")
             else:
-                print(f"Warning: Could not find policy checkpoint at {ckpt_path}")
+                raise FileNotFoundError(f"Checkpoint not found: {ckpt_file}")
         else:
             self.stats = None
 
@@ -195,7 +212,9 @@ class ACT:
 
             if self.temporal_agg:
                 # Match temporal aggregation exactly from imitate_episodes.py
-                self.all_time_actions[[self.t], self.t:self.t + self.num_queries] = (self.all_actions)
+                self.all_time_actions[[self.t], self.t : self.t + self.num_queries] = (
+                    self.all_actions
+                )
                 actions_for_curr_step = self.all_time_actions[:, self.t]
                 actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
                 actions_for_curr_step = actions_for_curr_step[actions_populated]
@@ -204,9 +223,13 @@ class ACT:
                 k = 0.01
                 exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                 exp_weights = exp_weights / exp_weights.sum()
-                exp_weights = (torch.from_numpy(exp_weights).to(self.device).unsqueeze(dim=1))
+                exp_weights = (
+                    torch.from_numpy(exp_weights).to(self.device).unsqueeze(dim=1)
+                )
 
-                raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
+                raw_action = (actions_for_curr_step * exp_weights).sum(
+                    dim=0, keepdim=True
+                )
             else:
                 # Direct action selection, same as imitate_episodes.py
                 raw_action = self.all_actions[:, self.t % self.query_frequency]

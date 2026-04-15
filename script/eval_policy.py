@@ -2,6 +2,7 @@ import sys
 import os
 import shutil
 import subprocess
+import time
 
 sys.path.append("./")
 sys.path.append(f"./policy")
@@ -95,6 +96,14 @@ def main(usr_args):
     args["task_name"] = task_name
     args["task_config"] = task_config
     args["ckpt_setting"] = ckpt_setting
+
+    # Pass checkpoint_num to get_model for checkpoint resolution
+    if "checkpoint_num" in usr_args:
+        args["checkpoint_num"] = usr_args["checkpoint_num"]
+
+    # Pass ckpt_dir if provided (for direct checkpoint path)
+    if "ckpt_dir" in usr_args:
+        args["ckpt_dir"] = usr_args["ckpt_dir"]
 
     embodiment_type = args.get("embodiment")
     embodiment_config_path = os.path.join(CONFIGS_PATH, "_embodiment_config.yml")
@@ -280,6 +289,7 @@ def eval_policy(
     now_id = 0
     succ_seed = 0
     suc_test_seed_list = []
+    last_print_time = 0.0
 
     policy_name = args["policy_name"]
     eval_func = eval_function_decorator(policy_name, "eval")
@@ -422,20 +432,23 @@ def eval_policy(
 
         TASK_ENV.test_num += 1
 
-        if end_reset_to_init:
-            print(
-                f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
-                f"Original Success (task checkpoint): \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
-                f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m | "
-                f"Full Success (task + reset): \033[96m{full_success_count}/{TASK_ENV.test_num}\033[0m => "
-                f"\033[95m{round(full_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
-            )
-        else:
-            print(
-                f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
-                f"Success rate: \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
-                f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
-            )
+        now = time.time()
+        if now - last_print_time >= 10.0:
+            last_print_time = now
+            if end_reset_to_init:
+                print(
+                    f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
+                    f"Original Success (task checkpoint): \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
+                    f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m | "
+                    f"Full Success (task + reset): \033[96m{full_success_count}/{TASK_ENV.test_num}\033[0m => "
+                    f"\033[95m{round(full_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
+                )
+            else:
+                print(
+                    f"\033[93m{task_name}\033[0m | \033[94m{args['policy_name']}\033[0m | \033[92m{args['task_config']}\033[0m | \033[91m{args['ckpt_setting']}\033[0m\n"
+                    f"Success rate: \033[96m{task_success_count}/{TASK_ENV.test_num}\033[0m => "
+                    f"\033[95m{round(task_success_count / TASK_ENV.test_num * 100, 1)}%\033[0m, current seed: \033[90m{now_seed}\033[0m\n"
+                )
         # TASK_ENV._take_picture()
         now_seed += 1
 

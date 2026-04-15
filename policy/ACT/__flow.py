@@ -96,18 +96,14 @@ def _resolve_checkpoint_dir(task: Dict[str, Any]) -> str:
     )
 
 
-def _prepare_act_best_symlink(ckpt_dir: str) -> None:
-    ckpt_path = Path(ckpt_dir)
-    if not ckpt_path.is_dir():
-        return
-    best = ckpt_path / "policy_best.ckpt"
-    last = ckpt_path / "policy_last.ckpt"
-    if not best.is_file():
-        return
-    if last.exists() or last.is_symlink():
-        last.unlink()
-    last.symlink_to("policy_best.ckpt")
-    print(f"[flow][best_symlink][ACT] {last} -> policy_best.ckpt", flush=True)
+def _log_checkpoint_info(ckpt_dir: str) -> None:
+    from ckpt_util import get_checkpoint_info
+
+    info = get_checkpoint_info(ckpt_dir, "ACT")
+    print(
+        f"[flow][ckpt_info][ACT] dir={ckpt_dir} has_best={info['has_best']} has_last={info['has_last']} steps={info['step_ckpts'][:5]}",
+        flush=True,
+    )
 
 
 # Optional flow-level overrides. Keep None to use YAML defaults.
@@ -227,7 +223,7 @@ def start_slot_job(
 
     if task_cfg:
         ckpt_dir = _resolve_checkpoint_dir(task_cfg)
-        _prepare_act_best_symlink(ckpt_dir)
+        _log_checkpoint_info(ckpt_dir)
 
     logs = ensure_logs_dir(BASE_DIR)
     ts = utc8_now_str()

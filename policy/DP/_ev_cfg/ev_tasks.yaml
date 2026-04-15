@@ -3,15 +3,17 @@
 # ============================================================
 # Checkpoints located at: policy/DP/ckpt/
 # GPU: 1 (DP uses card 1)
+# checkpoint_num: Optional. If not set, use best > max_step priority.
+#                 Can be "best" or specific step number like 10000.
 # ============================================================
 
 gpu_parallel: [1]
 
 model_defaults:
-  test_num: 50
+  test_num: 100
   end_reset_to_init: false
   seed: 0
-  checkpoint_num: 10000
+  # checkpoint_num: null  # Uncomment and set to force specific checkpoint
   eval_head_camera_type: D435
 
 ev_tasks:
