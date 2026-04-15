@@ -298,8 +298,15 @@ def _run_from_merged_config(
         cmd = [sys.executable, "./train_vla.py"] + argv_tokens
 
     logger.info("Launching training: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, env=env, cwd=tinyvla_dir)
-    _package_checkpoints_for_eval(output_dir)
+    train_succeeded = False
+    try:
+        subprocess.run(cmd, check=True, env=env, cwd=tinyvla_dir)
+        train_succeeded = True
+        _package_checkpoints_for_eval(output_dir)
+    finally:
+        if not train_succeeded and os.path.isfile(manifest_path):
+            os.remove(manifest_path)
+            logger.info("Removed manifest after failed training: %s", manifest_path)
     return 0
 
 

@@ -143,11 +143,6 @@ def _package_checkpoints_for_eval(ckpt_dir: str, logger: logging.Logger) -> None
             src = os.path.join(ckpt_dir, keep_name)
             if os.path.isfile(src):
                 shutil.copy2(src, os.path.join(dst_dir, keep_name))
-        for file_name in os.listdir(ckpt_dir):
-            if file_name.endswith(".yaml"):
-                src_yaml = os.path.join(ckpt_dir, file_name)
-                if os.path.isfile(src_yaml):
-                    shutil.copy2(src_yaml, os.path.join(dst_dir, file_name))
     logger.info("Packaged %d checkpoints to %s", len(entries), bundle_root)
 
 

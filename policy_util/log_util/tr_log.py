@@ -18,6 +18,15 @@ def _status_from_decision(decision: EarlyStopRecord) -> str:
     return "no_improve"
 
 
+def _format_rel_improve(rel_improve: float | None) -> str:
+    if rel_improve is None:
+        return "N/A"
+    pct = float(rel_improve) * 100
+    if pct >= 0:
+        return f"+{pct:.2f}%"
+    return f"{pct:.2f}%"
+
+
 def format_relative_early_stop_val_line(
     policy_tag: str,
     step: int,
@@ -27,24 +36,18 @@ def format_relative_early_stop_val_line(
     """
     @input: [str, policy_tag ACT|DP|TinyVLA], [int, optimizer/global step], [float, val_loss],
              [EarlyStopRecord, post-on_eval snapshot]
-    @output: [str, one ASCII line with fixed key=value tokens]
+    @output: [str, multi-line ASCII log with [EARLY_STOP] prefix]
     @scenario: [Unified console line after RelativeEarlyStopTracker.on_eval]
     """
     status = _status_from_decision(decision)
-    if decision.rel_improve is None:
-        rel_s = "na"
-    else:
-        rel_s = f"{float(decision.rel_improve):.6g}"
+    rel_str = _format_rel_improve(decision.rel_improve)
     tag = str(policy_tag).strip() or "POLICY"
     return (
-        f"[{tag}][VAL] "
-        f"step={int(step)} "
-        f"val_loss={float(val_loss):.5f} "
-        f"status={status} "
-        f"rel_improve={rel_s} "
-        f"best_val_loss={float(decision.best_val_loss):.5f} "
-        f"best_step={int(decision.best_step)} "
-        f"no_improve={int(decision.no_improve_count)}"
+        f"\n[EARLY_STOP] [{tag}]\n"
+        f"  Step: {int(step)} | Val Loss: {float(val_loss):.5f}\n"
+        f"  Status: {status} | Rel Improve: {rel_str}\n"
+        f"  Best Val: {float(decision.best_val_loss):.5f} (Step {int(decision.best_step)})\n"
+        f"  No Improve: {int(decision.no_improve_count)}"
     )
 
 
@@ -56,7 +59,7 @@ def print_relative_early_stop_val_line(
 ) -> None:
     """
     @input: Same as format_relative_early_stop_val_line
-    @output: [None, prints one line to stdout]
+    @output: [None, prints multi-line log to stdout]
     @scenario: [Convenience wrapper with flush]
     """
     print(
@@ -68,15 +71,14 @@ def print_relative_early_stop_val_line(
 def format_epoch_val_line(policy_tag: str, step: int, val_loss: float) -> str:
     """
     @input: [str, policy_tag], [int, step], [float, val_loss]
-    @output: [str, one line for per-epoch validation when early-stop cadence is off]
+    @output: [str, multi-line log for per-epoch validation when early-stop cadence is off]
     @scenario: [DP non-early-stop path; optional alignment elsewhere]
     """
     tag = str(policy_tag).strip() or "POLICY"
     return (
-        f"[{tag}][VAL] "
-        f"step={int(step)} "
-        f"val_loss={float(val_loss):.5f} "
-        f"status=epoch_val"
+        f"\n[EARLY_STOP] [{tag}]\n"
+        f"  Step: {int(step)} | Val Loss: {float(val_loss):.5f}\n"
+        f"  Status: epoch_val"
     )
 
 

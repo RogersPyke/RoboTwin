@@ -331,9 +331,8 @@ def _run_from_merged_config(
 
     ckpt_dir = os.path.join(dp_dir, "checkpoints", task_id)
     os.makedirs(ckpt_dir, exist_ok=True)
-    with open(
-        os.path.join(ckpt_dir, "training_run_manifest.txt"), "w", encoding="ascii"
-    ) as mf:
+    manifest_path = os.path.join(ckpt_dir, "training_run_manifest.txt")
+    with open(manifest_path, "w", encoding="ascii") as mf:
         mf.write(f"task_id={task_id}\n")
         mf.write(f"dp_policy_dir={dp_dir}\n")
         mf.write(f"combined_task_slug={task_slug}\n")
@@ -367,15 +366,24 @@ def _run_from_merged_config(
         f"setting={config_slug}",
         f"expert_data_num={total_episodes}",
         f"head_camera_type={head_camera_type}",
+        f"hydra.run.dir={ckpt_dir}",
+        f"hydra.sweep.dir={ckpt_dir}",
+        "hydra.sweep.subdir=multirun_${hydra.job.num}",
+        f"multi_run.run_dir={ckpt_dir}",
     ]
     logger.info("Launch training: %s", " ".join(cmd))
     save_name = os.path.splitext(os.path.basename(combined_rel_path))[0]
+    train_succeeded = False
     try:
         subprocess.run(cmd, check=True, cwd=dp_dir, env=env)
+        train_succeeded = True
         workspace_ckpt_dir = _find_workspace_checkpoint_dir(dp_dir, save_name, seed)
         if workspace_ckpt_dir:
             _package_checkpoints_for_eval(workspace_ckpt_dir, logger)
     finally:
+        if not train_succeeded and os.path.isfile(manifest_path):
+            os.remove(manifest_path)
+            logger.info("Removed manifest after failed training: %s", manifest_path)
         if os.path.isdir(combined_abs_path):
             shutil.rmtree(combined_abs_path)
             logger.info("Deleted combined zarr: %s", combined_rel_path)
