@@ -1,0 +1,33 @@
+# ============================================================
+# Shared Evaluation Configuration
+# ============================================================
+# This file defines global settings inherited by all models (ACT/DP/TinyVLA).
+# Each model can override these settings in their own ev_tasks.yaml.
+#
+# Precedence: Model config > Shared config
+# ============================================================
+
+# ------------------------------------------------------------
+# Global Random Seed
+# ------------------------------------------------------------
+# Used for reproducibility across all evaluation runs.
+seed: 0
+
+# ------------------------------------------------------------
+# Evaluation Defaults
+# ------------------------------------------------------------
+eval_defaults:
+  # Number of test rollouts per task.
+  test_num: 50
+  
+  # Whether to reset to init state at end of episode for SR calculation.
+  # true: calculate two SR (forward and backward)
+  # false: calculate single SR
+  end_reset_to_init: true
+
+# ------------------------------------------------------------
+# Paths Configuration
+# ------------------------------------------------------------
+paths:
+  # Root directory for checkpoints.
+  checkpoint_root: "policy"

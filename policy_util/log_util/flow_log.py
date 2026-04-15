@@ -1,7 +1,7 @@
 """
 Shared helpers for policy __flow.py schedulers: per-job log files, child env, failure excerpts.
 
-Usage: imported from ACT/DP/TinyVLA __flow.py after adding policy/ to sys.path (package flow_log_util).
+Usage: imported from ACT/DP/TinyVLA __flow.py after adding RoboTwin/policy_util/ to sys.path.
 """
 
 from __future__ import annotations
@@ -15,9 +15,7 @@ from typing import Dict, List, TextIO
 
 TRACE_MARK = "Traceback (most recent call last):"
 
-# Tail window for failure excerpt (bytes read from end of file when file is large).
 DEFAULT_MAX_TAIL_BYTES = 262144
-# Max lines to print after choosing traceback block or plain tail.
 DEFAULT_MAX_TAIL_LINES = 128
 
 

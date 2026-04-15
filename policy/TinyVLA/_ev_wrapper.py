@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TinyVLA evaluation wrapper.
+TinyVLA Eval wrapper.
 
-Primary mode:
-- ACT-aligned YAML with TRAIN_TASKS + EVAL_TASKS
-- wrapper-derived joint checkpoint directory under tinyvla_ckpt/
-- one config can evaluate the same joint checkpoint on multiple tasks
+Usage (new multi-YAML mode):
+    python3 _ev_wrapper.py --task-id <id> --yaml <shared.yaml> --yaml <model.yaml> [--gpu-id N] [--seed N]
 
-Compatibility mode:
-- legacy single-task YAML with TASK_NAME/TASK_CONFIG/OUTPUT_DIR
+Usage (legacy single-YAML mode):
+    python3 _ev_wrapper.py <cfg_name>
+    python3 _ev_wrapper.py --config <cfg_name>   # (legacy)
+
+The multi-YAML mode merges configs with later overriding earlier.
 """
 
 import argparse
@@ -18,8 +19,9 @@ import os
 import subprocess
 import sys
 import traceback
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -27,40 +29,14 @@ import yaml
 LOGGER: Optional[logging.Logger] = None
 
 
-def log_exceptions(func):
-    """
-    @input: [callable, any signature]
-    @output: [Any, returns func output]
-    @scenario: [Log exceptions with stack trace before re-raising]
-    """
-
-    def _wrapped(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as exc:
-            if LOGGER is not None:
-                LOGGER.error("Wrapper failed: %s", str(exc))
-                LOGGER.error("Stack trace:\n%s", traceback.format_exc())
-            raise
-
-    return _wrapped
-
-
 def _setup_logger(tinyvla_dir: str) -> logging.Logger:
-    """
-    @input: [str, tinyvla_dir]
-    @output: [logging.Logger, configured logger]
-    @scenario: [Consistent file+console logging for wrapper runs]
-    """
     global LOGGER
     logs_dir = os.path.join(tinyvla_dir, "logs")
     os.makedirs(logs_dir, exist_ok=True)
-
     script_name = os.path.splitext(os.path.basename(__file__))[0]
     tz_8 = timezone(timedelta(hours=8))
     ts = datetime.now(tz_8).strftime("%Y%m%d%H%M%S")
     log_path = os.path.join(logs_dir, f"{script_name}_{ts}.log")
-
     logger = logging.getLogger(script_name)
     logger.setLevel(logging.INFO)
     if not logger.handlers:
@@ -71,379 +47,359 @@ def _setup_logger(tinyvla_dir: str) -> logging.Logger:
         sh.setFormatter(formatter)
         logger.addHandler(fh)
         logger.addHandler(sh)
-
     LOGGER = logger
     return logger
 
 
 def _load_yaml(path: str) -> Dict[str, Any]:
-    """
-    @input: [str, path]
-    @output: [dict, parsed YAML]
-    @scenario: [Load config yaml]
-    """
     with open(path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    if not isinstance(cfg, dict) or not cfg:
-        raise ValueError(f"Empty or invalid YAML config: {path}")
+    if not isinstance(cfg, dict):
+        raise ValueError(f"Invalid YAML config: {path}")
     return cfg
 
 
-def _ensure_required_keys(cfg: Dict[str, Any], keys: List[str]) -> None:
-    """
-    @input: [dict, cfg], [list[str], keys]
-    @output: [None]
-    @scenario: [Fail fast when required config keys are missing]
-    """
-    missing = [k for k in keys if k not in cfg]
-    if missing:
-        raise KeyError(f"Missing required keys in config: {missing}")
+def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
-def _normalize_cfg_name(cfg_name: str) -> str:
-    """
-    @input: [str, cfg_name]
-    @output: [str, normalized base name]
-    @scenario: [Support cfg_name with or without .yaml extension]
-    """
-    return os.path.splitext(os.path.basename(cfg_name))[0]
+def _merge_yamls(yaml_paths: List[str]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {}
+    for path in yaml_paths:
+        cfg = _load_yaml(path)
+        merged = _deep_merge(merged, cfg)
+    return merged
 
 
-def _parse_task_rows(cfg: Dict[str, Any], key: str) -> List[Tuple[str, str, int]]:
-    """
-    @input: [dict, cfg], [str, key]
-    @output: [list[tuple[str, str, int]], parsed rows]
-    @scenario: [Parse config rows like [task_name, task_config, expert_num]]
-    """
-    if key not in cfg:
-        raise ValueError(f"Config must define {key} as a non-empty list of [task_name, task_config, expert_num].")
-    rows = cfg[key]
-    if not isinstance(rows, list) or not rows:
-        raise ValueError(f"{key} must be a non-empty list.")
+def _get_task_from_config(
+    cfg: Dict[str, Any], task_id: str
+) -> Optional[Dict[str, Any]]:
+    for task in cfg.get("ev_tasks", []):
+        if task.get("task_id") == task_id:
+            return task
+    return None
 
-    parsed_rows: List[Tuple[str, str, int]] = []
-    for idx, row in enumerate(rows):
+
+def _parse_task_rows(rows: List) -> List[tuple]:
+    if not rows:
+        raise ValueError("Task rows must be a non-empty list")
+    out = []
+    for i, row in enumerate(rows):
         if not isinstance(row, (list, tuple)) or len(row) != 3:
-            raise ValueError(f"{key}[{idx}] must be [task_name, task_config, expert_num], got {row!r}")
-        task_name = str(row[0]).strip()
-        task_config = str(row[1]).strip()
-        expert_num = int(row[2])
-        if not task_name or not task_config:
-            raise ValueError(f"{key}[{idx}] contains an empty task_name/task_config.")
-        if expert_num <= 0:
-            raise ValueError(f"{key}[{idx}] expert_num must be > 0, got {expert_num}.")
-        parsed_rows.append((task_name, task_config, expert_num))
-    return parsed_rows
+            raise ValueError(
+                f"Row {i} must be [task_name, task_config, expert_num], got {row!r}"
+            )
+        out.append((str(row[0]).strip(), str(row[1]).strip(), int(row[2])))
+    return out
 
 
-def _build_joint_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    @input: [str, tinyvla_dir], [dict, ev_cfg]
-    @output: [dict, derived joint checkpoint contract]
-    @scenario: [Resolve output_dir/model_path/state_path from TRAIN_TASKS]
-    """
-    train_rows = _parse_task_rows(ev_cfg, "TRAIN_TASKS")
-    task_slug = "__".join([row[0] for row in train_rows])
-    config_slug = "__".join([row[1] for row in train_rows])
-    total_episodes = int(sum([row[2] for row in train_rows]))
-    output_dir = os.path.join(
-        tinyvla_dir,
-        "tinyvla_ckpt",
-        f"tinyvla-{task_slug}",
-        f"{config_slug}-{total_episodes}",
-    )
-    use_policy_best = bool(ev_cfg.get("USE_POLICY_BEST", False))
-    model_path = os.path.join(output_dir, "policy_best") if use_policy_best else output_dir
-    state_path = os.path.join(output_dir, "dataset_stats.pkl")
-    return {
-        "task_slug": task_slug,
-        "config_slug": config_slug,
-        "total_episodes": total_episodes,
-        "output_dir": output_dir,
-        "model_path": model_path,
-        "state_path": state_path,
-        "ckpt_setting": config_slug,
-        "eval_runs": _parse_task_rows(ev_cfg, "EVAL_TASKS"),
-    }
-
-
-def _resolve_eval_test_num(ev_cfg: Dict[str, Any]) -> Any:
-    """
-    @input: [dict, eval yaml]
-    @output: [Any, test_num or None]
-    @scenario: [Prefer EVAL_TEST_NUM; fall back to ACT-style TEST_NUM for copied configs]
-    """
-    if ev_cfg.get("EVAL_TEST_NUM", None) is not None:
-        return ev_cfg.get("EVAL_TEST_NUM")
-    return ev_cfg.get("TEST_NUM", None)
-
-
-def _build_eval_overrides(
-    ev_cfg: Dict[str, Any],
-    task_name: str,
-    task_config: str,
-    expert_num: int,
-    ckpt_setting: str,
-    model_path: str,
-    state_path: str,
-) -> List[str]:
-    """
-    @input: [dict, ev_cfg], [str, task_name], [str, task_config], [int, expert_num]
-    @output: [list[str], overrides tokens after --overrides]
-    @scenario: [Translate wrapper config into eval_policy CLI overrides]
-    """
-    overrides: List[str] = []
-
-    def add_pair(key: str, value: Any) -> None:
-        if value is None:
-            return
-        overrides.extend([f"--{key}", str(value)])
-
-    add_pair("task_name", task_name)
-    add_pair("task_config", task_config)
-    add_pair("ckpt_setting", ckpt_setting)
-    add_pair("expert_data_num", expert_num)
-    add_pair("seed", ev_cfg.get("EVAL_SEED"))
-    add_pair("model_base", ev_cfg.get("MODEL_BASE"))
-    add_pair("model_path", model_path)
-    add_pair("state_path", state_path)
-    add_pair("enable_lore", ev_cfg.get("ENABLE_LORE", False))
-    add_pair("instruction_type", ev_cfg.get("INSTRUCTION_TYPE", None))
-    # Allow dry-run evaluation to limit rollout count (used by script/eval_policy.py).
-    add_pair("test_num", _resolve_eval_test_num(ev_cfg))
-    add_pair("END_RESET_TO_INIT", _resolve_eval_end_reset_to_init(ev_cfg))
-    return overrides
-
-
-def _to_cli_bool(v: Any) -> str:
-    """
-    @input: [Any, bool-like value]
-    @output: [str, "true" or "false"]
-    @scenario: [Normalize bool-like config/env values for CLI overrides]
-    """
+def _to_cli_bool(v) -> str:
     if isinstance(v, str):
-        return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
+        return (
+            "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
+        )
     return "true" if bool(v) else "false"
 
 
-def _resolve_eval_end_reset_to_init(ev_cfg: Dict[str, Any]) -> str:
-    """
-    @input: [dict, eval config]
-    @output: [str, "true" or "false"]
-    @scenario: [Resolve eval-only reset requirement from eval config]
-    """
-    return _to_cli_bool(ev_cfg["END_RESET_TO_INIT"])
-
-
-def _resolve_eval_contract(tinyvla_dir: str, ev_cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    @input: [str, tinyvla_dir], [dict, ev_cfg]
-    @output: [dict, normalized evaluation contract]
-    @scenario: [Support both ACT-style joint-eval config and legacy single-task config]
-    """
-    if "TRAIN_TASKS" in ev_cfg or "EVAL_TASKS" in ev_cfg:
-        _ensure_required_keys(
-            ev_cfg,
-            ["EVAL_SEED", "EVAL_GPU_ID", "MODEL_BASE", "TRAIN_TASKS", "EVAL_TASKS", "END_RESET_TO_INIT"],
-        )
-        return _build_joint_eval_contract(tinyvla_dir, ev_cfg)
-
-    _ensure_required_keys(
-        ev_cfg,
-        ["EVAL_SEED", "EVAL_GPU_ID", "TASK_NAME", "TASK_CONFIG", "MODEL_BASE", "OUTPUT_DIR", "END_RESET_TO_INIT"],
-    )
-    output_dir = str(ev_cfg["OUTPUT_DIR"])
-    use_policy_best = bool(ev_cfg.get("USE_POLICY_BEST", False))
-    model_path = os.path.join(output_dir, "policy_best") if use_policy_best else output_dir
-    state_path = os.path.join(output_dir, "dataset_stats.pkl")
-    return {
-        "task_slug": str(ev_cfg["TASK_NAME"]),
-        "config_slug": str(ev_cfg.get("CKPT_SETTING", "legacy")),
-        "total_episodes": int(ev_cfg.get("EXPERT_DATA_NUM", 0)),
-        "output_dir": output_dir,
-        "model_path": model_path,
-        "state_path": state_path,
-        "ckpt_setting": str(ev_cfg.get("CKPT_SETTING", "legacy")),
-        "eval_runs": [
-            (
-                str(ev_cfg["TASK_NAME"]).strip(),
-                str(ev_cfg["TASK_CONFIG"]).strip(),
-                int(ev_cfg.get("EXPERT_DATA_NUM", 0)),
-            )
-        ],
-    }
-
-
-def _merge_tvla_flow_eval_runtime(
-    ev_cfg: Dict[str, Any],
-    cli_seed: Optional[int] = None,
-    cli_gpu_id: Optional[str] = None,
-    cli_test_num: Optional[int] = None,
-    cli_end_reset_to_init: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    @input: [dict, raw eval yaml], [optional CLI overrides]
-    @output: [dict, copy with resolved EVAL_SEED / EVAL_GPU_ID / EVAL_TEST_NUM / END_RESET_TO_INIT]
-    @scenario: [CLI > TVLA_FLOW_* > YAML]
-    """
-    runtime = dict(ev_cfg)
-    eval_seed = int(runtime["EVAL_SEED"])
-    eval_gpu_id = str(runtime["EVAL_GPU_ID"]).strip()
-    seed_source = "YAML:EVAL_SEED"
-    gpu_source = "YAML:EVAL_GPU_ID"
-
-    if cli_seed is not None:
-        eval_seed = int(cli_seed)
-        seed_source = "CLI:--seed"
-    elif os.environ.get("TVLA_FLOW_SEED", "").strip():
-        eval_seed = int(os.environ["TVLA_FLOW_SEED"].strip())
-        seed_source = "FLOW_ENV:TVLA_FLOW_SEED"
-
-    if cli_gpu_id is not None:
-        eval_gpu_id = str(cli_gpu_id).strip()
-        gpu_source = "CLI:--gpu-id"
-    elif os.environ.get("TVLA_FLOW_GPU", "").strip():
-        eval_gpu_id = os.environ["TVLA_FLOW_GPU"].strip()
-        gpu_source = "FLOW_ENV:TVLA_FLOW_GPU"
-
-    runtime["EVAL_SEED"] = eval_seed
-    runtime["EVAL_GPU_ID"] = eval_gpu_id
-
-    test_num = _resolve_eval_test_num(runtime)
-    test_source = "YAML:EVAL_TEST_NUM/TEST_NUM"
-    if cli_test_num is not None:
-        test_num = int(cli_test_num)
-        test_source = "CLI:--test-num"
-    elif os.environ.get("TVLA_FLOW_TEST_NUM", "").strip():
-        test_num = int(os.environ["TVLA_FLOW_TEST_NUM"].strip())
-        test_source = "FLOW_ENV:TVLA_FLOW_TEST_NUM"
-    if test_num is not None:
-        runtime["EVAL_TEST_NUM"] = test_num
-
-    er_source = "YAML:END_RESET_TO_INIT"
-    if cli_end_reset_to_init is not None:
-        runtime["END_RESET_TO_INIT"] = cli_end_reset_to_init
-        er_source = "CLI:--end-reset-to-init"
-    elif os.environ.get("TVLA_FLOW_END_RESET_TO_INIT", "").strip():
-        runtime["END_RESET_TO_INIT"] = os.environ["TVLA_FLOW_END_RESET_TO_INIT"].strip()
-        er_source = "FLOW_ENV:TVLA_FLOW_END_RESET_TO_INIT"
-
-    if LOGGER is not None:
-        end_disp = _resolve_eval_end_reset_to_init(runtime)
-        LOGGER.info(
-            "Resolved eval runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s), "
-            "END_RESET_TO_INIT=%s (%s)",
-            eval_seed,
-            seed_source,
-            eval_gpu_id,
-            gpu_source,
-            test_num,
-            test_source,
-            end_disp,
-            er_source,
-        )
-    return runtime
-
-
-@log_exceptions
-def _run_eval(
+def _run_from_merged_config(
+    cfg: Dict[str, Any],
+    task_id: str,
+    gpu_id: int,
+    seed: int,
+    logger: logging.Logger,
     tinyvla_dir: str,
-    cfg_name: str,
-    cli_seed: Optional[int] = None,
-    cli_gpu_id: Optional[str] = None,
-    cli_test_num: Optional[int] = None,
-    cli_end_reset_to_init: Optional[str] = None,
 ) -> int:
-    """
-    @input: [str, tinyvla_dir], [str, cfg_name], [optional CLI overrides]
-    @output: [int, 0 on success else non-zero]
-    @scenario: [Load _ev_cfg yaml, build overrides, run eval_policy.py]
-    """
-    cfg_base = _normalize_cfg_name(cfg_name)
-    cfg_path = os.path.join(tinyvla_dir, "_ev_cfg", f"{cfg_base}.yaml")
-    if not os.path.isfile(cfg_path):
-        raise FileNotFoundError(f"No config found at: _ev_cfg/{cfg_base}.yaml")
+    task = _get_task_from_config(cfg, task_id)
+    if task is None:
+        raise ValueError(f"Task not found: {task_id}")
 
-    ev_cfg = _load_yaml(cfg_path)
-    runtime_cfg = _merge_tvla_flow_eval_runtime(
-        ev_cfg,
-        cli_seed=cli_seed,
-        cli_gpu_id=cli_gpu_id,
-        cli_test_num=cli_test_num,
-        cli_end_reset_to_init=cli_end_reset_to_init,
+    model_defaults = cfg.get("model_defaults", {})
+    test_num = task.get("test_num", model_defaults.get("test_num", 50))
+    end_reset_to_init = task.get(
+        "end_reset_to_init", model_defaults.get("end_reset_to_init", True)
     )
-    contract = _resolve_eval_contract(tinyvla_dir, runtime_cfg)
 
-    model_path = contract["model_path"]
-    state_path = contract["state_path"]
-    if not os.path.isdir(model_path):
-        raise FileNotFoundError(f"Model path does not exist: {model_path}")
-    if not os.path.isfile(state_path):
-        raise FileNotFoundError(f"State path does not exist: {state_path}")
+    train_tasks = task.get("train_tasks", [])
+    eval_tasks = task.get("eval_tasks", [])
 
+    if not train_tasks:
+        raise ValueError(f"Task {task_id} must have train_tasks")
+    if not eval_tasks:
+        raise ValueError(f"Task {task_id} must have eval_tasks")
+
+    train_rows = _parse_task_rows(train_tasks)
+    eval_rows = _parse_task_rows(eval_tasks)
+
+    names = [r[0] for r in train_rows]
+    cfgs = [r[1] for r in train_rows]
+    nums = [r[2] for r in train_rows]
+
+    task_slug = "__".join(names)
+    config_slug = "__".join(cfgs)
+    total_episodes = int(sum(nums))
+
+    output_dir = f"policy/TinyVLA/tinyvla_ckpt/tinyvla-{task_slug}/{config_slug}-{total_episodes}"
     repo_root = os.path.abspath(os.path.join(tinyvla_dir, "..", ".."))
-    policy_deploy_yml = "policy/TinyVLA/deploy_policy.yml"
 
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(runtime_cfg["EVAL_GPU_ID"])
-    env["PYTHONNOUSERSITE"] = "1"
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     env["PYTHONWARNINGS"] = "ignore::UserWarning"
-    env["ACT_EV_CFG_SNAPSHOT_SRC"] = os.path.abspath(cfg_path)
-    # Ensure `from vla import ...` works inside deploy_policy.py.
-    # When we run from `repo_root`, Python won't automatically include `policy/TinyVLA/` in sys.path.
-    existing_py_path = env.get("PYTHONPATH", "")
-    added_py_path = os.path.abspath(tinyvla_dir)
-    env["PYTHONPATH"] = added_py_path + (os.pathsep + existing_py_path if existing_py_path else "")
+    env["PYTHONNOUSERSITE"] = "1"
 
-    if LOGGER is not None:
-        LOGGER.info("Launching eval with config=%s", cfg_base)
-        LOGGER.info("Resolved output_dir=%s", contract["output_dir"])
-        LOGGER.info("Resolved model_path=%s", model_path)
+    logger.info(
+        "Task ID: %s | GPU: %d | Seed: %d | Test Num: %d | END_RESET_TO_INIT: %s",
+        task_id,
+        gpu_id,
+        seed,
+        test_num,
+        _to_cli_bool(end_reset_to_init),
+    )
+    logger.info("Output Dir: %s", output_dir)
 
-    for task_name, task_config, expert_num in contract["eval_runs"]:
-        overrides_tokens = _build_eval_overrides(
-            ev_cfg=runtime_cfg,
-            task_name=task_name,
-            task_config=task_config,
-            expert_num=expert_num,
-            ckpt_setting=contract["ckpt_setting"],
-            model_path=model_path,
-            state_path=state_path,
-        )
-        cmd: List[str] = [
+    for task_name, task_config in eval_rows:
+        cmd = [
             sys.executable,
             "script/eval_policy.py",
             "--config",
-            policy_deploy_yml,
+            "policy/TinyVLA/deploy_policy.yml",
             "--overrides",
-        ] + overrides_tokens
-        if LOGGER is not None:
-            LOGGER.info(
-                "Eval run: task_name=%s task_config=%s expert_num=%s ckpt_setting=%s",
-                task_name,
-                task_config,
-                expert_num,
-                contract["ckpt_setting"],
-            )
-            LOGGER.info("Command: %s", " ".join(cmd))
+            "--task_name",
+            task_name,
+            "--task_config",
+            task_config,
+            "--output_dir",
+            output_dir,
+            "--seed",
+            str(seed),
+            "--test_num",
+            str(test_num),
+            "--END_RESET_TO_INIT",
+            _to_cli_bool(end_reset_to_init),
+        ]
+        logger.info("Eval: task_name=%s task_config=%s", task_name, task_config)
+        logger.info("Run: %s", " ".join(cmd))
         subprocess.run(cmd, check=True, env=env, cwd=repo_root)
 
     return 0
 
 
-def main(argv: List[str]) -> int:
-    """
-    @input: [List[str], argv]
-    @output: [int, 0 on success else non-zero]
-    @scenario: [CLI entry for TinyVLA eval wrapper]
-    """
-    parser = argparse.ArgumentParser(description="TinyVLA evaluation wrapper (config under _ev_cfg/*.yaml)")
-    parser.add_argument(
-        "cfg_name",
-        nargs="?",
-        type=str,
-        help="Config name (file: _ev_cfg/<name>.yaml).",
+def _run_legacy_mode(
+    cfg_name: str, tinyvla_dir: str, logger: logging.Logger, args
+) -> int:
+    base = cfg_name if cfg_name.endswith(".yaml") else f"{cfg_name}.yaml"
+    cfg_path = os.path.join(tinyvla_dir, "_ev_cfg", base)
+    if not os.path.isfile(cfg_path):
+        raise FileNotFoundError(f"No config found: _ev_cfg/{base}")
+
+    cfg = _load_yaml(cfg_path)
+
+    for key in (
+        "TRAIN_TASKS",
+        "EVAL_TASKS",
+        "EVAL_SEED",
+        "EVAL_GPU_ID",
+        "END_RESET_TO_INIT",
+    ):
+        if key not in cfg:
+            raise KeyError(f"Missing required key: {key}")
+
+    train_tasks = cfg["TRAIN_TASKS"]
+    eval_tasks = cfg["EVAL_TASKS"]
+
+    train_rows = _parse_task_rows(train_tasks)
+    eval_rows = _parse_task_rows(eval_tasks)
+
+    names = [r[0] for r in train_rows]
+    cfgs = [r[1] for r in train_rows]
+    nums = [r[2] for r in train_rows]
+
+    task_slug = "__".join(names)
+    config_slug = "__".join(cfgs)
+    total_episodes = int(sum(nums))
+
+    seed = int(cfg["EVAL_SEED"])
+    gpu_id = int(cfg["EVAL_GPU_ID"])
+    test_num = int(cfg.get("TEST_NUM", 100))
+    end_reset_to_init = _to_cli_bool(cfg["END_RESET_TO_INIT"])
+
+    env_seed = os.environ.get("TVLA_FLOW_SEED", "").strip()
+    env_gpu = os.environ.get("TVLA_FLOW_GPU", "").strip()
+    env_test_num = os.environ.get("TVLA_FLOW_TEST_NUM", "").strip()
+
+    if args.seed is not None:
+        seed = int(args.seed)
+    elif env_seed:
+        seed = int(env_seed)
+    if args.gpu_id is not None:
+        gpu_id = int(args.gpu_id)
+    elif env_gpu:
+        gpu_id = int(env_gpu)
+    if args.test_num is not None:
+        test_num = int(args.test_num)
+    elif env_test_num:
+        test_num = int(env_test_num)
+    if args.end_reset_to_init is not None:
+        end_reset_to_init = _to_cli_bool(args.end_reset_to_init)
+    elif os.environ.get("TVLA_FLOW_END_RESET_TO_INIT", "").strip():
+        end_reset_to_init = _to_cli_bool(os.environ["TVLA_FLOW_END_RESET_TO_INIT"])
+
+    output_dir = f"policy/TinyVLA/tinyvla_ckpt/tinyvla-{task_slug}/{config_slug}-{total_episodes}"
+    repo_root = os.path.abspath(os.path.join(tinyvla_dir, "..", ".."))
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    env["PYTHONWARNINGS"] = "ignore::UserWarning"
+    env["PYTHONNOUSERSITE"] = "1"
+
+    logger.info(
+        "Legacy mode: seed=%d, gpu_id=%d, test_num=%d, END_RESET_TO_INIT=%s",
+        seed,
+        gpu_id,
+        test_num,
+        end_reset_to_init,
     )
+    logger.info("Output Dir: %s", output_dir)
+
+    for task_name, task_config in eval_rows:
+        cmd = [
+            sys.executable,
+            "script/eval_policy.py",
+            "--config",
+            "policy/TinyVLA/deploy_policy.yml",
+            "--overrides",
+            "--task_name",
+            task_name,
+            "--task_config",
+            task_config,
+            "--output_dir",
+            output_dir,
+            "--seed",
+            str(seed),
+            "--test_num",
+            str(test_num),
+            "--END_RESET_TO_INIT",
+            end_reset_to_init,
+        ]
+        logger.info("Eval: task_name=%s task_config=%s", task_name, task_config)
+        logger.info("Run: %s", " ".join(cmd))
+        subprocess.run(cmd, check=True, env=env, cwd=repo_root)
+
+    return 0
+
+
+def _run_direct_mode(
+    output_dir: str,
+    task_name: str,
+    task_config: str,
+    gpu_id: int,
+    seed: int,
+    test_num: int,
+    end_reset_to_init: bool,
+    logger: logging.Logger,
+    tinyvla_dir: str,
+) -> int:
+    """
+    Direct mode: specify output directory and task parameters directly.
+    """
+    repo_root = os.path.abspath(os.path.join(tinyvla_dir, "..", ".."))
+
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    env["PYTHONWARNINGS"] = "ignore::UserWarning"
+    env["PYTHONNOUSERSITE"] = "1"
+
+    logger.info(
+        "Direct mode: output_dir=%s, task_name=%s, task_config=%s, gpu=%d, seed=%d, test_num=%d, END_RESET_TO_INIT=%s",
+        output_dir,
+        task_name,
+        task_config,
+        gpu_id,
+        seed,
+        test_num,
+        _to_cli_bool(end_reset_to_init),
+    )
+
+    cmd = [
+        sys.executable,
+        "script/eval_policy.py",
+        "--config",
+        "policy/TinyVLA/deploy_policy.yml",
+        "--overrides",
+        "--task_name",
+        task_name,
+        "--task_config",
+        task_config,
+        "--output_dir",
+        output_dir,
+        "--seed",
+        str(seed),
+        "--test_num",
+        str(test_num),
+        "--END_RESET_TO_INIT",
+        _to_cli_bool(end_reset_to_init),
+    ]
+    logger.info("Run: %s", " ".join(cmd))
+    subprocess.run(cmd, check=True, env=env, cwd=repo_root)
+
+    return 0
+
+
+def main(argv: list) -> int:
+    parser = argparse.ArgumentParser(description="TinyVLA eval wrapper.")
+    parser.add_argument(
+        "--task-id", dest="task_id", type=str, help="Task ID from ev_tasks.yaml."
+    )
+    parser.add_argument(
+        "--yaml",
+        dest="yaml_paths",
+        action="append",
+        type=str,
+        help="YAML config path (can specify multiple).",
+    )
+    parser.add_argument(
+        "--output-dir",
+        dest="output_dir",
+        type=str,
+        default=None,
+        help="Direct output directory path (direct mode).",
+    )
+    parser.add_argument(
+        "--task-name",
+        dest="task_name",
+        type=str,
+        default=None,
+        help="Task name for evaluation (direct mode).",
+    )
+    parser.add_argument(
+        "--task-config",
+        dest="task_config",
+        type=str,
+        default=None,
+        help="Task config for evaluation (direct mode).",
+    )
+    parser.add_argument(
+        "--gpu-id", dest="gpu_id", type=int, default=None, help="GPU ID."
+    )
+    parser.add_argument(
+        "--seed", dest="seed", type=int, default=None, help="Random seed."
+    )
+    parser.add_argument(
+        "--test-num", dest="test_num", type=int, default=None, help="Test rollouts."
+    )
+    parser.add_argument(
+        "--end-reset-to-init",
+        dest="end_reset_to_init",
+        type=str,
+        default=None,
+        help="END_RESET_TO_INIT override: true/false",
+    )
+    parser.add_argument("cfg_name", nargs="?", type=str, help="(legacy) Config name.")
     parser.add_argument(
         "--config",
         dest="config",
@@ -451,46 +407,52 @@ def main(argv: List[str]) -> int:
         required=False,
         help="(legacy) Config name (file: _ev_cfg/<name>.yaml).",
     )
-    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional eval GPU id override.")
-    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
-    parser.add_argument(
-        "--test-num",
-        dest="test_num",
-        type=int,
-        required=False,
-        help="Optional rollout count override (eval_policy --test_num).",
-    )
-    parser.add_argument(
-        "--end-reset-to-init",
-        dest="end_reset_to_init",
-        type=str,
-        required=False,
-        help="Optional END_RESET_TO_INIT override: true/false (TVLA_FLOW_END_RESET_TO_INIT from __flow.py).",
-    )
+
     args = parser.parse_args(argv[1:])
 
     tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
-    _setup_logger(tinyvla_dir)
-
-    cfg = args.config if args.config is not None else args.cfg_name
-    if not cfg:
-        parser.error("Missing cfg_name. Use: python3 _ev_wrapper.py <cfg_name> (or --config <cfg_name>)")
+    logger = _setup_logger(tinyvla_dir)
 
     try:
-        return _run_eval(
-            tinyvla_dir,
-            cfg,
-            cli_seed=args.seed,
-            cli_gpu_id=args.gpu_id,
-            cli_test_num=args.test_num,
-            cli_end_reset_to_init=args.end_reset_to_init,
-        )
-    except Exception:
-        if LOGGER is not None:
-            LOGGER.error("Top-level wrapper exit due to failure.")
+        if args.output_dir and args.task_name and args.task_config:
+            gpu_id = args.gpu_id if args.gpu_id is not None else 0
+            seed = args.seed if args.seed is not None else 0
+            test_num = args.test_num if args.test_num is not None else 50
+            end_reset = True
+            if args.end_reset_to_init is not None:
+                end_reset = _to_cli_bool(args.end_reset_to_init) == "true"
+            return _run_direct_mode(
+                args.output_dir,
+                args.task_name,
+                args.task_config,
+                gpu_id,
+                seed,
+                test_num,
+                end_reset,
+                logger,
+                tinyvla_dir,
+            )
+        elif args.task_id and args.yaml_paths:
+            cfg = _merge_yamls(args.yaml_paths)
+            gpu_id = args.gpu_id if args.gpu_id is not None else 0
+            seed = args.seed if args.seed is not None else cfg.get("seed", 0)
+            return _run_from_merged_config(
+                cfg, args.task_id, gpu_id, seed, logger, tinyvla_dir
+            )
+        elif args.config is not None or args.cfg_name:
+            cfg_name = args.config if args.config is not None else args.cfg_name
+            if not cfg_name:
+                parser.error("Missing cfg_name.")
+            return _run_legacy_mode(cfg_name, tinyvla_dir, logger, args)
+        else:
+            parser.error(
+                "Require either --output-dir + --task-name + --task-config, or --task-id + --yaml, or legacy cfg_name."
+            )
+    except Exception as exc:
+        logger.error("Wrapper failed: %s", str(exc))
+        logger.error("Stack trace:\n%s", traceback.format_exc())
         return 1
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))
-

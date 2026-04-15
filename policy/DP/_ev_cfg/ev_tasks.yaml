@@ -1,0 +1,115 @@
+# ============================================================
+# DP Evaluation Tasks Configuration
+# ============================================================
+# This file defines all evaluation tasks for the DP model.
+# Settings here override or extend the shared config in:
+#   policy/config/_ev_cfg_shared.yaml
+#
+# Usage:
+#   bash __flow.sh
+#   python __flow.py
+# ============================================================
+
+# ------------------------------------------------------------
+# GPU Parallel Configuration
+# ------------------------------------------------------------
+gpu_parallel: [0, 0, 1, 1]
+
+# ------------------------------------------------------------
+# Model-Specific Defaults
+# ------------------------------------------------------------
+model_defaults:
+  test_num: 50
+  end_reset_to_init: true
+  seed: 0
+  checkpoint_num: 600
+  eval_head_camera_type: D435
+
+# ------------------------------------------------------------
+# Evaluation Task Queue
+# ------------------------------------------------------------
+
+ev_tasks:
+  # --- Single-Task Evaluation ---
+  
+  - task_id: flow_single_move_pillbottle_pad
+    train_tasks:
+      - [move_pillbottle_pad, demo_clean, 100]
+    eval_tasks:
+      - [move_pillbottle_pad, demo_clean, 100]
+
+  - task_id: flow_single_unmove_pillbottle_pad
+    train_tasks:
+      - [unmove_pillbottle_pad, demo_clean, 100]
+    eval_tasks:
+      - [unmove_pillbottle_pad, demo_clean, 100]
+
+  - task_id: flow_single_stack_bowls_three
+    train_tasks:
+      - [stack_bowls_three, demo_clean, 100]
+    eval_tasks:
+      - [stack_bowls_three, demo_clean, 100]
+
+  - task_id: flow_single_unstack_bowls_three
+    train_tasks:
+      - [unstack_bowls_three, demo_clean, 100]
+    eval_tasks:
+      - [unstack_bowls_three, demo_clean, 100]
+
+  - task_id: flow_single_stack_blocks_three
+    train_tasks:
+      - [stack_blocks_three, demo_clean, 100]
+    eval_tasks:
+      - [stack_blocks_three, demo_clean, 100]
+
+  - task_id: flow_single_unstack_blocks_three
+    train_tasks:
+      - [unstack_blocks_three, demo_clean, 100]
+    eval_tasks:
+      - [unstack_blocks_three, demo_clean, 100]
+
+  - task_id: flow_single_hanging_mug
+    train_tasks:
+      - [hanging_mug, demo_clean, 100]
+    eval_tasks:
+      - [hanging_mug, demo_clean, 100]
+
+  - task_id: flow_single_unhanging_mug
+    train_tasks:
+      - [unhanging_mug, demo_clean, 100]
+    eval_tasks:
+      - [unhanging_mug, demo_clean, 100]
+
+  # --- Joint-Task Evaluation ---
+
+  - task_id: flow_joint_move_pillbottle_pad
+    train_tasks:
+      - [move_pillbottle_pad, demo_clean, 100]
+      - [unmove_pillbottle_pad, demo_clean, 100]
+    eval_tasks:
+      - [move_pillbottle_pad, demo_clean, 100]
+      - [unmove_pillbottle_pad, demo_clean, 100]
+
+  - task_id: flow_joint_stack_bowls_three
+    train_tasks:
+      - [stack_bowls_three, demo_clean, 100]
+      - [unstack_bowls_three, demo_clean, 100]
+    eval_tasks:
+      - [stack_bowls_three, demo_clean, 100]
+      - [unstack_bowls_three, demo_clean, 100]
+
+  - task_id: flow_joint_stack_blocks_three
+    train_tasks:
+      - [stack_blocks_three, demo_clean, 100]
+      - [unstack_blocks_three, demo_clean, 100]
+    eval_tasks:
+      - [stack_blocks_three, demo_clean, 100]
+      - [unstack_blocks_three, demo_clean, 100]
+
+  - task_id: flow_joint_hanging_mug
+    train_tasks:
+      - [hanging_mug, demo_clean, 100]
+      - [unhanging_mug, demo_clean, 100]
+    eval_tasks:
+      - [hanging_mug, demo_clean, 100]
+      - [unhanging_mug, demo_clean, 100]

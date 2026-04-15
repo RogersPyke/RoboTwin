@@ -43,8 +43,11 @@ def eval_function_decorator(policy_name, model_name):
     except ImportError as e:
         raise e
 
+
 def get_camera_config(camera_type):
-    camera_config_path = os.path.join(parent_directory, "../task_config/_camera_config.yml")
+    camera_config_path = os.path.join(
+        parent_directory, "../task_config/_camera_config.yml"
+    )
 
     assert os.path.isfile(camera_config_path), "task config file is missing"
 
@@ -89,7 +92,7 @@ def main(usr_args):
     if "END_RESET_TO_INIT" in usr_args and usr_args["END_RESET_TO_INIT"] is not None:
         args["END_RESET_TO_INIT"] = usr_args["END_RESET_TO_INIT"]
 
-    args['task_name'] = task_name
+    args["task_name"] = task_name
     args["task_config"] = task_config
     args["ckpt_setting"] = ckpt_setting
 
@@ -132,7 +135,9 @@ def main(usr_args):
     else:
         embodiment_name = str(embodiment_type[0]) + "+" + str(embodiment_type[1])
 
-    save_dir = Path(f"eval_result/{task_name}/{policy_name}/{task_config}/{ckpt_setting}/{current_time}")
+    save_dir = Path(
+        f"eval_result/{task_name}/{policy_name}/{task_config}/{ckpt_setting}/{current_time}"
+    )
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # Multi-task eval: _ev_wrapper sets ACT_EV_CFG_SNAPSHOT_SRC so each eval_result folder
@@ -147,31 +152,64 @@ def main(usr_args):
         camera_config = get_camera_config(args["camera"]["head_camera_type"])
         video_size = str(camera_config["w"]) + "x" + str(camera_config["h"])
         video_save_dir.mkdir(parents=True, exist_ok=True)
+        (video_save_dir / "succ").mkdir(parents=True, exist_ok=True)
+        (video_save_dir / "fail").mkdir(parents=True, exist_ok=True)
         args["eval_video_save_dir"] = video_save_dir
 
     # output camera config
     print("============= Config =============\n")
-    print("\033[95mMessy Table:\033[0m " + str(args["domain_randomization"]["cluttered_table"]))
-    print("\033[95mRandom Background:\033[0m " + str(args["domain_randomization"]["random_background"]))
+    print(
+        "\033[95mMessy Table:\033[0m "
+        + str(args["domain_randomization"]["cluttered_table"])
+    )
+    print(
+        "\033[95mRandom Background:\033[0m "
+        + str(args["domain_randomization"]["random_background"])
+    )
     if args["domain_randomization"]["random_background"]:
-        print(" - Clean Background Rate: " + str(args["domain_randomization"]["clean_background_rate"]))
-    print("\033[95mRandom Light:\033[0m " + str(args["domain_randomization"]["random_light"]))
+        print(
+            " - Clean Background Rate: "
+            + str(args["domain_randomization"]["clean_background_rate"])
+        )
+    print(
+        "\033[95mRandom Light:\033[0m "
+        + str(args["domain_randomization"]["random_light"])
+    )
     if args["domain_randomization"]["random_light"]:
-        print(" - Crazy Random Light Rate: " + str(args["domain_randomization"]["crazy_random_light_rate"]))
-    print("\033[95mRandom Table Height:\033[0m " + str(args["domain_randomization"]["random_table_height"]))
-    print("\033[95mRandom Head Camera Distance:\033[0m " + str(args["domain_randomization"]["random_head_camera_dis"]))
+        print(
+            " - Crazy Random Light Rate: "
+            + str(args["domain_randomization"]["crazy_random_light_rate"])
+        )
+    print(
+        "\033[95mRandom Table Height:\033[0m "
+        + str(args["domain_randomization"]["random_table_height"])
+    )
+    print(
+        "\033[95mRandom Head Camera Distance:\033[0m "
+        + str(args["domain_randomization"]["random_head_camera_dis"])
+    )
 
-    print("\033[94mHead Camera Config:\033[0m " + str(args["camera"]["head_camera_type"]) + f", " +
-          str(args["camera"]["collect_head_camera"]))
-    print("\033[94mWrist Camera Config:\033[0m " + str(args["camera"]["wrist_camera_type"]) + f", " +
-          str(args["camera"]["collect_wrist_camera"]))
+    print(
+        "\033[94mHead Camera Config:\033[0m "
+        + str(args["camera"]["head_camera_type"])
+        + f", "
+        + str(args["camera"]["collect_head_camera"])
+    )
+    print(
+        "\033[94mWrist Camera Config:\033[0m "
+        + str(args["camera"]["wrist_camera_type"])
+        + f", "
+        + str(args["camera"]["collect_wrist_camera"])
+    )
     print("\033[94mEmbodiment Config:\033[0m " + embodiment_name)
     print("\n==================================")
 
     TASK_ENV = class_decorator(args["task_name"])
     args["policy_name"] = policy_name
     usr_args["left_arm_dim"] = len(args["left_embodiment_config"]["arm_joints_name"][0])
-    usr_args["right_arm_dim"] = len(args["right_embodiment_config"]["arm_joints_name"][1])
+    usr_args["right_arm_dim"] = len(
+        args["right_embodiment_config"]["arm_joints_name"][1]
+    )
 
     seed = usr_args["seed"]
 
@@ -180,14 +218,16 @@ def main(usr_args):
     test_num = int(usr_args.get("test_num", 100))
 
     model = get_model(usr_args)
-    st_seed, eval_stats = eval_policy(task_name,
-                                      TASK_ENV,
-                                      args,
-                                      model,
-                                      st_seed,
-                                      test_num=test_num,
-                                      video_size=video_size,
-                                      instruction_type=instruction_type)
+    st_seed, eval_stats = eval_policy(
+        task_name,
+        TASK_ENV,
+        args,
+        model,
+        st_seed,
+        test_num=test_num,
+        video_size=video_size,
+        instruction_type=instruction_type,
+    )
 
     file_path = os.path.join(save_dir, f"_result.txt")
     with open(file_path, "w") as file:
@@ -215,14 +255,16 @@ def main(usr_args):
     # return task_reward
 
 
-def eval_policy(task_name,
-                TASK_ENV,
-                args,
-                model,
-                st_seed,
-                test_num=100,
-                video_size=None,
-                instruction_type=None):
+def eval_policy(
+    task_name,
+    TASK_ENV,
+    args,
+    model,
+    st_seed,
+    test_num=100,
+    video_size=None,
+    instruction_type=None,
+):
     print(f"\033[34mTask Name: {args['task_name']}\033[0m")
     print(f"\033[34mPolicy Name: {args['policy_name']}\033[0m")
 
@@ -255,7 +297,9 @@ def eval_policy(task_name,
 
         if expert_check:
             try:
-                TASK_ENV.setup_demo(now_ep_num=now_id, seed=now_seed, is_test=True, **args)
+                TASK_ENV.setup_demo(
+                    now_ep_num=now_id, seed=now_seed, is_test=True, **args
+                )
                 episode_info = TASK_ENV.play_once()
                 TASK_ENV.close_env()
             except UnStableError as e:
@@ -289,11 +333,17 @@ def eval_policy(task_name,
 
         TASK_ENV.setup_demo(now_ep_num=now_id, seed=now_seed, is_test=True, **args)
         episode_info_list = [episode_info["info"]]
-        results = generate_episode_descriptions(args["task_name"], episode_info_list, test_num)
+        results = generate_episode_descriptions(
+            args["task_name"], episode_info_list, test_num
+        )
         instruction = np.random.choice(results[0][instruction_type])
         TASK_ENV.set_instruction(instruction=instruction)  # set language instruction
 
+        video_temp_path = None
         if TASK_ENV.eval_video_path is not None:
+            video_temp_path = (
+                f"{TASK_ENV.eval_video_path}/_tmp_episode{TASK_ENV.test_num}.mp4"
+            )
             ffmpeg = subprocess.Popen(
                 [
                     "ffmpeg",
@@ -316,7 +366,7 @@ def eval_policy(task_name,
                     "libx264",
                     "-crf",
                     "23",
-                    f"{TASK_ENV.eval_video_path}/episode{TASK_ENV.test_num}.mp4",
+                    video_temp_path,
                 ],
                 stdin=subprocess.PIPE,
             )
@@ -334,7 +384,14 @@ def eval_policy(task_name,
         if TASK_ENV.eval_video_path is not None:
             TASK_ENV._del_eval_video_ffmpeg()
 
-        task_success_reached = bool(getattr(TASK_ENV, "_eval_task_success_reached", False))
+        if video_temp_path is not None and os.path.isfile(video_temp_path):
+            video_subdir = "succ" if succ else "fail"
+            video_final_path = f"{TASK_ENV.eval_video_path}/{video_subdir}/episode{TASK_ENV.test_num}.mp4"
+            shutil.move(video_temp_path, video_final_path)
+
+        task_success_reached = bool(
+            getattr(TASK_ENV, "_eval_task_success_reached", False)
+        )
         if succ:
             TASK_ENV.suc += 1
             if end_reset_to_init:
@@ -428,6 +485,7 @@ def parse_args_and_config():
 
 if __name__ == "__main__":
     from test_render import Sapien_TEST
+
     Sapien_TEST()
 
     usr_args = parse_args_and_config()
