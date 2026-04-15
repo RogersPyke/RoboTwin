@@ -268,7 +268,14 @@ def start_slot_job(
     )
     lf.flush()
 
-    script = f"set -euo pipefail; bash _eval.sh {task_id!r}"
+    repo_root = BASE_DIR.parent.parent
+    shared_cfg = repo_root / SHARED_CFG_PATH
+    model_cfg = repo_root / MODEL_CFG_PATH
+    script = (
+        f"set -euo pipefail; "
+        f"python3 _ev_wrapper.py --task-id {task_id!r} "
+        f"--yaml {str(shared_cfg)!r} --yaml {str(model_cfg)!r}"
+    )
 
     print(
         f"[flow][slot={slot}][eval][task_id={task_id}][gpu={gpu_id}] "
