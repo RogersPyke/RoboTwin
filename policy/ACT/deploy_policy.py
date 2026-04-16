@@ -47,7 +47,7 @@ def reset_model(model):
     # Reset temporal aggregation state if enabled
     if model.temporal_agg:
         # ==== temporal_agg reset memory fix ==== #
-        # 修改原因: avoid per-episode large tensor reallocation on GPU,
+        # avoid per-episode large tensor reallocation on GPU,
         # which can cause memory fragmentation and render buffer allocation failure.
         # ====================================== #
         expected_shape = (

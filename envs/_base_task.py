@@ -11,6 +11,7 @@ import json
 import transforms3d as t3d
 from collections import OrderedDict
 import torch, random
+import time
 
 from .utils import *
 import math
@@ -32,6 +33,8 @@ from typing import Optional, Literal
 current_file_path = os.path.abspath(__file__)
 parent_directory = os.path.dirname(current_file_path)
 
+_STEP_LOG_LAST_TIME: float = 0.0
+_STEP_LOG_INTERVAL: float = 10.0  # seconds
 
 class Base_Task(gym.Env):
 
@@ -1501,7 +1504,10 @@ class Base_Task(gym.Env):
             self.eval_video_ffmpeg.stdin.write(self.now_obs["observation"]["head_camera"]["rgb"].tobytes())
 
         self.take_action_cnt += 1
-        print(f"step: \033[92m{self.take_action_cnt} / {self.step_lim}\033[0m", end="\r")
+        global _STEP_LOG_LAST_TIME
+        if time.time() - _STEP_LOG_LAST_TIME >= _STEP_LOG_INTERVAL:
+            print(f"step: \033[92m{self.take_action_cnt} / {self.step_lim}\033[0m")
+            _STEP_LOG_LAST_TIME = time.time()
 
         self._update_render()
         if self.render_freq:
