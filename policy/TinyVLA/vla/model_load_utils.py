@@ -8,11 +8,19 @@ import os
 from aloha_scripts.utils import *
 
 
-def find_all_linear_names(model, rank0_print):
+def find_all_linear_names(model, rank0_print, lora_module="vit"):
     cls = torch.nn.Linear
     lora_module_names = set()
-
-    multimodal_keywords = ['language_model', 'vision_model']
+    lora_module_text = str(lora_module).strip().lower()
+    if lora_module_text in ("vision", "vit"):
+        multimodal_keywords = ["vision_model"]
+    elif lora_module_text in ("llm", "lm", "language_model", "language"):
+        multimodal_keywords = ["language_model"]
+    elif lora_module_text in ("all", "both", "vl", "multimodal"):
+        multimodal_keywords = ["language_model", "vision_model"]
+    else:
+        rank0_print(f"[LoRA] Unknown lora_module={lora_module}, fallback to vision_model.")
+        multimodal_keywords = ["vision_model"]
 
     rank0_print("##" * 20)
 
