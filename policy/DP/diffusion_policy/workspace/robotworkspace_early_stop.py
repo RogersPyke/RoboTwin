@@ -45,9 +45,7 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
 
     def _sync_tracker_state(self, tracker: RelativeEarlyStopTracker) -> None:
         self.early_stop_best_val_loss = (
-            float(tracker.best_val_loss)
-            if tracker.best_step >= 0
-            else float("inf")
+            float(tracker.best_val_loss) if tracker.best_step >= 0 else float("inf")
         )
         self.early_stop_best_train_step = int(tracker.best_step)
         self.early_stop_no_improve_evals = int(tracker.no_improve_count)
@@ -74,7 +72,9 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
             f.write(f"last_train_loss={float(last_train_loss)}\n")
             f.write(f"stop_reason={str(stop_reason)}\n")
             f.write(f"best_eval_step={int(tracker.best_step)}\n")
-            f.write(f"best_val_loss={float(tracker.best_val_loss) if tracker.best_step >= 0 else float('nan')}\n")
+            f.write(
+                f"best_val_loss={float(tracker.best_val_loss) if tracker.best_step >= 0 else float('nan')}\n"
+            )
             f.write(f"total_evals_run={int(tracker.total_evals_run)}\n")
             f.write(f"no_improve_count={int(tracker.no_improve_count)}\n")
 
@@ -103,9 +103,13 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
         cfg = copy.deepcopy(self.cfg)
         seed = cfg.training.seed
         # ==== Early stop ====
-        early_stop_patience_evals = int(getattr(cfg.training, "early_stop_patience_evals", 0))
+        early_stop_patience_evals = int(
+            getattr(cfg.training, "early_stop_patience_evals", 0)
+        )
         early_stop_rel_tol = float(getattr(cfg.training, "early_stop_rel_tol", 0.0))
-        eval_steps_for_early_stop = int(getattr(cfg.training, "eval_steps_for_early_stop", 1))
+        eval_steps_for_early_stop = int(
+            getattr(cfg.training, "eval_steps_for_early_stop", 1)
+        )
         max_tr_steps = getattr(cfg.training, "max_tr_steps", None)
         save_interval = getattr(cfg.training, "save_interval", None)
         max_tr_steps = int(max_tr_steps) if max_tr_steps is not None else None
@@ -177,6 +181,7 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
         last_val_loss = float("nan")
         with JsonLogger(log_path) as json_logger:
             for _ in range(cfg.training.num_epochs):
+                print(f"\nEpoch {self.epoch} | Steps: {self.train_optimizer_steps}")
                 if cfg.training.freeze_encoder:
                     self.model.obs_encoder.eval()
                     self.model.obs_encoder.requires_grad_(False)
@@ -197,7 +202,10 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                         loss.backward()
 
                         val_fields = {}
-                        if self.global_step % cfg.training.gradient_accumulate_every == 0:
+                        if (
+                            self.global_step % cfg.training.gradient_accumulate_every
+                            == 0
+                        ):
                             self.optimizer.step()
                             self.optimizer.zero_grad()
                             lr_scheduler.step()
@@ -208,7 +216,9 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                 and self.train_optimizer_steps % save_interval == 0
                             ):
                                 forced_ckpt_rel_path = f"{ckpt_rel_dir}/step_{self.train_optimizer_steps}.ckpt"
-                                self.save_checkpoint(path=forced_ckpt_rel_path, use_thread=False)
+                                self.save_checkpoint(
+                                    path=forced_ckpt_rel_path, use_thread=False
+                                )
                                 print(
                                     f"[INFO] Forced save at opt_step={self.train_optimizer_steps}: {forced_ckpt_rel_path}",
                                     flush=True,
@@ -216,9 +226,13 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                             # ==== Early stop ====
                             if (
                                 early_stop_enabled
-                                and self.train_optimizer_steps % eval_steps_for_early_stop == 0
+                                and self.train_optimizer_steps
+                                % eval_steps_for_early_stop
+                                == 0
                             ):
-                                val_loss_f = self._val_mean_loss(cfg, dataset, val_dataloader, device)
+                                val_loss_f = self._val_mean_loss(
+                                    cfg, dataset, val_dataloader, device
+                                )
                                 if val_loss_f is not None:
                                     last_val_loss = float(val_loss_f)
                                     decision = early_stop_tracker.on_eval(
@@ -262,7 +276,9 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                     if decision.should_stop:
                                         # Design: early-stop only stops training and writes summary.
                                         # It MUST NOT trigger any best-ckpt saving.
-                                        self.early_stop_stop_reason = str(decision.stop_reason)
+                                        self.early_stop_stop_reason = str(
+                                            decision.stop_reason
+                                        )
                                         raw_loss_cpu = raw_loss.item()
                                         json_logger.log(
                                             {
@@ -295,10 +311,15 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                         )
                                         return
                             # ==== Early stop ====
-                            if max_tr_steps is not None and self.train_optimizer_steps >= max_tr_steps:
+                            if (
+                                max_tr_steps is not None
+                                and self.train_optimizer_steps >= max_tr_steps
+                            ):
                                 self.early_stop_stop_reason = "max_tr_steps_reached"
                                 forced_last_rel_path = f"{ckpt_rel_dir}/step_{self.train_optimizer_steps}.ckpt"
-                                self.save_checkpoint(path=forced_last_rel_path, use_thread=False)
+                                self.save_checkpoint(
+                                    path=forced_last_rel_path, use_thread=False
+                                )
                                 print(
                                     f"[WARN] Reached max_tr_steps={max_tr_steps}; stop with checkpoint {forced_last_rel_path}",
                                     flush=True,
@@ -331,9 +352,8 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                             json_logger.log(step_log)
                             self.global_step += 1
 
-                        if (
-                            cfg.training.max_train_steps is not None
-                            and batch_idx >= (cfg.training.max_train_steps - 1)
+                        if cfg.training.max_train_steps is not None and batch_idx >= (
+                            cfg.training.max_train_steps - 1
                         ):
                             break
 
@@ -349,7 +369,9 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                 if not early_stop_enabled:
                     should_run_val = (self.epoch % cfg.training.val_every) == 0
                     if should_run_val:
-                        val_loss = self._val_mean_loss(cfg, dataset, val_dataloader, device)
+                        val_loss = self._val_mean_loss(
+                            cfg, dataset, val_dataloader, device
+                        )
                         if val_loss is not None:
                             last_val_loss = float(val_loss)
                             decision = early_stop_tracker.on_eval(
@@ -366,7 +388,9 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                                 self.early_stop_no_improve_evals
                             )
                             if decision.rel_improve is not None:
-                                step_log["early_stop_rel_improve"] = float(decision.rel_improve)
+                                step_log["early_stop_rel_improve"] = float(
+                                    decision.rel_improve
+                                )
                             print_epoch_val_line(
                                 "DP",
                                 int(self.train_optimizer_steps),
@@ -394,12 +418,19 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
                         del pred_action
                         del mse
 
-                if ((self.epoch + 1) % cfg.training.checkpoint_every) == 0:
+                if (
+                    cfg.training.checkpoint_every > 0
+                    and ((self.epoch + 1) % cfg.training.checkpoint_every) == 0
+                ):
                     self.save_checkpoint(f"{ckpt_rel_dir}/{self.epoch + 1}.ckpt")
 
                 policy.train()
-                step_log["early_stop_best_val_loss"] = float(self.early_stop_best_val_loss)
-                step_log["early_stop_no_improve_evals"] = int(self.early_stop_no_improve_evals)
+                step_log["early_stop_best_val_loss"] = float(
+                    self.early_stop_best_val_loss
+                )
+                step_log["early_stop_no_improve_evals"] = int(
+                    self.early_stop_no_improve_evals
+                )
                 step_log["early_stop_stop_reason"] = str(self.early_stop_stop_reason)
                 json_logger.log(step_log)
                 self.global_step += 1
@@ -411,4 +442,3 @@ class RobotWorkspaceEarlyStopPlugin(RobotWorkspace):
             last_train_loss=last_train_loss,
             tracker=early_stop_tracker,
         )
-

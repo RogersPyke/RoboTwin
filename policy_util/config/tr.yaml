@@ -30,87 +30,93 @@ global:
 
 ACT:
   early_stop:
-    enabled: true
+    enabled: false
     eval_steps: 1000
     patience_evals: 20
     rel_tol: 0.001
-  gpu_parallel: [0, 0]
+  limits:
+    max_tr_steps: 60000
+    save_interval: 10000
+  gpu_parallel: [0]
   model_defaults:
     kl_weight: 10
     chunk_size: 50
     hidden_dim: 512
     dim_feedforward: 3200
-    batch_size: 32
+    batch_size: 128
     lr: 1.0e-5
-    num_epochs: 6000
-    save_freq: 2000
+    num_epochs: 999999
+    save_freq: 0
     state_dim: 14
   tr_tasks:
-    - task_id: stack_blocks_100
-      task_name: stack_blocks_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/ACT/processed_data/sim-stack_blocks_three/demo_clean-100"
-    - task_id: stack_bowls_100
-      task_name: stack_bowls_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/ACT/processed_data/sim-stack_bowls_three/demo_clean-100"
-    - task_id: hanging_mug_100
-      task_name: hanging_mug
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/ACT/processed_data/sim-hanging_mug/demo_clean-100"
-    - task_id: move_pillbottle_100
-      task_name: move_pillbottle_pad
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/ACT/processed_data/sim-move_pillbottle_pad/demo_clean-100"
+    - task_id: four_tasks_mixed_400
+      data_sources:
+        - task_name: stack_blocks_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/ACT/processed_data/sim-stack_blocks_three/demo_clean-100"
+        - task_name: stack_bowls_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/ACT/processed_data/sim-stack_bowls_three/demo_clean-100"
+        - task_name: hanging_mug
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/ACT/processed_data/sim-hanging_mug/demo_clean-100"
+        - task_name: move_pillbottle_pad
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/ACT/processed_data/sim-move_pillbottle_pad/demo_clean-100"
 
 DP:
   early_stop:
+    enabled: false
     eval_steps: 1000
     patience_evals: 20
     rel_tol: 0.001
-  gpu_parallel: [1, 1]
+  limits:
+    max_tr_steps: 60000
+    save_interval: 10000
+  gpu_parallel: [1]
   model_defaults:
     action_dim: 14
     head_camera_type: D435
-    batch_size: 64
+    batch_size: 128
     lr: 1.0e-4
-    num_epochs: 6000
-    checkpoint_every: 2000
+    num_epochs: 999999
+    checkpoint_every: 0
     val_ratio: 0.02
     delete_combined_zarr_after_train: true
   tr_tasks:
-    - task_id: stack_blocks_100
-      task_name: stack_blocks_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/DP/data/stack_blocks_three-demo_clean-100.zarr"
-    - task_id: stack_bowls_100
-      task_name: stack_bowls_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/DP/data/stack_bowls_three-demo_clean-100.zarr"
-    - task_id: hanging_mug_100
-      task_name: hanging_mug
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/DP/data/hanging_mug-demo_clean-100.zarr"
-    - task_id: move_pillbottle_100
-      task_name: move_pillbottle_pad
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/DP/data/move_pillbottle_pad-demo_clean-100.zarr"
+    - task_id: four_tasks_mixed_400
+      data_sources:
+        - task_name: stack_blocks_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/DP/data/stack_blocks_three-demo_clean-100.zarr"
+        - task_name: stack_bowls_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/DP/data/stack_bowls_three-demo_clean-100.zarr"
+        - task_name: hanging_mug
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/DP/data/hanging_mug-demo_clean-100.zarr"
+        - task_name: move_pillbottle_pad
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/DP/data/move_pillbottle_pad-demo_clean-100.zarr"
 
 TinyVLA:
   early_stop:
-    enabled: true
+    enabled: false
     eval_steps: 1000
     patience_evals: 20
     rel_tol: 0.001
-  gpu_parallel: [2, 3]
+  limits:
+    max_tr_steps: &tinyvla_max_steps 80000
+    save_interval: 10000
+  gpu_parallel: [2]
   model_defaults:
     model_name_or_path: "model_param/InternVL3-1B/"
     policy_head_type: unet_diffusion_policy
@@ -120,7 +126,7 @@ TinyVLA:
     noise_samples: 2
     skip_mirrored_data: false
     flash_attn: false
-    max_steps: 100000
+    max_steps: *tinyvla_max_steps
     per_device_train_batch_size: 16
     per_device_eval_batch_size: 16
     gradient_accumulation_steps: 1
@@ -158,23 +164,21 @@ TinyVLA:
     master_port: 29604
     zero2_json: scripts/zero2.json
   tr_tasks:
-    - task_id: stack_blocks_100
-      task_name: stack_blocks_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/TinyVLA/data/sim-stack_blocks_three/demo_clean-100"
-    - task_id: stack_bowls_100
-      task_name: stack_bowls_three
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/TinyVLA/data/sim-stack_bowls_three/demo_clean-100"
-    - task_id: hanging_mug_100
-      task_name: hanging_mug
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/TinyVLA/data/sim-hanging_mug/demo_clean-100"
-    - task_id: move_pillbottle_100
-      task_name: move_pillbottle_pad
-      task_config: demo_clean
-      expert_num: 100
-      data_folder: "policy/TinyVLA/data/sim-move_pillbottle_pad/demo_clean-100"
+    - task_id: four_tasks_mixed_400
+      data_sources:
+        - task_name: stack_blocks_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/TinyVLA/data/sim-stack_blocks_three/demo_clean-100"
+        - task_name: stack_bowls_three
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/TinyVLA/data/sim-stack_bowls_three/demo_clean-100"
+        - task_name: hanging_mug
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/TinyVLA/data/sim-hanging_mug/demo_clean-100"
+        - task_name: move_pillbottle_pad
+          task_config: demo_clean
+          expert_num: 100
+          data_folder: "policy/TinyVLA/data/sim-move_pillbottle_pad/demo_clean-100"

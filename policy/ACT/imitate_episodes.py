@@ -138,8 +138,9 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(dataset_dir, num_episodes, camera_names, batch_size_train,
-                                                           batch_size_val)
+    train_dataloader, val_dataloader, stats, _ = load_data(
+        dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val
+    )
 
     # save dataset stats
     if not os.path.isdir(ckpt_dir):
@@ -269,12 +270,16 @@ def eval_bc(config, ckpt_name, save_episode=True):
         ### onscreen render
         if onscreen_render:
             ax = plt.subplot()
-            plt_img = ax.imshow(env._physics.render(height=480, width=640, camera_id=onscreen_cam))
+            plt_img = ax.imshow(
+                env._physics.render(height=480, width=640, camera_id=onscreen_cam)
+            )
             plt.ion()
 
         ### evaluation loop
         if temporal_agg:
-            all_time_actions = torch.zeros([max_timesteps, max_timesteps + num_queries, state_dim]).cuda()
+            all_time_actions = torch.zeros(
+                [max_timesteps, max_timesteps + num_queries, state_dim]
+            ).cuda()
 
         qpos_history = torch.zeros((1, max_timesteps, state_dim)).cuda()
         image_list = []  # for visualization
@@ -285,7 +290,9 @@ def eval_bc(config, ckpt_name, save_episode=True):
             for t in range(max_timesteps):
                 ### update onscreen render and wait for DT
                 if onscreen_render:
-                    image = env._physics.render(height=480, width=640, camera_id=onscreen_cam)
+                    image = env._physics.render(
+                        height=480, width=640, camera_id=onscreen_cam
+                    )
                     plt_img.set_data(image)
                     plt.pause(DT)
 
@@ -306,15 +313,21 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     if t % query_frequency == 0:
                         all_actions = policy(qpos, curr_image)
                     if temporal_agg:
-                        all_time_actions[[t], t:t + num_queries] = all_actions
+                        all_time_actions[[t], t : t + num_queries] = all_actions
                         actions_for_curr_step = all_time_actions[:, t]
-                        actions_populated = torch.all(actions_for_curr_step != 0, axis=1)
+                        actions_populated = torch.all(
+                            actions_for_curr_step != 0, axis=1
+                        )
                         actions_for_curr_step = actions_for_curr_step[actions_populated]
                         k = 0.01
                         exp_weights = np.exp(-k * np.arange(len(actions_for_curr_step)))
                         exp_weights = exp_weights / exp_weights.sum()
-                        exp_weights = (torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1))
-                        raw_action = (actions_for_curr_step * exp_weights).sum(dim=0, keepdim=True)
+                        exp_weights = (
+                            torch.from_numpy(exp_weights).cuda().unsqueeze(dim=1)
+                        )
+                        raw_action = (actions_for_curr_step * exp_weights).sum(
+                            dim=0, keepdim=True
+                        )
                     else:
                         raw_action = all_actions[:, t % query_frequency]
                 elif config["policy_class"] == "CNNMLP":
@@ -350,7 +363,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         episode_highest_reward = np.max(rewards)
         highest_rewards.append(episode_highest_reward)
         print(
-            f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward==env_max_reward}"
+            f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward == env_max_reward}"
         )
 
         if save_episode:
@@ -366,7 +379,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
     for r in range(env_max_reward + 1):
         more_or_equal_r = (np.array(highest_rewards) >= r).sum()
         more_or_equal_r_rate = more_or_equal_r / num_rollouts
-        summary_str += f"Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate*100}%\n"
+        summary_str += f"Reward >= {r}: {more_or_equal_r}/{num_rollouts} = {more_or_equal_r_rate * 100}%\n"
 
     # save success rate to txt
     result_file_name = "result_" + ckpt_name.split(".")[0] + ".txt"
@@ -444,7 +457,7 @@ def train_bc(train_dataloader, val_dataloader, config):
 
     for epoch in tqdm(range(num_epochs)):
         epochs_run = epoch + 1
-        print(f"\nEpoch {epoch}")
+        print(f"\nEpoch {epoch} | Steps: {total_train_steps}")
         stop_training = False
         # When early-stop is disabled, keep the original behavior:
         # evaluate every epoch and run on_eval() (which will never trigger should_stop anyway).
@@ -510,14 +523,22 @@ def train_bc(train_dataloader, val_dataloader, config):
             optimizer.zero_grad()
             train_history.append(detach_dict(forward_dict))
             total_train_steps += 1
-            if save_interval is not None and save_interval > 0 and (total_train_steps % save_interval == 0):
-                forced_ckpt = os.path.join(ckpt_dir, f"policy_step_{total_train_steps}.ckpt")
+            if (
+                save_interval is not None
+                and save_interval > 0
+                and (total_train_steps % save_interval == 0)
+            ):
+                forced_ckpt = os.path.join(
+                    ckpt_dir, f"policy_step_{total_train_steps}.ckpt"
+                )
                 torch.save(policy.state_dict(), forced_ckpt)
                 print(f"[INFO] Forced save at step={total_train_steps}: {forced_ckpt}")
 
             # ==== Early stop eval cadence (FIX) ====
             # The CLI param is named eval_steps_for_early_stop, so we evaluate on optimizer steps.
-            if early_stop_enabled and (total_train_steps % eval_steps_for_early_stop == 0):
+            if early_stop_enabled and (
+                total_train_steps % eval_steps_for_early_stop == 0
+            ):
                 with torch.inference_mode():
                     policy.eval()
                     eval_dicts = []
@@ -587,14 +608,20 @@ def train_bc(train_dataloader, val_dataloader, config):
             train_history[(batch_idx + 1) * epoch : (batch_idx + 1) * (epoch + 1)]
         )
         epoch_train_loss = epoch_summary["loss"]
-        last_train_loss = float(epoch_train_loss.item()) if hasattr(epoch_train_loss, "item") else float(epoch_train_loss)
+        last_train_loss = (
+            float(epoch_train_loss.item())
+            if hasattr(epoch_train_loss, "item")
+            else float(epoch_train_loss)
+        )
         print(f"Train loss: {epoch_train_loss:.5f}")
         summary_string = ""
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "
 
-        if (epoch + 1) % config["save_freq"] == 0:
-            ckpt_path = os.path.join(ckpt_dir, f"policy_epoch_{epoch + 1}_seed_{seed}.ckpt")
+        if config["save_freq"] > 0 and (epoch + 1) % config["save_freq"] == 0:
+            ckpt_path = os.path.join(
+                ckpt_dir, f"policy_epoch_{epoch + 1}_seed_{seed}.ckpt"
+            )
             torch.save(policy.state_dict(), ckpt_path)
             if validation_history:
                 plot_history(train_history, validation_history, epoch, ckpt_dir, seed)
@@ -628,7 +655,9 @@ def train_bc(train_dataloader, val_dataloader, config):
     else:
         best_eval_step, min_val_loss, best_state_dict = best_ckpt_info
 
-    print(f"Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at step {best_eval_step}")
+    print(
+        f"Training finished:\nSeed {seed}, val loss {min_val_loss:.6f} at step {best_eval_step}"
+    )
 
     if validation_history:
         plot_history(train_history, validation_history, epochs_run, ckpt_dir, seed)
@@ -681,7 +710,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--eval", action="store_true")
     parser.add_argument("--onscreen_render", action="store_true")
-    parser.add_argument("--ckpt_dir", action="store", type=str, help="ckpt_dir", required=True)
+    parser.add_argument(
+        "--ckpt_dir", action="store", type=str, help="ckpt_dir", required=True
+    )
     parser.add_argument(
         "--policy_class",
         action="store",
@@ -689,18 +720,39 @@ if __name__ == "__main__":
         help="policy_class, capitalize",
         required=True,
     )
-    parser.add_argument("--task_name", action="store", type=str, help="task_name", required=True)
-    parser.add_argument("--batch_size", action="store", type=int, help="batch_size", required=True)
+    parser.add_argument(
+        "--task_name", action="store", type=str, help="task_name", required=True
+    )
+    parser.add_argument(
+        "--batch_size", action="store", type=int, help="batch_size", required=True
+    )
     parser.add_argument("--seed", action="store", type=int, help="seed", required=True)
-    parser.add_argument("--num_epochs", action="store", type=int, help="num_epochs", required=True)
+    parser.add_argument(
+        "--num_epochs", action="store", type=int, help="num_epochs", required=True
+    )
     parser.add_argument("--lr", action="store", type=float, help="lr", required=True)
 
     # for ACT
-    parser.add_argument("--kl_weight", action="store", type=int, help="KL Weight", required=False)
-    parser.add_argument("--chunk_size", action="store", type=int, help="chunk_size", required=False)
-    parser.add_argument("--hidden_dim", action="store", type=int, help="hidden_dim", required=False)
-    parser.add_argument("--state_dim", action="store", type=int, help="state dim", required=True)
-    parser.add_argument("--save_freq", action="store", type=int, help="save ckpt frequency", required=False, default=6000)
+    parser.add_argument(
+        "--kl_weight", action="store", type=int, help="KL Weight", required=False
+    )
+    parser.add_argument(
+        "--chunk_size", action="store", type=int, help="chunk_size", required=False
+    )
+    parser.add_argument(
+        "--hidden_dim", action="store", type=int, help="hidden_dim", required=False
+    )
+    parser.add_argument(
+        "--state_dim", action="store", type=int, help="state dim", required=True
+    )
+    parser.add_argument(
+        "--save_freq",
+        action="store",
+        type=int,
+        help="save ckpt frequency",
+        required=False,
+        default=6000,
+    )
     parser.add_argument(
         "--early_stop_patience_evals",
         action="store",
