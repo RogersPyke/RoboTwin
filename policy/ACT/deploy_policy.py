@@ -46,11 +46,22 @@ def eval(TASK_ENV, model, observation):
 def reset_model(model):
     # Reset temporal aggregation state if enabled
     if model.temporal_agg:
-        model.all_time_actions = torch.zeros([
+        # ==== temporal_agg reset memory fix ==== #
+        # 修改原因: avoid per-episode large tensor reallocation on GPU,
+        # which can cause memory fragmentation and render buffer allocation failure.
+        # ====================================== #
+        expected_shape = (
             model.max_timesteps,
             model.max_timesteps + model.num_queries,
             model.state_dim,
-        ]).to(model.device)
+        )
+        if (not hasattr(model, "all_time_actions")
+                or tuple(model.all_time_actions.shape) != expected_shape
+                or model.all_time_actions.device != model.device):
+            model.all_time_actions = torch.zeros(expected_shape, device=model.device)
+        else:
+            model.all_time_actions.zero_()
+        # ================ end ================ #
         model.t = 0
         print("Reset temporal aggregation state")
     else:
