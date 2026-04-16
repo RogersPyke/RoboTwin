@@ -27,8 +27,6 @@ from utils import compute_dict_mean, set_seed, detach_dict  # helper functions
 from act_policy import ACTPolicy, CNNMLPPolicy
 from visualize_episodes import save_videos
 
-from sim_env import BOX_POSE
-
 import IPython
 
 e = IPython.embed
@@ -242,7 +240,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         env = make_real_env(init_node=True)
         env_max_reward = 0
     else:
-        from sim_env import make_sim_env
+        from sim_env import make_sim_env, BOX_POSE
 
         env = make_sim_env(task_name)
         env_max_reward = env.task.max_reward

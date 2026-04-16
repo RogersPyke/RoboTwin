@@ -211,7 +211,7 @@ def _concat_zarrs_from_src_paths(
     offset = 0
     for _, _, _, _, src_ep_ends in src_meta:
         episode_ends_list.append(src_ep_ends + offset)
-        offset = int(src_ep_ends[-1])
+        offset += int(src_ep_ends[-1])
     all_episode_ends = np.concatenate(episode_ends_list, axis=0).astype(np.int64)
 
     if os.path.isdir(combined_abs_path):

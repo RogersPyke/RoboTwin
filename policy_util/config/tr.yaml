@@ -43,7 +43,7 @@ ACT:
     chunk_size: 50
     hidden_dim: 512
     dim_feedforward: 3200
-    batch_size: 128
+    batch_size: 64
     lr: 1.0e-5
     num_epochs: 999999
     save_freq: 0

@@ -338,8 +338,18 @@ def _run_from_merged_config(
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    offline_torch_home = os.path.join(act_dir, "torch_offline")
+    offline_resnet = os.path.join(
+        offline_torch_home, "hub", "checkpoints", "resnet18-f37072fd.pth"
+    )
+    if os.path.isfile(offline_resnet):
+        env["TORCH_HOME"] = offline_torch_home
+        logger.info(
+            "Offline ResNet18 weights found; TORCH_HOME=%s", offline_torch_home
+        )
     cmd = [
-        "python3",
+        sys.executable,
         "imitate_episodes.py",
         "--task_name",
         combined_key,

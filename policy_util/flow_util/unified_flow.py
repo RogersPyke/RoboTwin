@@ -13,6 +13,7 @@ The flow will:
 """
 
 import atexit
+import json
 import os
 import shutil
 import signal
@@ -22,7 +23,7 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, TextIO
+from typing import Any, Dict, List, Optional, TextIO, Tuple
 
 import yaml
 
@@ -171,6 +172,129 @@ class BaseFlowScheduler(ABC):
                 unique_tasks.append(task_name)
         return unique_tasks
 
+    def _check_hdf5_integrity(self, hdf5_path: Path) -> Tuple[bool, str]:
+        """
+        Check HDF5 file integrity for processed data.
+
+        @input: [Path, path to episode hdf5 file]
+        @output: [Tuple[bool, str], (is_valid, error_message)]
+        @scenario: [Verify HDF5 contains required keys for training]
+        """
+        try:
+            import h5py
+
+            with h5py.File(str(hdf5_path), "r") as f:
+                if "action" not in f:
+                    return False, "missing 'action' dataset"
+                if "observations" not in f:
+                    return False, "missing 'observations' group"
+                obs = f["observations"]
+                if "qpos" not in obs:
+                    return False, "missing 'observations/qpos' dataset"
+                if "images" not in obs:
+                    return False, "missing 'observations/images' group"
+                action_shape = f["action"].shape
+                if len(action_shape) != 2 or action_shape[0] == 0:
+                    return False, f"invalid action shape: {action_shape}"
+                qpos_shape = obs["qpos"].shape
+                if len(qpos_shape) != 2 or qpos_shape[0] == 0:
+                    return False, f"invalid qpos shape: {qpos_shape}"
+            return True, ""
+        except Exception as e:
+            return False, str(e)
+
+    def check_data_item_ready(
+        self, task_name: str, task_config: str, expert_num: int
+    ) -> Tuple[bool, List[str]]:
+        """
+        Check if a single (task_name, task_config) data item is ready.
+
+        @input: [str, task_name], [str, task_config], [int, expert_num]
+        @output: [Tuple[bool, List[str]], (is_ready, missing_items)]
+        @scenario: [Verify processed data exists and is valid for one data item]
+        """
+        missing = []
+        sub_key = f"sim-{task_name}-{task_config}-{expert_num}"
+
+        sim_cfg_path = self.policy_dir / "SIM_TASK_CONFIGS.json"
+        if not sim_cfg_path.is_file():
+            missing.append(f"SIM_TASK_CONFIGS.json not found")
+            return False, missing
+
+        try:
+            with open(sim_cfg_path, "r", encoding="utf-8") as f:
+                sim_configs = json.load(f)
+        except Exception as e:
+            missing.append(f"Failed to load SIM_TASK_CONFIGS.json: {e}")
+            return False, missing
+
+        if sub_key not in sim_configs:
+            missing.append(f"Missing config key: {sub_key}")
+            return False, missing
+
+        entry = sim_configs[sub_key]
+        dataset_dir = entry.get("dataset_dir", "")
+        if not dataset_dir:
+            missing.append(f"Empty dataset_dir for {sub_key}")
+            return False, missing
+
+        dataset_path = self.policy_dir / dataset_dir
+        if not dataset_path.is_dir():
+            missing.append(f"Dataset dir not found: {dataset_dir}")
+            return False, missing
+
+        expected_num = entry.get("num_episodes", expert_num)
+        for j in range(expected_num):
+            ep_file = dataset_path / f"episode_{j}.hdf5"
+            if not ep_file.is_file():
+                missing.append(f"Missing episode_{j}.hdf5 in {dataset_dir}")
+                continue
+
+            is_valid, err = self._check_hdf5_integrity(ep_file)
+            if not is_valid:
+                missing.append(f"Invalid episode_{j}.hdf5: {err}")
+
+        return len(missing) == 0, missing
+
+    def get_missing_data_items(
+        self, tr_tasks: List[Dict[str, Any]]
+    ) -> List[Tuple[str, str, int]]:
+        """
+        Get list of missing data items that need processing.
+
+        @input: [List[Dict], tr_tasks from config]
+        @output: [List[Tuple[str, str, int]], list of (task_name, task_config, expert_num)]
+        @scenario: [Identify which data items need to be processed]
+        """
+        missing_items = []
+        seen = set()
+
+        for task in tr_tasks:
+            data_sources = task.get("data_sources", [])
+            if not data_sources:
+                continue
+
+            for src in data_sources:
+                task_name = src.get("task_name")
+                task_config = src.get("task_config")
+                expert_num = src.get("expert_num")
+
+                if not all([task_name, task_config, expert_num]):
+                    continue
+
+                item_key = (task_name, task_config, expert_num)
+                if item_key in seen:
+                    continue
+                seen.add(item_key)
+
+                is_ready, _ = self.check_data_item_ready(
+                    task_name, task_config, expert_num
+                )
+                if not is_ready:
+                    missing_items.append(item_key)
+
+        return missing_items
+
     @abstractmethod
     def get_process_data_cmd(
         self, task_name: str, task_config: str, expert_num: str
@@ -243,6 +367,78 @@ class BaseFlowScheduler(ABC):
                 return code
             print(
                 f"[flow][process_data][task={task_name}] done log={done_final}",
+                flush=True,
+            )
+        return 0
+
+    def run_process_data_items(
+        self, env: dict, data_items: List[Tuple[str, str, int]], gpu_tag: str
+    ) -> int:
+        """
+        Process only missing data items with fine-grained control.
+
+        @input: [dict, env], [List[Tuple[str, str, int]], data items], [str, gpu_tag]
+        @output: [int, exit code]
+        @scenario: [Process only missing (task_name, task_config, expert_num) items]
+        """
+        logs = self.ensure_logs_dir(self.policy_dir)
+
+        for q_idx, (task_name, task_config, expert_num) in enumerate(data_items):
+            ts = self.utc8_now_str()
+            safe_task = self.safe_filename_part(f"{task_name}_{task_config}")
+            tmp_path = (
+                logs
+                / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
+            )
+            final_path = (
+                logs
+                / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
+            )
+            lf = self.open_flow_text_log(tmp_path)
+            lf.write(
+                f"# flow_meta kind=process_data task_name={task_name} task_config={task_config} expert_num={expert_num} slot=0 gpu={gpu_tag} queue_idx={q_idx} ts_utc8={ts}\n"
+            )
+            lf.flush()
+
+            cmd = self.get_process_data_cmd(task_name, task_config, str(expert_num))
+            if shutil.which("stdbuf"):
+                cmd = ["stdbuf", "-oL", "-eL"] + cmd
+
+            print(
+                f"[flow][slot=0][process_data][task={task_name}][config={task_config}][num={expert_num}][gpu={gpu_tag}] log={tmp_path} starting",
+                flush=True,
+            )
+            p = subprocess.Popen(
+                cmd,
+                cwd=str(self.policy_dir),
+                env=env,
+                stdout=lf,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            pid = p.pid
+            lf.write(f"# child_pid={pid}\n")
+            lf.flush()
+            done_final = final_path.parent / final_path.name.format(pid=pid)
+            self.rename_log_with_pid(tmp_path, done_final)
+            code = p.wait()
+            try:
+                lf.close()
+            except Exception:
+                pass
+            if code != 0:
+                print(
+                    f"[flow][process_data][task={task_name}][config={task_config}] failed code={code} log={done_final}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                self.dump_log_tail_to_stderr(
+                    done_final,
+                    f"[flow][process_data][task={task_name}][config={task_config}]",
+                )
+                return code
+            print(
+                f"[flow][process_data][task={task_name}][config={task_config}] done log={done_final}",
                 flush=True,
             )
         return 0
@@ -342,18 +538,36 @@ class BaseFlowScheduler(ABC):
             print("[flow] tr_tasks is empty", file=sys.stderr)
             return 1
 
-        task_data = self.get_process_data_tasks(tr_tasks)
         gpu_tag = str(parallel[0])
         env = self.inject_flow_child_env(os.environ.copy())
 
         print(
-            f"[flow] main MODEL={self.MODEL_NAME} PARALLEL={parallel} SEED={seed} TASK_DATA={len(task_data)} TR_TASKS={len(tr_tasks)} CONFIG={self.UNIFIED_CFG_PATH}",
+            f"[flow] main MODEL={self.MODEL_NAME} PARALLEL={parallel} SEED={seed} TR_TASKS={len(tr_tasks)} CONFIG={self.UNIFIED_CFG_PATH}",
             flush=True,
         )
 
-        pd_code = self.run_process_data_steps(env, task_data, gpu_tag)
-        if pd_code != 0:
-            return pd_code
+        missing_items = self.get_missing_data_items(tr_tasks)
+        if missing_items:
+            print(
+                f"[flow] Data check: {len(missing_items)} items need processing",
+                flush=True,
+            )
+            for task_name, task_config, expert_num in missing_items:
+                is_ready, missing = self.check_data_item_ready(
+                    task_name, task_config, expert_num
+                )
+                print(
+                    f"  - {task_name}/{task_config}/{expert_num}: {missing[:3]}{'...' if len(missing) > 3 else ''}",
+                    flush=True,
+                )
+
+            pd_code = self.run_process_data_items(env, missing_items, gpu_tag)
+            if pd_code != 0:
+                return pd_code
+        else:
+            print(
+                "[flow] Data check: all items ready, skipping process_data", flush=True
+            )
 
         next_idx = 0
         total = len(tr_tasks)

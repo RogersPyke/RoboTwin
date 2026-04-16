@@ -148,6 +148,26 @@ def get_args_parser():
     )
     # === end of early stop args ===
 
+    # Passed through imitate_episodes.py / _tr_wrapper.py; consumed only in imitate_episodes
+    # training loop. Listed here because build_ACT_model_and_optimizer() calls parse_args()
+    # on sys.argv (see comment block above early_stop args).
+    parser.add_argument(
+        "--max_tr_steps",
+        action="store",
+        type=int,
+        help="(unused by DETR) hard cap for optimizer steps",
+        required=False,
+        default=None,
+    )
+    parser.add_argument(
+        "--save_interval",
+        action="store",
+        type=int,
+        help="(unused by DETR) force-save ckpt every K optimizer steps",
+        required=False,
+        default=None,
+    )
+
     return parser
 
 
