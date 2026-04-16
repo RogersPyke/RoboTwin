@@ -1,23 +1,17 @@
 #!/usr/bin/env python3
-
+# -*- coding: utf-8 -*-
 """
 Flow scheduler for DP train/eval pipeline.
 
-Design notes (minimal override contract):
-1) Keep YAML as baseline defaults for each stem config.
-2) Allow flow-level overrides for practical batch scheduling.
-3) Keep optional CLI as highest-priority emergency override.
+Uses unified configuration from policy_util/config/tr.yaml.
 
-Runtime precedence:
-CLI args > FLOW env injected by this file > YAML config defaults.
+Usage:
+    cd policy/DP
+    bash __flow.sh
 
-This file only injects flow-level env values and process orchestration:
-- DP_FLOW_GPU      from PARALLEL slot gpu id
-- DP_FLOW_SEED     from FLOW_SEED (optional)
-- DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP, DP_FLOW_EARLY_STOP_PATIENCE_EVALS,
-  DP_FLOW_EARLY_STOP_REL_TOL from matching FLOW constants (optional, None skips)
-- DP_FLOW_MAX_TR_STEPS, DP_FLOW_SAVE_INTERVAL from matching FLOW constants
-  (optional, None skips)
+The flow will:
+1. Process data for all tasks defined in unified config
+2. Train models in parallel using GPU slots from gpu_parallel config
 """
 
 import atexit
@@ -46,52 +40,25 @@ from log_util.flow_log import (
     safe_filename_part,
     utc8_now_str,
 )
+from flow_util.unified_flow import (
+    build_tr_wrapper_cmd,
+    get_gpu_parallel,
+    get_model_config,
+    get_process_data_tasks,
+    get_seed,
+    get_tr_tasks,
+    load_unified_config,
+)
 
-# Optional flow-level overrides. Keep None to use YAML defaults.
-TASK_CONFIG = "demo_clean"
-EXPERT_NUM = "100"
-PARALLEL = [1, 1]
-FLOW_SEED = 0
-EVAL_STEPS_FOR_EARLY_STOP = 100
-EARLY_STOP_PATIENCE_EVALS = 20
-EARLY_STOP_REL_TOL = 1e-3
-MAX_TR_STEPS = 30000
-SAVE_INTERVAL = 10000
-
-# Explicit demo-processing task names (process_data.sh first argument).
-TASK_DATA = [
-    "move_pillbottle_pad",
-    "unmove_pillbottle_pad",
-    "stack_bowls_three",
-    "unstack_bowls_three",
-    "stack_blocks_three",
-    "unstack_blocks_three",
-    "hanging_mug",
-    "unhanging_mug",
-]
-
-# Ordered FIFO train-only steps.
-TASK_SEQ = [("train", stem) for stem in [
-    "flow_single_move_pillbottle_pad",
-    "flow_single_unmove_pillbottle_pad",
-    # "flow_joint_move_pillbottle_pad",
-    "flow_single_stack_bowls_three",
-    "flow_single_unstack_bowls_three",
-    # "flow_joint_stack_bowls_three",
-    "flow_single_stack_blocks_three",
-    "flow_single_unstack_blocks_three",
-    # "flow_joint_stack_blocks_three",
-    "flow_single_hanging_mug",
-    "flow_single_unhanging_mug",
-    # "flow_joint_hanging_mug",
-]]
+MODEL_NAME = "DP"
+UNIFIED_CFG_PATH = _POLICY_UTIL_ROOT / "config" / "tr.yaml"
 
 
 @dataclass
 class Job:
     slot: int
     phase: str
-    stem: str
+    task_id: str
     queue_idx: int
     process: subprocess.Popen
     log_path: Path
@@ -139,22 +106,27 @@ def on_signal(signum: int, _frame) -> None:
     raise SystemExit(128 + signum)
 
 
-def run_process_data_steps(env: dict) -> int:
+def run_process_data_steps(env: dict, task_data: List[str], gpu_tag: str) -> int:
     """Sequential process_data; one log file per task (full console capture)."""
-    gpu_tag = str(PARALLEL[0]) if PARALLEL else "none"
     logs = ensure_logs_dir(BASE_DIR)
-    for q_idx, task_name in enumerate(TASK_DATA):
+    for q_idx, task_name in enumerate(task_data):
         ts = utc8_now_str()
         safe_task = safe_filename_part(task_name)
-        tmp_path = logs / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
-        final_path = logs / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
+        tmp_path = (
+            logs
+            / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_tmp.log"
+        )
+        final_path = (
+            logs
+            / f"flow_process_data_{safe_task}_slot0_gpu{gpu_tag}_q{q_idx}_{ts}_pid{{pid}}.log"
+        )
         lf = open_flow_text_log(tmp_path)
         lf.write(
             f"# flow_meta kind=process_data task_name={task_name} slot=0 gpu={gpu_tag} "
             f"queue_idx={q_idx} ts_utc8={ts}\n"
         )
         lf.flush()
-        cmd = ["bash", "process_data.sh", task_name, TASK_CONFIG, EXPERT_NUM]
+        cmd = ["bash", "process_data.sh", task_name, "demo_clean", "100"]
         if shutil.which("stdbuf"):
             cmd = ["stdbuf", "-oL", "-eL"] + cmd
         print(
@@ -201,56 +173,52 @@ def run_process_data_steps(env: dict) -> int:
 def start_slot_job(
     slot: int,
     phase: str,
-    stem: str,
+    task_id: str,
     gpu_id: int,
     env: dict,
     queue_idx: int,
+    seed: int,
+    yaml_path: Path,
 ) -> Job:
     slot_env = env.copy()
     slot_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     slot_env["DP_FLOW_GPU"] = str(gpu_id)
     slot_env["DP_FLOW_SLOT"] = str(slot)
-    slot_env["DP_FLOW_STEM"] = stem
+    slot_env["DP_FLOW_TASK_ID"] = task_id
     slot_env["DP_FLOW_PHASE"] = phase
-    if FLOW_SEED is not None:
-        slot_env["DP_FLOW_SEED"] = str(FLOW_SEED)
-    if EVAL_STEPS_FOR_EARLY_STOP is not None:
-        slot_env["DP_FLOW_EVAL_STEPS_FOR_EARLY_STOP"] = str(EVAL_STEPS_FOR_EARLY_STOP)
-    if EARLY_STOP_PATIENCE_EVALS is not None:
-        slot_env["DP_FLOW_EARLY_STOP_PATIENCE_EVALS"] = str(EARLY_STOP_PATIENCE_EVALS)
-    if EARLY_STOP_REL_TOL is not None:
-        slot_env["DP_FLOW_EARLY_STOP_REL_TOL"] = str(EARLY_STOP_REL_TOL)
-    if MAX_TR_STEPS is not None:
-        slot_env["DP_FLOW_MAX_TR_STEPS"] = str(MAX_TR_STEPS)
-    if SAVE_INTERVAL is not None:
-        slot_env["DP_FLOW_SAVE_INTERVAL"] = str(SAVE_INTERVAL)
 
     logs = ensure_logs_dir(BASE_DIR)
     ts = utc8_now_str()
-    safe_stem = safe_filename_part(stem)
+    safe_task_id = safe_filename_part(task_id)
     tmp_path = logs / (
-        f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_tmp.log"
+        f"flow_{phase}_{safe_task_id}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_tmp.log"
     )
     final_path = logs / (
-        f"flow_{phase}_{safe_stem}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_pid{{pid}}.log"
+        f"flow_{phase}_{safe_task_id}_slot{slot}_gpu{gpu_id}_q{queue_idx}_{ts}_pid{{pid}}.log"
     )
 
     lf = open_flow_text_log(tmp_path)
     lf.write(
-        f"# flow_meta kind={phase} stem={stem} slot={slot} gpu={gpu_id} "
+        f"# flow_meta kind={phase} task_id={task_id} slot={slot} gpu={gpu_id} "
         f"queue_idx={queue_idx} ts_utc8={ts}\n"
     )
     lf.flush()
 
-    script = f"set -euo pipefail; bash _train.sh {stem!r}"
+    cmd = build_tr_wrapper_cmd(
+        task_id=task_id,
+        yaml_path=yaml_path,
+        gpu_id=gpu_id,
+        seed=seed,
+        wrapper_script="_tr_wrapper.py",
+    )
 
     print(
-        f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
+        f"[flow][slot={slot}][{phase}][task_id={task_id}][gpu={gpu_id}] "
         f"log={tmp_path} starting",
         flush=True,
     )
     process = subprocess.Popen(
-        bash_lc_cmd(script),
+        cmd,
         cwd=str(BASE_DIR),
         env=slot_env,
         stdout=lf,
@@ -264,14 +232,14 @@ def start_slot_job(
     rename_log_with_pid(tmp_path, done_final)
 
     print(
-        f"[flow][slot={slot}][{phase}][stem={stem}][gpu={gpu_id}] "
-        f"log={done_final} pid={pid} (source=FLOW.PARALLEL)",
+        f"[flow][slot={slot}][{phase}][task_id={task_id}][gpu={gpu_id}] "
+        f"log={done_final} pid={pid}",
         flush=True,
     )
     return Job(
         slot=slot,
         phase=phase,
-        stem=stem,
+        task_id=task_id,
         queue_idx=queue_idx,
         process=process,
         log_path=done_final,
@@ -280,26 +248,38 @@ def start_slot_job(
 
 
 def main() -> int:
-    if not PARALLEL:
-        print("[flow] PARALLEL is empty", file=sys.stderr)
+    unified_cfg = load_unified_config(UNIFIED_CFG_PATH)
+    model_cfg = get_model_config(unified_cfg, MODEL_NAME)
+    parallel = get_gpu_parallel(model_cfg)
+    tr_tasks = get_tr_tasks(model_cfg)
+    seed = get_seed(model_cfg)
+
+    if not parallel:
+        print("[flow] gpu_parallel is empty", file=sys.stderr)
         return 1
+
+    if not tr_tasks:
+        print("[flow] tr_tasks is empty", file=sys.stderr)
+        return 1
+
+    task_data = get_process_data_tasks(tr_tasks)
+    gpu_tag = str(parallel[0])
 
     env = inject_flow_child_env(os.environ.copy())
     print(
-        f"[flow] main TASK_CONFIG={TASK_CONFIG} EXPERT_NUM={EXPERT_NUM} "
-        f"PARALLEL={PARALLEL} FLOW_SEED={FLOW_SEED} "
-        f"TASK_DATA={len(TASK_DATA)} TASK_SEQ={len(TASK_SEQ)} "
-        f"(source=FLOW constants)",
+        f"[flow] main MODEL={MODEL_NAME} PARALLEL={parallel} SEED={seed} "
+        f"TASK_DATA={len(task_data)} TR_TASKS={len(tr_tasks)} "
+        f"CONFIG={UNIFIED_CFG_PATH}",
         flush=True,
     )
 
-    pd_code = run_process_data_steps(env)
+    pd_code = run_process_data_steps(env, task_data, gpu_tag)
     if pd_code != 0:
         return pd_code
 
     next_idx = 0
-    total = len(TASK_SEQ)
-    slot_count = len(PARALLEL)
+    total = len(tr_tasks)
+    slot_count = len(parallel)
 
     def try_fill_slots() -> None:
         nonlocal next_idx
@@ -312,9 +292,12 @@ def main() -> int:
                     break
             if slot is None:
                 break
-            phase, stem = TASK_SEQ[next_idx]
-            gpu_id = PARALLEL[slot]
-            job = start_slot_job(slot, phase, stem, gpu_id, env, next_idx)
+            task = tr_tasks[next_idx]
+            task_id = task.get("task_id", f"task_{next_idx}")
+            gpu_id = parallel[slot]
+            job = start_slot_job(
+                slot, "train", task_id, gpu_id, env, next_idx, seed, UNIFIED_CFG_PATH
+            )
             ACTIVE_JOBS[job.process.pid] = job
             next_idx += 1
 
@@ -333,9 +316,7 @@ def main() -> int:
                 pass
             if code != 0:
                 failed = True
-                hdr = (
-                    f"[flow][slot={job.slot}][{job.phase}][stem={job.stem}]"
-                )
+                hdr = f"[flow][slot={job.slot}][{job.phase}][task_id={job.task_id}]"
                 print(
                     f"{hdr} failed code={code} log={job.log_path}",
                     file=sys.stderr,

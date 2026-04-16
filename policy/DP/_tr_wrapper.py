@@ -395,6 +395,21 @@ def _run_from_merged_config(
     return 0
 
 
+def _extract_model_config(
+    unified_cfg: Dict[str, Any], model_name: str
+) -> Dict[str, Any]:
+    """Extract model-specific config from unified config by merging global and model sections."""
+    global_cfg = unified_cfg.get("global", {})
+    model_cfg = unified_cfg.get(model_name, {})
+    result = dict(global_cfg)
+    for key, value in model_cfg.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="DP train wrapper.")
     parser.add_argument(
@@ -423,7 +438,8 @@ def main(argv: list) -> int:
 
     try:
         if args.yaml_paths and args.task_id:
-            cfg = _merge_yamls(args.yaml_paths)
+            unified_cfg = _merge_yamls(args.yaml_paths)
+            cfg = _extract_model_config(unified_cfg, "DP")
             seed = args.seed if args.seed is not None else cfg.get("seed", 0)
             gpu_id = args.gpu_id
             return _run_from_merged_config(
