@@ -10,6 +10,20 @@
 #   python script/__flow.py --model DP
 # ============================================================
 
+early_stop:
+  # Number of optimizer steps between validation evaluations.
+  # Higher values = less frequent evaluation = faster training.
+  eval_steps: 1000
+  
+  # Number of consecutive evaluations without improvement before stopping.
+  # Higher values = more patience = longer training before early stop.
+  patience_evals: 20
+  
+  # Relative tolerance for improvement detection.
+  # If (new_loss < best_loss * (1 - rel_tol)), considered an improvement.
+  # Example: 0.001 means 0.1% improvement threshold.
+  rel_tol: 0.001
+
 # ------------------------------------------------------------
 # GPU Parallel Configuration
 # ------------------------------------------------------------
