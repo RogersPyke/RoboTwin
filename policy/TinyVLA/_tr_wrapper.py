@@ -3,12 +3,8 @@
 """
 TinyVLA Train wrapper.
 
-Usage (new multi-YAML mode):
-    python3 _tr_wrapper.py --task-id <id> --yaml <shared.yaml> --yaml <model.yaml> [--gpu-id N] [--seed N]
-
-Usage (legacy single-YAML mode):
-    python3 _tr_wrapper.py <cfg_name>
-    python3 _tr_wrapper.py --config <cfg_name>
+Usage:
+    python3 _tr_wrapper.py --task-id <id> --yaml <config.yaml> [--gpu-id N] [--seed N]
 """
 
 import argparse
@@ -70,12 +66,18 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return result
 
 
-def _merge_yamls(yaml_paths: List[str]) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {}
-    for path in yaml_paths:
-        cfg = _load_yaml(path)
-        merged = _deep_merge(merged, cfg)
-    return merged
+def _extract_model_config(
+    unified_cfg: Dict[str, Any], model_name: str
+) -> Dict[str, Any]:
+    global_cfg = unified_cfg.get("global", {})
+    model_cfg = unified_cfg.get(model_name, {})
+    result = dict(global_cfg)
+    for key, value in model_cfg.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def _get_task_from_config(
@@ -315,40 +317,25 @@ def _run_from_merged_config(
     return 0
 
 
-def _extract_model_config(
-    unified_cfg: Dict[str, Any], model_name: str
-) -> Dict[str, Any]:
-    """Extract model-specific config from unified config by merging global and model sections."""
-    global_cfg = unified_cfg.get("global", {})
-    model_cfg = unified_cfg.get(model_name, {})
-    result = dict(global_cfg)
-    for key, value in model_cfg.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
 def main(argv: list) -> int:
     parser = argparse.ArgumentParser(description="TinyVLA train wrapper.")
     parser.add_argument(
-        "--task-id", dest="task_id", type=str, help="Task ID from tr_tasks.yaml."
+        "--task-id",
+        dest="task_id",
+        type=str,
+        required=True,
+        help="Task ID from tr_tasks.",
     )
     parser.add_argument(
         "--yaml",
-        dest="yaml_paths",
-        action="append",
+        dest="yaml_path",
         type=str,
-        help="YAML config path (can specify multiple).",
+        required=True,
+        help="Unified YAML config path.",
     )
     parser.add_argument("--gpu-id", dest="gpu_id", type=int, default=0, help="GPU ID.")
     parser.add_argument(
         "--seed", dest="seed", type=int, default=None, help="Random seed."
-    )
-    parser.add_argument("cfg_name", nargs="?", type=str, help="(legacy) Config name.")
-    parser.add_argument(
-        "--config", dest="config", type=str, help="(legacy) Config name."
     )
     args = parser.parse_args(argv[1:])
 
@@ -357,29 +344,12 @@ def main(argv: list) -> int:
     logger = _setup_logger(tinyvla_dir)
 
     try:
-        if args.yaml_paths and args.task_id:
-            unified_cfg = _merge_yamls(args.yaml_paths)
-            cfg = _extract_model_config(unified_cfg, "TinyVLA")
-            seed = args.seed if args.seed is not None else cfg.get("seed", 0)
-            gpu_id = args.gpu_id
-            return _run_from_merged_config(
-                cfg, args.task_id, gpu_id, seed, logger, tinyvla_dir
-            )
-
-        cfg_name = args.config or args.cfg_name
-        if cfg_name:
-            cfg_path = os.path.join(tinyvla_dir, "_tr_cfg", f"{cfg_name}.yaml")
-            if not os.path.isfile(cfg_path):
-                cfg_path = os.path.join(tinyvla_dir, "_tr_cfg", cfg_name)
-            cfg = _load_yaml(cfg_path)
-            task_id = cfg.get("tr_tasks", [{}])[0].get("task_id", cfg_name)
-            seed = args.seed if args.seed is not None else cfg.get("seed", 0)
-            gpu_id = args.gpu_id
-            return _run_from_merged_config(
-                cfg, task_id, gpu_id, seed, logger, tinyvla_dir
-            )
-
-        parser.error("Use --task-id + --yaml, or provide cfg_name.")
+        unified_cfg = _load_yaml(args.yaml_path)
+        cfg = _extract_model_config(unified_cfg, "TinyVLA")
+        seed = args.seed if args.seed is not None else cfg.get("seed", 0)
+        return _run_from_merged_config(
+            cfg, args.task_id, args.gpu_id, seed, logger, tinyvla_dir
+        )
     except Exception as exc:
         logger.error("Wrapper failed: %s", str(exc))
         logger.error("Stack trace:\n%s", traceback.format_exc())
