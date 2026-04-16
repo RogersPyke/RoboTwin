@@ -23,7 +23,7 @@ import yaml
 
 ROBOTWIN_ROOT = Path(__file__).resolve().parent.parent.parent
 POLICY_ROOT = ROBOTWIN_ROOT / "policy"
-SHARED_CFG_PATH = POLICY_ROOT / "config" / "_tr_cfg_shared.yaml"
+SHARED_CFG_PATH = ROBOTWIN_ROOT / "policy_util" / "config" / "tr.yaml"
 
 MODEL_CFG_PATHS = {
     "ACT": POLICY_ROOT / "ACT" / "_tr_cfg" / "tr_tasks.yaml",
@@ -183,14 +183,27 @@ def load_tr_config(
     model = model_normalized
 
     shared_cfg = _load_yaml_file(SHARED_CFG_PATH)
+    using_unified_shared = "global" in shared_cfg and model in shared_cfg
 
     if config_path:
         model_cfg_path = Path(config_path)
+        model_cfg = _load_yaml_file(model_cfg_path)
+        if "global" in model_cfg and model in model_cfg:
+            merged = _deep_merge(model_cfg.get("global", {}), model_cfg.get(model, {}))
+        else:
+            if using_unified_shared:
+                merged = _deep_merge(shared_cfg.get("global", {}), shared_cfg.get(model, {}))
+                merged = _deep_merge(merged, model_cfg)
+            else:
+                merged = _deep_merge(shared_cfg, model_cfg)
     else:
-        model_cfg_path = MODEL_CFG_PATHS[model]
-    model_cfg = _load_yaml_file(model_cfg_path)
-
-    merged = _deep_merge(shared_cfg, model_cfg)
+        if using_unified_shared:
+            model_cfg_path = SHARED_CFG_PATH
+            merged = _deep_merge(shared_cfg.get("global", {}), shared_cfg.get(model, {}))
+        else:
+            model_cfg_path = MODEL_CFG_PATHS[model]
+            model_cfg = _load_yaml_file(model_cfg_path)
+            merged = _deep_merge(shared_cfg, model_cfg)
 
     if "gpu_parallel" not in merged:
         raise ValueError(f"Model config must define gpu_parallel: {model}")

@@ -40,7 +40,7 @@ from log_util.flow_log import (
     utc8_now_str,
 )
 
-SHARED_YAML = BASE_DIR / "policy" / "config" / "_tr_cfg_shared.yaml"
+SHARED_YAML = BASE_DIR / "policy_util" / "config" / "tr.yaml"
 
 
 @dataclass
@@ -98,15 +98,10 @@ def _get_model_dir(model: str) -> Path:
     return BASE_DIR / "policy" / model
 
 
-def _get_model_yaml(model: str) -> Path:
-    return _get_model_dir(model) / "_tr_cfg" / "tr_tasks.yaml"
-
-
 def _build_train_command(
     model: str,
     task_id: str,
     shared_yaml: Path,
-    model_yaml: Path,
     gpu_id: int,
     seed: int,
 ) -> List[str]:
@@ -118,8 +113,6 @@ def _build_train_command(
         task_id,
         "--yaml",
         str(shared_yaml),
-        "--yaml",
-        str(model_yaml),
         "--gpu-id",
         str(gpu_id),
         "--seed",
@@ -138,7 +131,6 @@ def start_slot_job(
 ) -> Job:
     model = cfg["_model"]
     model_dir = _get_model_dir(model)
-    model_yaml = _get_model_yaml(model)
 
     slot_env = env.copy()
     slot_env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
@@ -163,7 +155,7 @@ def start_slot_job(
     lf.flush()
 
     seed = cfg.get("seed", 0)
-    cmd = _build_train_command(model, task_id, SHARED_YAML, model_yaml, gpu_id, seed)
+    cmd = _build_train_command(model, task_id, SHARED_YAML, gpu_id, seed)
 
     print(
         f"[flow][slot={slot}][train][task={task_id}][gpu={gpu_id}] "

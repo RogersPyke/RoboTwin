@@ -218,9 +218,14 @@ def _run_from_merged_config(
     act_dim_feedforward = int(params.get("dim_feedforward", 3200))
 
     early_stop = cfg.get("early_stop", {})
-    early_stop_patience_evals = early_stop.get("patience_evals")
-    early_stop_rel_tol = early_stop.get("rel_tol")
-    eval_steps_for_early_stop = early_stop.get("eval_steps")
+    early_stop_enabled = bool(early_stop.get("enabled", True))
+    early_stop_patience_evals = (
+        early_stop.get("patience_evals") if early_stop_enabled else None
+    )
+    early_stop_rel_tol = early_stop.get("rel_tol") if early_stop_enabled else None
+    eval_steps_for_early_stop = (
+        early_stop.get("eval_steps") if early_stop_enabled else None
+    )
     limits = cfg.get("limits", {})
     max_tr_steps = limits.get("max_tr_steps")
     save_interval = limits.get("save_interval")
@@ -366,6 +371,8 @@ def _run_from_merged_config(
     _maybe_add_arg(cmd, "--early_stop_rel_tol", early_stop_rel_tol)
     _maybe_add_arg(cmd, "--early_stop_patience_evals", early_stop_patience_evals)
     _maybe_add_arg(cmd, "--eval_steps_for_early_stop", eval_steps_for_early_stop)
+    _maybe_add_arg(cmd, "--max_tr_steps", max_tr_steps)
+    _maybe_add_arg(cmd, "--save_interval", save_interval)
     logger.info("Launching training: %s", " ".join(cmd))
     sim_task_root_dir = os.path.join("./processed_data", f"sim-{combined_task_slug}")
     try:

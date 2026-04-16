@@ -304,9 +304,14 @@ def _run_from_merged_config(
     learning_rate = float(params.get("lr", 1.0e-4))
 
     early_stop = cfg.get("early_stop", {})
-    early_stop_patience_evals = early_stop.get("patience_evals", 0)
-    early_stop_rel_tol = early_stop.get("rel_tol", 0.0)
-    eval_steps_for_early_stop = early_stop.get("eval_steps", 1)
+    early_stop_enabled = bool(early_stop.get("enabled", True))
+    early_stop_patience_evals = (
+        early_stop.get("patience_evals", 0) if early_stop_enabled else 0
+    )
+    early_stop_rel_tol = early_stop.get("rel_tol", 0.0) if early_stop_enabled else 0.0
+    eval_steps_for_early_stop = (
+        early_stop.get("eval_steps", 1) if early_stop_enabled else 1
+    )
     limits = cfg.get("limits", {})
     max_tr_steps = limits.get("max_tr_steps")
     save_interval = limits.get("save_interval")

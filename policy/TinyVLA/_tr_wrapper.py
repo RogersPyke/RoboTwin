@@ -241,12 +241,17 @@ def _run_from_merged_config(
     train_args["joint_task_spec"] = json.dumps(joint_task_spec)
 
     early_stop = cfg.get("early_stop", {})
-    if early_stop.get("eval_steps"):
-        train_args["eval_steps_for_early_stop"] = early_stop["eval_steps"]
-    if early_stop.get("patience_evals"):
-        train_args["early_stop_patience_evals"] = early_stop["patience_evals"]
-    if early_stop.get("rel_tol"):
-        train_args["early_stop_rel_tol"] = early_stop["rel_tol"]
+    early_stop_enabled = bool(early_stop.get("enabled", True))
+    if early_stop_enabled:
+        if early_stop.get("eval_steps") is not None:
+            train_args["eval_steps_for_early_stop"] = early_stop["eval_steps"]
+        if early_stop.get("patience_evals") is not None:
+            train_args["early_stop_patience_evals"] = early_stop["patience_evals"]
+        if early_stop.get("rel_tol") is not None:
+            train_args["early_stop_rel_tol"] = early_stop["rel_tol"]
+    else:
+        train_args["early_stop_patience_evals"] = 0
+        train_args["early_stop_rel_tol"] = 0.0
 
     limits = cfg.get("limits", {})
     if limits.get("max_tr_steps"):
