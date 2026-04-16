@@ -55,7 +55,7 @@ class BaseFlowScheduler(ABC):
         self.active_jobs: Dict[int, Job] = {}
         self._setup_signal_handlers()
 
-        policy_util_root = policy_dir.parent.parent.parent / "policy_util"
+        policy_util_root = policy_dir.parent.parent / "policy_util"
         if self.UNIFIED_CFG_PATH is None:
             self.UNIFIED_CFG_PATH = policy_util_root / "config" / "tr.yaml"
 
