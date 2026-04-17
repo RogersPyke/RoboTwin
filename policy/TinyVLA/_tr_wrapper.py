@@ -287,7 +287,8 @@ class TinyVLATrWrapper(BaseTrWrapper):
 
 def main(argv: list) -> int:
     """CLI entry point."""
-    return TinyVLATrWrapper.main(argv)
+    policy_dir = os.path.dirname(os.path.abspath(__file__))
+    return TinyVLATrWrapper.main(argv, policy_dir=policy_dir)
 
 
 if __name__ == "__main__":

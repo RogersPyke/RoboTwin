@@ -375,11 +375,15 @@ class BaseTrWrapper(ABC):
             return 1
 
     @classmethod
-    def main(cls, argv: List[str]) -> int:
+    def main(cls, argv: List[str], policy_dir: Optional[str] = None) -> int:
         """
-        @input: [list, command line arguments]
+        @input: [list, command line arguments], [Optional[str], policy directory path]
         @output: [int, exit code]
         @scenario: [CLI entry point for training wrapper]
+
+        Note: Subclasses should pass policy_dir explicitly, otherwise __file__ will
+        point to this base class file (policy_util/wrapper_base/) instead of the
+        actual policy directory (e.g., policy/TinyVLA/).
         """
         parser = argparse.ArgumentParser(description=f"{cls.MODEL_NAME} train wrapper.")
         parser.add_argument(
@@ -412,7 +416,9 @@ class BaseTrWrapper(ABC):
         )
         args = parser.parse_args(argv[1:])
 
-        policy_dir = os.path.dirname(os.path.abspath(__file__))
+        if policy_dir is None:
+            # Fallback: use directory of this file (NOT recommended for subclasses)
+            policy_dir = os.path.dirname(os.path.abspath(__file__))
         wrapper = cls(policy_dir)
         return wrapper.run(
             task_id=args.task_id,
