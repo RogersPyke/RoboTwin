@@ -1,359 +1,293 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-TinyVLA Train wrapper.
+TinyVLA Train wrapper - Refactored to use BaseTrWrapper.
 
 Usage:
     python3 _tr_wrapper.py --task-id <id> --yaml <config.yaml> [--gpu-id N] [--seed N]
 """
 
-import argparse
 import json
-import logging
 import os
-import re
 import shutil
-import subprocess
 import sys
-import traceback
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-import yaml
+# Add policy_util to path for imports
+_POLICY_UTIL_ROOT = Path(__file__).resolve().parent.parent.parent / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
 
-
-LOGGER: Optional[logging.Logger] = None
-
-
-def _setup_logger(tinyvla_dir: str) -> logging.Logger:
-    global LOGGER
-    logs_dir = os.path.join(tinyvla_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    script_name = os.path.splitext(os.path.basename(__file__))[0]
-    tz_8 = timezone(timedelta(hours=8))
-    ts = datetime.now(tz_8).strftime("%Y%m%d%H%M%S")
-    log_path = os.path.join(logs_dir, f"{script_name}_{ts}.log")
-    logger = logging.getLogger(script_name)
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        formatter = logging.Formatter("[Wrapper] [%(levelname)s] %(message)s")
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(formatter)
-        sh = logging.StreamHandler(sys.stdout)
-        sh.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(sh)
-    LOGGER = logger
-    return logger
+from wrapper_base import BaseTrWrapper
+from wrapper_base.config_util import build_argv_from_args_dict
 
 
-def _load_yaml(path: str) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-    if not isinstance(cfg, dict):
-        raise ValueError(f"Invalid YAML config: {path}")
-    return cfg
+class TinyVLATrWrapper(BaseTrWrapper):
+    """
+    TinyVLA-specific training wrapper.
 
+    Model-specific features:
+    - Uses HuggingFace Trainer
+    - Supports DeepSpeed multi-GPU training
+    - Uses dataset_dirs list (multiple data directories)
+    - Checkpoint format is directories (checkpoint-N)
+    - Uses joint_task_spec.json for task configuration
+    """
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    result = dict(base)
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+    MODEL_NAME = "TinyVLA"
 
+    def _prepare_dataset(
+        self,
+        cfg: Dict[str, Any],
+        task: Dict[str, Any],
+        task_id: str,
+        task_names: List[str],
+        task_configs: List[str],
+        expert_counts: List[int],
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        @input: [various config and task parameters]
+        @output: [tuple, (dataset_dirs_json, dataset_info dict)]
+        @scenario: [Prepare TinyVLA dataset - resolve data directories]
+        """
+        robotwin_root = Path(self.policy_dir).parent.parent
+        dataset_dirs: List[str] = []
 
-def _extract_model_config(
-    unified_cfg: Dict[str, Any], model_name: str
-) -> Dict[str, Any]:
-    global_cfg = unified_cfg.get("global", {})
-    model_cfg = unified_cfg.get(model_name, {})
-    result = dict(global_cfg)
-    for key, value in model_cfg.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
-
-
-def _get_task_from_config(
-    cfg: Dict[str, Any], task_id: str
-) -> Optional[Dict[str, Any]]:
-    for task in cfg.get("tr_tasks", []):
-        if task.get("task_id") == task_id:
-            return task
-    return None
-
-
-def _build_argv_from_args_dict(
-    args_dict: Dict[str, Any], override_seed: Optional[int] = None
-) -> List[str]:
-    out: List[str] = []
-    for k, v in args_dict.items():
-        if v is None:
-            continue
-        flag = str(k)
-        if flag.startswith("--"):
-            flag = flag[2:]
-        if not flag:
-            continue
-        out.append(f"--{flag}")
-        if isinstance(v, bool):
-            out.append("True" if v else "False")
-        else:
-            out.append(str(v))
-    if override_seed is not None:
-        filtered: List[str] = []
-        i = 0
-        while i < len(out):
-            if out[i] == "--seed":
-                i += 2
-                continue
-            filtered.append(out[i])
-            i += 1
-        out = filtered
-        out.extend(["--seed", str(override_seed)])
-    return out
-
-
-def _extract_step_from_tinyvla_name(name: str) -> int:
-    m = re.search(r"checkpoint-(\d+)$", name)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"step_(\d+)$", name)
-    if m:
-        return int(m.group(1))
-    return -1
-
-
-def _package_checkpoints_for_eval(output_dir: str) -> None:
-    if not os.path.isdir(output_dir):
-        return
-    candidates = []
-    for name in sorted(os.listdir(output_dir)):
-        path = os.path.join(output_dir, name)
-        if name.startswith("checkpoint-") and os.path.isdir(path):
-            candidates.append((name, path))
-        elif name == "policy_best" and os.path.isdir(path):
-            candidates.append((name, path))
-    if not candidates:
-        return
-    bundle_root = os.path.join(output_dir, "step_packages")
-    os.makedirs(bundle_root, exist_ok=True)
-    passthrough_files = [
-        "training_run_manifest.txt",
-        "steps.txt",
-        "joint_task_spec.json",
-    ]
-    for name, src_path in candidates:
-        step_id = _extract_step_from_tinyvla_name(name)
-        if step_id >= 0:
-            folder_name = f"step_{step_id}"
-        elif name == "policy_best":
-            folder_name = "step_best"
-        else:
-            folder_name = f"step_misc_{name.replace('/', '_')}"
-        dst_dir = os.path.join(bundle_root, folder_name)
-        os.makedirs(dst_dir, exist_ok=True)
-        model_dir = os.path.join(dst_dir, "model")
-        shutil.copytree(src_path, model_dir, dirs_exist_ok=True)
-        for keep in passthrough_files:
-            src_keep = os.path.join(output_dir, keep)
-            if os.path.isfile(src_keep):
-                shutil.copy2(src_keep, os.path.join(dst_dir, keep))
-    if LOGGER is not None:
-        LOGGER.info(
-            "Packaged %d TinyVLA checkpoints to %s", len(candidates), bundle_root
-        )
-
-
-def _run_from_merged_config(
-    cfg: Dict[str, Any],
-    task_id: str,
-    gpu_id: int,
-    seed: int,
-    logger: logging.Logger,
-    tinyvla_dir: str,
-) -> int:
-    task = _get_task_from_config(cfg, task_id)
-    if task is None:
-        raise ValueError(f"Task not found: {task_id}")
-
-    model_defaults = cfg.get("model_defaults", {})
-    params = dict(model_defaults)
-    for key in task:
-        if key not in (
-            "task_id",
-            "data_folder",
-            "data_sources",
-            "_resolved_data",
-            "task_name",
-            "task_config",
-            "expert_num",
-        ):
-            params[key] = task[key]
-
-    if "data_folder" in task:
-        task_names = [task.get("task_name", task_id)]
-        task_configs = [task.get("task_config", "demo_clean")]
-        expert_counts = [task.get("expert_num", 100)]
-    elif "data_sources" in task:
-        task_names = [src["task_name"] for src in task["data_sources"]]
-        task_configs = [src["task_config"] for src in task["data_sources"]]
-        expert_counts = [src["expert_num"] for src in task["data_sources"]]
-    else:
-        raise ValueError(f"Task {task_id} must have data_folder or data_sources")
-
-    combined_task_slug = "__".join(task_names)
-    combined_config_slug = "__".join(task_configs)
-    combined_total_episodes = int(sum(expert_counts))
-
-    dataset_dirs: List[str] = []
-    if "data_folder" in task:
-        data_folder = Path(task["data_folder"])
-        if not data_folder.is_absolute():
-            robotwin_root = Path(tinyvla_dir).parent.parent
-            data_folder = robotwin_root / data_folder
-        dataset_dirs.append(str(data_folder))
-    elif "data_sources" in task:
-        robotwin_root = Path(tinyvla_dir).parent.parent
-        for src in task["data_sources"]:
-            data_folder = Path(src["data_folder"])
+        if "data_folder" in task:
+            data_folder = Path(task["data_folder"])
             if not data_folder.is_absolute():
                 data_folder = robotwin_root / data_folder
             dataset_dirs.append(str(data_folder))
+        elif "data_sources" in task:
+            for src in task["data_sources"]:
+                data_folder = Path(src["data_folder"])
+                if not data_folder.is_absolute():
+                    data_folder = robotwin_root / data_folder
+                dataset_dirs.append(str(data_folder))
+        else:
+            raise ValueError(f"Task {task_id} must have data_folder or data_sources")
 
-    joint_task_spec = {
-        "task_name": combined_task_slug,
-        "dataset_dir": dataset_dirs,
-        "camera_names": ["cam_high", "cam_left_wrist", "cam_right_wrist"],
-        "episode_len": 0,
-    }
+        combined_task_slug = "__".join(task_names)
+        combined_config_slug = "__".join(task_configs)
+        combined_total_episodes = int(sum(expert_counts))
 
-    output_dir = os.path.join(tinyvla_dir, "tinyvla_ckpt", task_id)
+        # Create joint_task_spec
+        joint_task_spec = {
+            "task_name": combined_task_slug,
+            "dataset_dir": dataset_dirs,
+            "camera_names": ["cam_high", "cam_left_wrist", "cam_right_wrist"],
+            "episode_len": 0,
+        }
 
-    train_args: Dict[str, Any] = dict(params)
-    train_args["task_name"] = combined_task_slug
-    train_args["output_dir"] = output_dir
-    train_args.setdefault("logging_dir", os.path.join(output_dir, "log"))
-    train_args["joint_task_spec"] = json.dumps(joint_task_spec)
+        dataset_info = {
+            "task_slug": combined_task_slug,
+            "config_slug": combined_config_slug,
+            "total_episodes": combined_total_episodes,
+            "dataset_dirs": dataset_dirs,
+            "joint_task_spec": joint_task_spec,
+        }
+        return json.dumps(dataset_dirs), dataset_info
 
-    early_stop = cfg.get("early_stop", {})
-    early_stop_enabled = bool(early_stop.get("enabled", True))
-    if early_stop_enabled:
-        if early_stop.get("eval_steps") is not None:
-            train_args["eval_steps_for_early_stop"] = early_stop["eval_steps"]
-        if early_stop.get("patience_evals") is not None:
-            train_args["early_stop_patience_evals"] = early_stop["patience_evals"]
-        if early_stop.get("rel_tol") is not None:
-            train_args["early_stop_rel_tol"] = early_stop["rel_tol"]
-    else:
-        train_args["early_stop_patience_evals"] = 0
-        train_args["early_stop_rel_tol"] = 0.0
+    def _build_train_command(
+        self,
+        cfg: Dict[str, Any],
+        task: Dict[str, Any],
+        params: Dict[str, Any],
+        task_id: str,
+        task_names: List[str],
+        task_configs: List[str],
+        expert_counts: List[int],
+        dataset_info: Dict[str, Any],
+        ckpt_dir: str,
+        gpu_id: int,
+        seed: int,
+    ) -> List[str]:
+        """
+        @input: [various config and task parameters]
+        @output: [list, command tokens for train_vla.py]
+        @scenario: [Build TinyVLA training command]
+        """
+        combined_task_slug = dataset_info["task_slug"]
+        output_dir = os.path.join(self.policy_dir, "tinyvla_ckpt", task_id)
 
-    limits = cfg.get("limits", {})
-    if limits.get("max_tr_steps"):
-        train_args["max_steps"] = limits["max_tr_steps"]
-    if limits.get("save_interval"):
-        train_args["save_steps"] = limits["save_interval"]
-        train_args["save_strategy"] = "steps"
+        train_args: Dict[str, Any] = dict(params)
+        train_args["task_name"] = combined_task_slug
+        train_args["output_dir"] = output_dir
+        train_args.setdefault("logging_dir", os.path.join(output_dir, "log"))
+        train_args["joint_task_spec"] = json.dumps(dataset_info["joint_task_spec"])
 
-    deepspeed_cfg = cfg.get("deepspeed", {})
-    use_deepspeed = deepspeed_cfg.get("enabled", False)
+        # Early stop parameters
+        early_stop = cfg.get("early_stop", {})
+        early_stop_enabled = bool(early_stop.get("enabled", True))
+        if early_stop_enabled:
+            if early_stop.get("eval_steps") is not None:
+                train_args["eval_steps_for_early_stop"] = early_stop["eval_steps"]
+            if early_stop.get("patience_evals") is not None:
+                train_args["early_stop_patience_evals"] = early_stop["patience_evals"]
+            if early_stop.get("rel_tol") is not None:
+                train_args["early_stop_rel_tol"] = early_stop["rel_tol"]
+        else:
+            train_args["early_stop_patience_evals"] = 0
+            train_args["early_stop_rel_tol"] = 0.0
 
-    if use_deepspeed:
-        num_gpus = int(deepspeed_cfg.get("num_gpus", 1))
-        master_port = int(deepspeed_cfg.get("master_port", 29604))
-        zero2_json = str(deepspeed_cfg.get("zero2_json", "scripts/zero2.json"))
-        train_args["deepspeed"] = zero2_json
+        # Limits
+        limits = cfg.get("limits", {})
+        if limits.get("max_tr_steps"):
+            train_args["max_steps"] = limits["max_tr_steps"]
+        if limits.get("save_interval"):
+            train_args["save_steps"] = limits["save_interval"]
+            train_args["save_strategy"] = "steps"
 
-    logger.info("Task ID: %s", task_id)
-    logger.info("Tasks: %s", task_names)
-    logger.info("Seed: %s", seed)
-    logger.info("GPU ID: %s", gpu_id)
-    logger.info("Output dir: %s", output_dir)
+        # DeepSpeed
+        deepspeed_cfg = cfg.get("deepspeed", {})
+        use_deepspeed = deepspeed_cfg.get("enabled", False)
 
-    os.makedirs(output_dir, exist_ok=True)
-    manifest_path = os.path.join(output_dir, "training_run_manifest.txt")
-    with open(manifest_path, "w", encoding="ascii") as mf:
-        mf.write(f"task_id={task_id}\n")
-        mf.write(f"tinyvla_policy_dir={tinyvla_dir}\n")
-        mf.write(f"combined_task_slug={combined_task_slug}\n")
-        mf.write(f"combined_config_slug={combined_config_slug}\n")
-        mf.write(f"combined_total_episodes={combined_total_episodes}\n")
+        if use_deepspeed:
+            num_gpus = int(deepspeed_cfg.get("num_gpus", 1))
+            master_port = int(deepspeed_cfg.get("master_port", 29604))
+            zero2_json = str(deepspeed_cfg.get("zero2_json", "scripts/zero2.json"))
+            train_args["deepspeed"] = zero2_json
+            self._use_deepspeed = True
+            self._num_gpus = num_gpus
+            self._master_port = master_port
+        else:
+            self._use_deepspeed = False
 
-    argv_tokens = _build_argv_from_args_dict(train_args, override_seed=seed)
+        # Store output_dir for manifest
+        self._output_dir = output_dir
 
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    env["PYTHONNOUSERSITE"] = "1"
+        # Build argv
+        argv_tokens = build_argv_from_args_dict(train_args, override_seed=seed)
 
-    if use_deepspeed:
-        cmd = [
-            "deepspeed",
-            "--master_port",
-            str(master_port),
-            f"--num_gpus={num_gpus}",
-            "--num_nodes=1",
-            "./train_vla.py",
-        ] + argv_tokens
-    else:
-        cmd = [sys.executable, "./train_vla.py"] + argv_tokens
+        if use_deepspeed:
+            cmd = [
+                "deepspeed",
+                "--master_port", str(self._master_port),
+                f"--num_gpus={self._num_gpus}",
+                "--num_nodes=1",
+                "./train_vla.py",
+            ] + argv_tokens
+        else:
+            cmd = [sys.executable, "./train_vla.py"] + argv_tokens
 
-    logger.info("Launching training: %s", " ".join(cmd))
-    train_succeeded = False
-    try:
-        subprocess.run(cmd, check=True, env=env, cwd=tinyvla_dir)
-        train_succeeded = True
-        _package_checkpoints_for_eval(output_dir)
-    finally:
-        if not train_succeeded and os.path.isfile(manifest_path):
-            os.remove(manifest_path)
-            logger.info("Removed manifest after failed training: %s", manifest_path)
-    return 0
+        return cmd
+
+    def _get_checkpoint_dir(self, task_id: str) -> str:
+        """
+        @input: [str, task_id]
+        @output: [str, checkpoint directory path]
+        @scenario: [Return TinyVLA checkpoint directory]
+        """
+        return os.path.join(self.policy_dir, "tinyvla_ckpt", task_id)
+
+    def _package_checkpoints(self, ckpt_dir: str) -> None:
+        """
+        @input: [str, checkpoint directory]
+        @output: [None]
+        @scenario: [Package TinyVLA checkpoints - directories not files]
+        """
+        if not os.path.isdir(ckpt_dir):
+            return
+
+        candidates = []
+        for name in sorted(os.listdir(ckpt_dir)):
+            path = os.path.join(ckpt_dir, name)
+            if name.startswith("checkpoint-") and os.path.isdir(path):
+                candidates.append((name, path))
+            elif name == "policy_best" and os.path.isdir(path):
+                candidates.append((name, path))
+
+        if not candidates:
+            return
+
+        bundle_root = os.path.join(ckpt_dir, "step_packages")
+        os.makedirs(bundle_root, exist_ok=True)
+        passthrough_files = [
+            "training_run_manifest.txt",
+            "steps.txt",
+            "joint_task_spec.json",
+        ]
+
+        for name, src_path in candidates:
+            step_id = self._extract_step_from_tinyvla_name(name)
+            if step_id >= 0:
+                folder_name = f"step_{step_id}"
+            elif name == "policy_best":
+                folder_name = "step_best"
+            else:
+                folder_name = f"step_misc_{name.replace('/', '_')}"
+
+            dst_dir = os.path.join(bundle_root, folder_name)
+            os.makedirs(dst_dir, exist_ok=True)
+
+            # TinyVLA uses directories, copy tree
+            model_dir = os.path.join(dst_dir, "model")
+            shutil.copytree(src_path, model_dir, dirs_exist_ok=True)
+
+            # Copy passthrough files
+            for keep in passthrough_files:
+                src_keep = os.path.join(ckpt_dir, keep)
+                if os.path.isfile(src_keep):
+                    shutil.copy2(src_keep, os.path.join(dst_dir, keep))
+
+        self.logger.info("Packaged %d TinyVLA checkpoints to %s", len(candidates), bundle_root)
+
+    def _extract_step_from_tinyvla_name(self, name: str) -> int:
+        """Extract step from TinyVLA checkpoint directory name."""
+        import re
+        m = re.search(r"checkpoint-(\d+)$", name)
+        if m:
+            return int(m.group(1))
+        m = re.search(r"step_(\d+)$", name)
+        if m:
+            return int(m.group(1))
+        return -1
+
+    def _cleanup_after_training(
+        self,
+        cfg: Dict[str, Any],
+        task: Dict[str, Any],
+        dataset_info: Dict[str, Any],
+        success: bool,
+    ) -> None:
+        """
+        @input: [various parameters], [bool, training success]
+        @output: [None]
+        @scenario: [Cleanup manifest if training failed]
+        """
+        if not success:
+            manifest_path = os.path.join(
+                self._get_checkpoint_dir(dataset_info.get("task_id", "")),
+                "training_run_manifest.txt"
+            )
+            if os.path.isfile(manifest_path):
+                os.remove(manifest_path)
+                self.logger.info("Removed manifest after failed training: %s", manifest_path)
+
+    def write_manifest(
+        self, ckpt_dir: str, task_id: str, task_slug: str, config_slug: str, total_episodes: int
+    ) -> str:
+        """
+        @input: [various parameters]
+        @output: [str, manifest file path]
+        @scenario: [Write TinyVLA-specific training manifest]
+        """
+        os.makedirs(ckpt_dir, exist_ok=True)
+        manifest_path = os.path.join(ckpt_dir, "training_run_manifest.txt")
+        with open(manifest_path, "w", encoding="ascii") as mf:
+            mf.write(f"task_id={task_id}\n")
+            mf.write(f"tinyvla_policy_dir={self.policy_dir}\n")
+            mf.write(f"combined_task_slug={task_slug}\n")
+            mf.write(f"combined_config_slug={config_slug}\n")
+            mf.write(f"combined_total_episodes={total_episodes}\n")
+        self.logger.info("Saved training manifest to %s", manifest_path)
+        return manifest_path
 
 
 def main(argv: list) -> int:
-    parser = argparse.ArgumentParser(description="TinyVLA train wrapper.")
-    parser.add_argument(
-        "--task-id",
-        dest="task_id",
-        type=str,
-        required=True,
-        help="Task ID from tr_tasks.",
-    )
-    parser.add_argument(
-        "--yaml",
-        dest="yaml_path",
-        type=str,
-        required=True,
-        help="Unified YAML config path.",
-    )
-    parser.add_argument("--gpu-id", dest="gpu_id", type=int, default=0, help="GPU ID.")
-    parser.add_argument(
-        "--seed", dest="seed", type=int, default=None, help="Random seed."
-    )
-    args = parser.parse_args(argv[1:])
-
-    tinyvla_dir = os.path.dirname(os.path.abspath(__file__))
-    os.chdir(tinyvla_dir)
-    logger = _setup_logger(tinyvla_dir)
-
-    try:
-        unified_cfg = _load_yaml(args.yaml_path)
-        cfg = _extract_model_config(unified_cfg, "TinyVLA")
-        seed = args.seed if args.seed is not None else cfg.get("seed", 0)
-        return _run_from_merged_config(
-            cfg, args.task_id, args.gpu_id, seed, logger, tinyvla_dir
-        )
-    except Exception as exc:
-        logger.error("Wrapper failed: %s", str(exc))
-        logger.error("Stack trace:\n%s", traceback.format_exc())
-        return 1
+    """CLI entry point."""
+    return TinyVLATrWrapper.main(argv)
 
 
 if __name__ == "__main__":

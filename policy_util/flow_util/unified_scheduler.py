@@ -3,6 +3,23 @@
 """
 Unified Training Task Scheduler.
 
+DEPRECATED: This module is deprecated. Use `unified_flow.py` with `BaseFlowScheduler` instead.
+
+This module provides a function-based scheduler implementation.
+For new code, prefer the object-oriented `BaseFlowScheduler` in `unified_flow.py`.
+
+Migration example:
+    # Old (deprecated):
+    from flow_util.unified_scheduler import run_scheduler
+    run_scheduler(cfg)
+
+    # New (recommended):
+    from flow_util.unified_flow import BaseFlowScheduler
+    class MyScheduler(BaseFlowScheduler):
+        MODEL_NAME = "ACT"
+    scheduler = MyScheduler(policy_dir)
+    scheduler.run(cfg)
+
 @input: [dict, training config from tr_cfg_parser]
 @output: [int, exit code (0 for success)]
 @scenario: [Execute training tasks in parallel using GPU slots]
@@ -13,6 +30,8 @@ Design:
 - Passes shared YAML + model YAML paths to wrapper
 - Wrapper merges YAMLs with later overriding earlier
 """
+
+import warnings
 
 import atexit
 import os
@@ -195,6 +214,18 @@ def start_slot_job(
 
 
 def run_scheduler(cfg: Dict[str, Any]) -> int:
+    """
+    DEPRECATED: Use BaseFlowScheduler from unified_flow.py instead.
+
+    This function is retained for backward compatibility only.
+    """
+    warnings.warn(
+        "unified_scheduler.run_scheduler is deprecated. "
+        "Use BaseFlowScheduler from unified_flow.py instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     model = cfg["_model"]
     gpu_parallel = cfg["gpu_parallel"]
     tr_tasks = cfg["tr_tasks"]

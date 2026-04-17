@@ -1,247 +1,93 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Eval wrapper: reads _ev_cfg/<name>.yaml, loads checkpoint under act_ckpt derived from TRAIN_TASKS
-(single task: act-<name>/...; multiple: act-<t1>__<t2>/...), runs eval on each EVAL_TASKS row.
-Optional TEST_NUM in YAML sets rollout count (passed to eval_policy as --test_num; default 100).
-Each eval_result/.../<timestamp>/ receives _ev_cfg_<name>.yaml (copy via eval_policy.py).
+ACT Eval wrapper - Refactored to use BaseEvWrapper.
 
-eval_policy save path: eval_result/<task>/ACT/<task_config>/<ckpt_setting>/<timestamp>/.
-  ckpt_setting joins TRAIN_TASKS task_config values with "__" (one row -> no join).
-  So joint eval shows e.g. demo_clean__demo_clean; single-task eval shows demo_clean only.
-  The copied _ev_cfg_*.yaml in that folder identifies flow_single_* vs flow_joint_*.
+Usage:
+    python3 _ev_wrapper.py <cfg_name>
+    python3 _ev_wrapper.py --config <cfg_name>   # (legacy)
 
-Usage: python3 _ev_wrapper.py <cfg_name>
-       python3 _ev_wrapper.py --config <cfg_name>   # (legacy)
-Config name is without extension; file must be _ev_cfg/<name>.yaml.
+Config file: _ev_cfg/<cfg_name>.yaml
 """
-import argparse
-import logging
+
 import os
-import subprocess
 import sys
-import traceback
-from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Any, Dict, List
 
-import yaml
+# Add policy_util to path for imports
+_POLICY_UTIL_ROOT = Path(__file__).resolve().parent.parent.parent / "policy_util"
+if str(_POLICY_UTIL_ROOT) not in sys.path:
+    sys.path.insert(0, str(_POLICY_UTIL_ROOT))
 
-
-def _setup_logger(act_dir: str) -> logging.Logger:
-    logs_dir = os.path.join(act_dir, "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    script_name = os.path.splitext(os.path.basename(__file__))[0]
-    tz_8 = timezone(timedelta(hours=8))
-    ts = datetime.now(tz_8).strftime("%Y%m%d%H%M%S")
-    log_path = os.path.join(logs_dir, f"{script_name}_{ts}.log")
-    logger = logging.getLogger(script_name)
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        formatter = logging.Formatter("[Wrapper] [%(levelname)s] %(message)s")
-        fh = logging.FileHandler(log_path)
-        fh.setFormatter(formatter)
-        sh = logging.StreamHandler(sys.stdout)
-        sh.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(sh)
-    return logger
+from wrapper_base import BaseEvWrapper
 
 
-def _parse_joint_ckpt_dir_parts(cfg: dict) -> tuple:
+class ACTEvWrapper(BaseEvWrapper):
     """
-    @input: [dict, eval YAML with TRAIN_TASKS matching the training run]
-    @output: [tuple, (combined_task_slug, combined_config_slug, combined_total_episodes)]
-    @scenario: [Same layout as train: single slug or slug1__slug2 / cfg slugs joined by __]
+    ACT-specific evaluation wrapper.
+
+    Model-specific features:
+    - Checkpoint directory format: act_ckpt/act-{task_slug}/{config_slug}-{total_episodes}
+    - Uses script/eval_policy.py with deploy_policy.yml
+    - Supports temporal aggregation
     """
-    if "TRAIN_TASKS" not in cfg:
-        raise ValueError("Config must define TRAIN_TASKS (same rows as used for training).")
-    rows = cfg["TRAIN_TASKS"]
-    if not rows or len(rows) < 1:
-        raise ValueError("TRAIN_TASKS must list at least 1 row [task_name, task_config, expert_num].")
-    names, cfgs, nums = [], [], []
-    for i, row in enumerate(rows):
-        if not isinstance(row, (list, tuple)) or len(row) != 3:
-            raise ValueError(f"TRAIN_TASKS[{i}] must be [task_name, task_config, expert_num], got {row!r}")
-        names.append(str(row[0]).strip())
-        cfgs.append(str(row[1]).strip())
-        nums.append(int(row[2]))
-    combined_task_slug = "__".join(names)
-    combined_config_slug = "__".join(cfgs)
-    combined_total_episodes = int(sum(nums))
-    return combined_task_slug, combined_config_slug, combined_total_episodes
 
+    MODEL_NAME = "ACT"
+    ENV_PREFIX = "ACT_FLOW"
 
-def _parse_eval_runs(cfg: dict) -> list:
-    """
-    @input: [dict, loaded eval YAML]
-    @output: [list, [(task_name, task_config), ...]]
-    @scenario: [EVAL_TASKS rows: each [task_name, task_config, expert_num]; expert_num is informational]
-    """
-    if "EVAL_TASKS" not in cfg:
-        raise ValueError("Config must define EVAL_TASKS as a non-empty list.")
-    rows = cfg["EVAL_TASKS"]
-    if not rows:
-        raise ValueError("EVAL_TASKS must be a non-empty list.")
-    out = []
-    for i, row in enumerate(rows):
-        if not isinstance(row, (list, tuple)) or len(row) != 3:
-            raise ValueError(f"EVAL_TASKS[{i}] must be [task_name, task_config, expert_num], got {row!r}")
-        out.append((str(row[0]).strip(), str(row[1]).strip()))
-    return out
+    def _get_checkpoint_dir(
+        self,
+        task_slug: str,
+        config_slug: str,
+        total_episodes: int,
+        cfg: Dict[str, Any],
+    ) -> str:
+        """
+        @input: [str, task slug], [str, config slug], [int, total episodes], [dict, config]
+        @output: [str, checkpoint directory path]
+        @scenario: [Return ACT checkpoint directory]
+        """
+        return f"policy/ACT/act_ckpt/act-{task_slug}/{config_slug}-{total_episodes}"
 
+    def _build_eval_command(
+        self,
+        task_name: str,
+        task_config: str,
+        ckpt_dir: str,
+        runtime: Dict[str, Any],
+        cfg: Dict[str, Any],
+        train_slug: str,
+        config_slug: str,
+        total_episodes: int,
+    ) -> List[str]:
+        """
+        @input: [various evaluation parameters]
+        @output: [list, command tokens for script/eval_policy.py]
+        @scenario: [Build ACT evaluation command]
+        """
+        end_reset = self._resolve_eval_end_reset_to_init(cfg)
 
-def _load_ev_cfg(act_dir: str, name: str) -> dict:
-    """
-    @input: [str, act_dir], [str, config name without .yaml]
-    @output: [dict, normalized eval config fields present or derivable]
-    @scenario: [Load _ev_cfg/<name>.yaml for evaluation]
-    """
-    base = name if name.endswith(".yaml") else f"{name}.yaml"
-    path = os.path.join(act_dir, "_ev_cfg", base)
-    if not os.path.isfile(path):
-        raise FileNotFoundError(f"No config found: _ev_cfg/{base}")
-    with open(path, "r") as f:
-        cfg = yaml.safe_load(f)
-    if not cfg:
-        raise ValueError("Config file is empty.")
-    for k in ("EVAL_SEED", "EVAL_GPU_ID", "END_RESET_TO_INIT"):
-        if k not in cfg:
-            raise ValueError(f"Missing required key in config: {k}")
-    _parse_joint_ckpt_dir_parts(cfg)
-    _parse_eval_runs(cfg)
-    return cfg
-
-
-def _to_cli_bool(v) -> str:
-    """
-    Convert python truthy values to eval_policy override bool string.
-    """
-    if isinstance(v, str):
-        return "true" if v.strip().lower() in ("1", "true", "yes", "y", "on") else "false"
-    return "true" if bool(v) else "false"
-
-
-def _resolve_eval_end_reset_to_init(cfg: dict) -> str:
-    return _to_cli_bool(cfg["END_RESET_TO_INIT"])
+        cmd = [
+            sys.executable,
+            "script/eval_policy.py",
+            "--config", "policy/ACT/deploy_policy.yml",
+            "--overrides",
+            "--task_name", task_name,
+            "--task_config", task_config,
+            "--ckpt_setting", config_slug,
+            "--ckpt_dir", ckpt_dir,
+            "--seed", str(runtime["seed"]),
+            "--test_num", str(runtime["test_num"]),
+            "--temporal_agg", "true",
+            "--END_RESET_TO_INIT", end_reset,
+        ]
+        return cmd
 
 
 def main(argv: list) -> int:
-    parser = argparse.ArgumentParser(description="Eval wrapper (config under _ev_cfg/*.yaml); 1+ train tasks.")
-    parser.add_argument(
-        "cfg_name",
-        nargs="?",
-        type=str,
-        help="Config name (file: _ev_cfg/<name>.yaml).",
-    )
-    parser.add_argument(
-        "--config",
-        dest="config",
-        type=str,
-        required=False,
-        help="(legacy) Config name (file: _ev_cfg/<name>.yaml).",
-    )
-    parser.add_argument("--gpu-id", dest="gpu_id", type=str, required=False, help="Optional GPU id override.")
-    parser.add_argument("--seed", dest="seed", type=int, required=False, help="Optional eval seed override.")
-    parser.add_argument("--test-num", dest="test_num", type=int, required=False, help="Optional eval test_num override.")
-    args = parser.parse_args(argv[1:])
-
-    act_dir = os.path.dirname(os.path.abspath(__file__))
-    logger = _setup_logger(act_dir)
-
-    cfg_name = args.config if args.config is not None else args.cfg_name
-    if not cfg_name:
-        parser.error("Missing cfg_name. Use: python3 _ev_wrapper.py <cfg_name> (or --config <cfg_name>)")
-
-    try:
-        cfg = _load_ev_cfg(act_dir, cfg_name)
-        combined_task_slug, ckpt_setting, expert_data_num = _parse_joint_ckpt_dir_parts(cfg)
-        eval_runs = _parse_eval_runs(cfg)
-        seed = str(cfg["EVAL_SEED"]).strip()
-        seed_source = "YAML:EVAL_SEED"
-        gpu_id = str(cfg["EVAL_GPU_ID"]).strip()
-        gpu_source = "YAML:EVAL_GPU_ID"
-        test_num = int(cfg.get("TEST_NUM", 100))
-        test_num_source = "YAML:TEST_NUM/default"
-        if test_num < 1:
-            raise ValueError("TEST_NUM must be >= 1")
-        end_reset_to_init = _resolve_eval_end_reset_to_init(cfg)
-        env_seed = os.environ.get("ACT_FLOW_SEED", "").strip()
-        env_gpu = os.environ.get("ACT_FLOW_GPU", "").strip()
-        env_test_num = os.environ.get("ACT_FLOW_TEST_NUM", "").strip()
-        if args.seed is not None:
-            seed = str(int(args.seed))
-            seed_source = "CLI:--seed"
-        elif env_seed:
-            seed = str(int(env_seed))
-            seed_source = "FLOW_ENV:ACT_FLOW_SEED"
-        if args.gpu_id is not None:
-            gpu_id = str(args.gpu_id).strip()
-            gpu_source = "CLI:--gpu-id"
-        elif env_gpu:
-            gpu_id = env_gpu
-            gpu_source = "FLOW_ENV:ACT_FLOW_GPU"
-        if args.test_num is not None:
-            test_num = int(args.test_num)
-            test_num_source = "CLI:--test-num"
-        elif env_test_num:
-            test_num = int(env_test_num)
-            test_num_source = "FLOW_ENV:ACT_FLOW_TEST_NUM"
-        if test_num < 1:
-            raise ValueError("TEST_NUM must be >= 1")
-        logger.info(
-            "Resolved runtime: seed=%s (%s), gpu_id=%s (%s), test_num=%s (%s)",
-            seed,
-            seed_source,
-            gpu_id,
-            gpu_source,
-            test_num,
-            test_num_source,
-        )
-
-        repo_root = os.path.abspath(os.path.join(act_dir, "..", ".."))
-        env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = gpu_id
-        env["PYTHONWARNINGS"] = "ignore::UserWarning"
-        env["PYTHONNOUSERSITE"] = "1"
-        # eval_policy.py copies this into each eval_result/<...>/<timestamp>/ so runs are
-        # labeled by config name, not only by act_ckpt folder slugs.
-        base = cfg_name if cfg_name.endswith(".yaml") else f"{cfg_name}.yaml"
-        ev_cfg_path = os.path.abspath(os.path.join(act_dir, "_ev_cfg", base))
-        env["ACT_EV_CFG_SNAPSHOT_SRC"] = ev_cfg_path
-        logger.info("Eval snapshot: ACT_EV_CFG_SNAPSHOT_SRC=%s", ev_cfg_path)
-
-        ckpt_dir = (
-            f"policy/ACT/act_ckpt/act-{combined_task_slug}/{ckpt_setting}-{expert_data_num}"
-        )
-        for task_name, task_config in eval_runs:
-            cmd = [
-                sys.executable,
-                "script/eval_policy.py",
-                "--config", "policy/ACT/deploy_policy.yml",
-                "--overrides",
-                "--task_name", task_name,
-                "--task_config", task_config,
-                "--ckpt_setting", ckpt_setting,
-                "--ckpt_dir", ckpt_dir,
-                "--seed", seed,
-                "--test_num", str(test_num),
-                "--temporal_agg", "true",
-                "--END_RESET_TO_INIT", end_reset_to_init,
-            ]
-            logger.info(
-                "Eval: task_name=%s task_config=%s ckpt_dir=%s test_num=%s END_RESET_TO_INIT=%s",
-                task_name,
-                task_config,
-                ckpt_dir,
-                test_num,
-                end_reset_to_init,
-            )
-            logger.info("Run: %s", " ".join(cmd))
-            subprocess.run(cmd, check=True, env=env, cwd=repo_root)
-        return 0
-    except Exception as exc:
-        logger.error("Wrapper failed: %s", str(exc))
-        logger.error("Stack trace:\n%s", traceback.format_exc())
-        return 1
+    """CLI entry point."""
+    return ACTEvWrapper.main(argv)
 
 
 if __name__ == "__main__":
