@@ -4,7 +4,7 @@ import torch
 from safetensors import safe_open
 
 
-path = '/home/rl/Downloads/output/checkpoint-4'
+path = '/home/rl/Downloads/outputs/checkpoint-4'
 path = '/media/rl/HDD/data/multi_head_train_results/aloha_qwen2_vla/qwen2_vl_2B/qwen2_vl_only_folding_shirt_lora_ema_finetune_dit_h_4w_steps/checkpoint-30000'
 def compare_lora_weights():
     ckpt = safe_open(os.path.join(path, 'adapter_model.safetensors'), framework='pt')
@@ -84,7 +84,7 @@ if __name__ == '__main__':
     # compare_non_lora_weights()
     # compare_zero_weights()
     # compare_ema_weights()
-    # ema_ckpt = torch.load(os.path.join("/home/rl/Downloads/output/checkpoint-2", 'ema_weights.pth'), map_location=torch.device('cpu'))
+    # ema_ckpt = torch.load(os.path.join("/home/rl/Downloads/outputs/checkpoint-2", 'ema_weights.pth'), map_location=torch.device('cpu'))
     # for k,v in ema_ckpt.items():
     #     if
     check_norm_stats()
