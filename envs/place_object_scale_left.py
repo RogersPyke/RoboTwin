@@ -13,15 +13,15 @@ scale functional point before releasing.  This replaces the generic
 ``place_actor(..., constrain="free")`` path, whose scale-model frame
 differences can generate unreachable end-effector poses.
 
-The standard collection protocol uses the former level-2 expansion from the
-first seed onward: object x/y ranges ``[-0.18, -0.075]``/``[-0.11, -0.01]``,
-scale x/y ranges ``[-0.32, -0.22]``/``[-0.29, -0.19]``, and bounded yaw in
-``[-30, 30]`` degrees.  In the 500-episode validation run, 500/577 seeds
-succeeded (86.66%); the longest failure streak was two seeds.
+The standard collection protocol uses overlapping object and scale ranges
+inside the shifted left-arm workspace.  Both actors are sampled from the
+expanded x/y region ``[-0.12, 0.22]``/``[-0.18, 0.08]`` and are required to
+remain 15 cm apart, with bounded object yaw in ``[-30, 30]`` degrees.
 """
 
 import glob
 import os
+from copy import deepcopy
 
 import numpy as np
 
@@ -46,7 +46,41 @@ class place_object_scale_left(Base_Task):
         @scenario: Keep the active arm fixed to the left arm.
         """
         self.arm_side = "left"
+
+        # The task keeps both Piper entities in the scene, but its active
+        # workspace is centered on the left arm.  Robot normally places two
+        # separated arms at ``base_x +/- embodiment_dis / 2``.  Shift the
+        # common base pose by +0.30 m so the left arm is centered at x=0 while
+        # preserving the configured 0.60 m separation.
+        for config_key in ("left_embodiment_config", "right_embodiment_config"):
+            embodiment_config = kwargs.get(config_key)
+            if embodiment_config is None:
+                raise KeyError(f"Missing {config_key} for {self.__class__.__name__}")
+            embodiment_config = deepcopy(embodiment_config)
+            robot_poses = embodiment_config.get("robot_pose")
+            if not robot_poses:
+                raise KeyError(f"Missing robot_pose in {config_key}")
+            for robot_pose in robot_poses:
+                robot_pose[0] += 0.30
+            kwargs[config_key] = embodiment_config
+
         super()._init_task_env_(**kwargs)
+
+    def move(self, actions_by_arm1, actions_by_arm2=None, save_freq=-1):
+        """Reject any action that would invoke the inactive right arm."""
+        action_groups = (actions_by_arm1, actions_by_arm2)
+        for action_group in action_groups:
+            if action_group is None:
+                continue
+            if not isinstance(action_group, tuple) or len(action_group) != 2:
+                raise ValueError("place_object_scale_left expects a single ArmTag/action pair")
+            arm_tag = action_group[0]
+            if arm_tag != ArmTag("left"):
+                raise ValueError(
+                    "place_object_scale_left is a left-arm-only task; "
+                    f"received arm tag {arm_tag!r}"
+                )
+        return super().move(actions_by_arm1, actions_by_arm2, save_freq=save_freq)
 
     def load_actors(self):
         """Create a randomized object and scale on the left side.
@@ -55,10 +89,13 @@ class place_object_scale_left(Base_Task):
         @output: None; stores ``object`` and ``scale`` actors.
         @scenario: Keep the original task variation while using the left arm.
         """
-        # Standard collection workspace: the former level-2 expansion is now
-        # used from the first seed through the full episode budget.
-        object_xlim, object_ylim = [-0.18, -0.075], [-0.11, -0.01]
-        scale_xlim, scale_ylim = [-0.32, -0.22], [-0.29, -0.19]
+        # Aggressive diversity protocol: sample both actors from the same
+        # broad left-arm workspace so their valid ranges substantially overlap.
+        # The short-distance rejection below prevents initial actor overlap
+        # while retaining nearby object/target layouts for different paths.
+        object_xlim, object_ylim = [-0.12, 0.22], [-0.18, 0.08]
+        scale_xlim, scale_ylim = [-0.12, 0.22], [-0.18, 0.08]
+        min_object_scale_distance = 0.15
         yaw_limit = np.pi / 6
 
         # This task uses two independently mounted Piper arms (0.60 m apart).
@@ -114,7 +151,7 @@ class place_object_scale_left(Base_Task):
             ylim=scale_ylim,
             qpos=[0.5, 0.5, 0.5, 0.5],
         )
-        while np.linalg.norm(target_rand_pose.p[:2] - rand_pos.p[:2]) < 0.15:
+        while np.linalg.norm(target_rand_pose.p[:2] - rand_pos.p[:2]) < min_object_scale_distance:
             target_rand_pose = rand_pose(
                 xlim=scale_xlim,
                 ylim=scale_ylim,
