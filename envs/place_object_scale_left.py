@@ -14,14 +14,15 @@ scale functional point before releasing.  This replaces the generic
 differences can generate unreachable end-effector poses.
 
 The standard collection protocol uses overlapping object and scale ranges
-inside the shifted left-arm workspace.  Both actors are sampled from the
-expanded x/y region ``[-0.12, 0.22]``/``[-0.18, 0.08]`` and are required to
-remain 15 cm apart, with bounded object yaw in ``[-30, 30]`` degrees.
+inside the left-arm workspace.  The left and right arm bases are at x=-0.30 m
+and x=+0.30 m respectively, while the head camera remains at its central
+asset-configured position.  Both actors are sampled from the expanded x/y
+region ``[-0.42, -0.08]``/``[-0.18, 0.08]`` and are required to remain 15 cm
+apart, with bounded object yaw in ``[-30, 30]`` degrees.
 """
 
 import glob
 import os
-from copy import deepcopy
 
 import numpy as np
 
@@ -46,24 +47,11 @@ class place_object_scale_left(Base_Task):
         @scenario: Keep the active arm fixed to the left arm.
         """
         self.arm_side = "left"
-
-        # The task keeps both Piper entities in the scene, but its active
-        # workspace is centered on the left arm.  Robot normally places two
-        # separated arms at ``base_x +/- embodiment_dis / 2``.  Shift the
-        # common base pose by +0.30 m so the left arm is centered at x=0 while
-        # preserving the configured 0.60 m separation.
-        for config_key in ("left_embodiment_config", "right_embodiment_config"):
-            embodiment_config = kwargs.get(config_key)
-            if embodiment_config is None:
-                raise KeyError(f"Missing {config_key} for {self.__class__.__name__}")
-            embodiment_config = deepcopy(embodiment_config)
-            robot_poses = embodiment_config.get("robot_pose")
-            if not robot_poses:
-                raise KeyError(f"Missing robot_pose in {config_key}")
-            for robot_pose in robot_poses:
-                robot_pose[0] += 0.30
-            kwargs[config_key] = embodiment_config
-
+        # The Piper asset uses x=0 as the common pose.  In the configured
+        # non-coincident dual-arm embodiment, Robot adds +/-0.30 m, so the
+        # active left arm is at -0.30 m and the idle right arm at +0.30 m.
+        # Keep the asset's static camera configuration untouched: its head
+        # camera is the central, scene-fixed camera for this task.
         super()._init_task_env_(**kwargs)
 
     def move(self, actions_by_arm1, actions_by_arm2=None, save_freq=-1):
@@ -93,8 +81,13 @@ class place_object_scale_left(Base_Task):
         # broad left-arm workspace so their valid ranges substantially overlap.
         # The short-distance rejection below prevents initial actor overlap
         # while retaining nearby object/target layouts for different paths.
-        object_xlim, object_ylim = [-0.12, 0.22], [-0.18, 0.08]
-        scale_xlim, scale_ylim = [-0.12, 0.22], [-0.18, 0.08]
+        # These are the former ranges in the left-arm-centered scene.  Shift
+        # both actors by the same -0.30 m as the active arm so their relative
+        # workspace and distribution stay unchanged after moving the arm
+        # back to x=-0.30 m.
+        workspace_x_shift = -0.30
+        object_xlim, object_ylim = [x + workspace_x_shift for x in (-0.12, 0.22)], [-0.18, 0.08]
+        scale_xlim, scale_ylim = [x + workspace_x_shift for x in (-0.12, 0.22)], [-0.18, 0.08]
         min_object_scale_distance = 0.15
         yaw_limit = np.pi / 6
 
