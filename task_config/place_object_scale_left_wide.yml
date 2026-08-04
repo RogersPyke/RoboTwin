@@ -1,11 +1,10 @@
-# Embodied Mixup first-round RoboTwin protocol.
-# The Piper separation is read from the official embodiment asset after setup.
+# Standard fixed level-2 expansion place-object-scale protocol.
 render_freq: 0
 episode_num: 500
 use_seed: false
 save_freq: 15
 embodiment: [piper, piper, 0.60]
-language_num: 0
+language_num: 1
 domain_randomization:
   random_background: false
   cluttered_table: false
@@ -15,7 +14,7 @@ domain_randomization:
   random_light: false
   crazy_random_light_rate: 0
 camera:
-  head_camera_type: D435
+  head_camera_type: D435-W
   wrist_camera_type: D435
   collect_head_camera: true
   collect_wrist_camera: false
@@ -25,8 +24,6 @@ data_type:
   depth: false
   pointcloud: false
   observer: false
-  # Auxiliary only: it is converted to observation.eef_pose for EMIX indexing
-  # and is never declared as a policy input.
   endpose: true
   qpos: true
   mesh_segmentation: false

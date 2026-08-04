@@ -1,6 +1,6 @@
 # Standard fixed level-2 expansion place-object-scale protocol.
 render_freq: 0
-episode_num: 500
+episode_num: 1
 use_seed: false
 save_freq: 15
 embodiment: [piper, piper, 0.60]
