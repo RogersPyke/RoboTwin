@@ -33,6 +33,7 @@ place_mouse_pad: 400
 place_object_basket: 700
 place_object_scale: 400
 place_object_scale_left: 400
+place_object_scale_left_oppo_cam: 400
 place_object_stand: 400
 place_phone_stand: 400
 move_pillbottle_pad: 400
