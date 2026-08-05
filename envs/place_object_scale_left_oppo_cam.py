@@ -11,10 +11,10 @@ class place_object_scale_left_oppo_cam(place_object_scale_left):
     def setup_demo(self, **kwargs):
         """Initialize the inherited task with an opposite-side head camera.
 
-        The default Piper head camera is ``[-0.032, -0.45, 1.35]`` and looks
-        along ``[0, 0.6, -0.8]``.  This task negates only its table-depth
-        position and look direction.  The camera-left axis is also negated so
-        that ``cross(forward, left)`` remains an upward-facing axis.
+        The active left Piper base is at x=-0.30. Position the camera directly
+        across the table from that base, then point it back toward the left
+        arm workspace. The camera-left axis keeps ``cross(forward, left)``
+        upward-facing.
         """
         task_kwargs = dict(kwargs)
         embodiment_config = deepcopy(kwargs["left_embodiment_config"])
@@ -23,7 +23,7 @@ class place_object_scale_left_oppo_cam(place_object_scale_left):
             if camera_info["name"] == "head_camera":
                 camera_info.update(
                     {
-                        "position": [-0.032, 0.45, 1.35],
+                        "position": [-0.30, 0.45, 1.35],
                         "forward": [0, -0.6, -0.8],
                         "left": [1, 0, 0],
                     }
