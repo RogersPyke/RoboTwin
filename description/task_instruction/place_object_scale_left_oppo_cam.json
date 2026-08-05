@@ -1,0 +1,11 @@
+{
+  "full_description": "use one arm to grab the object and put it on the scale",
+  "schema": "{A} notifies the scale, {B} notifies the object, {a} notifies the arm to grab the object",
+  "preference": "num of words should not exceed 10. Degree of detail avg is six.",
+  "seen": [
+    "Use {a} to grab {B} for {A}"
+  ],
+  "unseen": [
+    "Grab {B} and place it on {A}."
+  ]
+}
