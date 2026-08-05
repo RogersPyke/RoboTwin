@@ -1,7 +1,7 @@
-# One-episode visual check: the head camera is placed on the opposite side by
-# the task implementation.  D435 keeps the normal (non-wide) 37 degree FOV.
+# Full 500-episode training collection with the head camera directly opposite
+# the active left Piper. D435 keeps the normal (non-wide) 37 degree FOV.
 render_freq: 0
-episode_num: 1
+episode_num: 500
 use_seed: false
 save_freq: 15
 embodiment: [piper, piper, 0.60]
