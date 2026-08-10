@@ -7,6 +7,15 @@ with open("./_generate_task_prompt.txt", "r") as f:
     system_prompt = f.read()
 
 
+def task_instruction_path(task_name):
+    """Path to the existing task instruction JSON, preferring task_instruction/left/."""
+    for sub in ("task_instruction/left", "task_instruction"):
+        p = f"./{sub}/{task_name}.json"
+        if os.path.exists(p):
+            return p
+    return f"./task_instruction/{task_name}.json"
+
+
 class Instruction(BaseModel):
     content: str = Field(description="the instruction for the task")
     degreeOfDetail: int = Field(description="the degree of detail for the instruction, from 1 to 10")
@@ -68,7 +77,8 @@ def make_prompt_generate(detailed_task, preferences, schema, instruction_num):
 
 
 def generate_task_description(task_name, instruction_num):
-    with open(f"./task_instruction/{task_name}.json", "r") as f:
+    path = task_instruction_path(task_name)
+    with open(path, "r") as f:
         task_info_json = f.read()
     # print(task_info_json)
     task_info = json.loads(task_info_json)
@@ -94,7 +104,7 @@ def generate_task_description(task_name, instruction_num):
     task_info["unseen"].extend(result[0:2])
     # task_info['seen'] = result[2:]
     # task_info['unseen'] = result[0:2]
-    with open(f"./task_instruction/{task_name}.json", "w") as f:
+    with open(path, "w") as f:
         json.dump(task_info, f, indent=2, ensure_ascii=False)
 
 

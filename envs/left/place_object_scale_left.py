@@ -26,8 +26,8 @@ import os
 
 import numpy as np
 
-from ._base_task import Base_Task
-from .utils import *
+from .._base_task import Base_Task
+from ..utils import *
 
 
 class place_object_scale_left(Base_Task):

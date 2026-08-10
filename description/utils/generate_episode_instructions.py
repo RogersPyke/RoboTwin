@@ -128,9 +128,32 @@ def replace_placeholders_unseen(instruction: str, episode_params: Dict[str, str]
     return instruction
 
 
+def resolve_task_instruction_path(task_name: str) -> str:
+    """Path to the existing task instruction JSON, preferring task_instruction/left/.
+
+    Left-arm task instructions live in ``task_instruction/left/``; original
+    ones stay in ``task_instruction/``.  The bare task name is resolved against
+    both so the CLI argument is unchanged.
+    """
+    for sub in ("task_instruction/left", "task_instruction"):
+        p = os.path.join(parent_directory, f"../{sub}/{task_name}.json")
+        if os.path.exists(p):
+            return p
+    return os.path.join(parent_directory, f"../task_instruction/{task_name}.json")
+
+
+def resolve_setting_path(setting: str) -> str:
+    """Path to the existing task config yml, preferring task_config/left/."""
+    for sub in ("task_config/left", "task_config"):
+        p = os.path.join(parent_directory, f"../../{sub}/{setting}.yml")
+        if os.path.exists(p):
+            return p
+    return os.path.join(parent_directory, f"../../task_config/{setting}.yml")
+
+
 def load_task_instructions(task_name: str) -> Dict[str, Any]:
     """Load the task instructions from the JSON file."""
-    file_path = os.path.join(parent_directory, f"../task_instruction/{task_name}.json")
+    file_path = resolve_task_instruction_path(task_name)
     with open(file_path, "r") as f:
         task_data = json.load(f)
     return task_data
@@ -258,9 +281,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    setting_file = os.path.join(
-        parent_directory, f"../../task_config/{args.setting}.yml"
-    )
+    setting_file = resolve_setting_path(args.setting)
     with open(setting_file, "r", encoding="utf-8") as f:
         args_dict = yaml.load(f.read(), Loader=yaml.FullLoader)
 

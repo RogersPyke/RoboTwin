@@ -5,7 +5,7 @@ import subprocess
 sys.path.append("./")
 sys.path.append(f"./policy")
 sys.path.append("./description/utils")
-from envs import CONFIGS_PATH
+from envs import CONFIGS_PATH, import_task_env, task_config_yml_path
 from envs.utils.create_actor import UnStableError
 
 import numpy as np
@@ -94,7 +94,7 @@ def json_to_numpy(json_str: str) -> Any:
     return json.loads(json_str, object_hook=object_hook)
 
 def class_decorator(task_name):
-    envs_module = importlib.import_module(f"envs.{task_name}")
+    envs_module = import_task_env(task_name)
     try:
         env_class = getattr(envs_module, task_name)
         env_instance = env_class()
@@ -242,7 +242,7 @@ def main(usr_args):
 
     get_model = eval_function_decorator(policy_name, "get_model", conda_env=policy_conda_env)
 
-    with open(f"./task_config/{task_config}.yml", "r", encoding="utf-8") as f:
+    with open(task_config_yml_path(task_config), "r", encoding="utf-8") as f:
         args = yaml.load(f.read(), Loader=yaml.FullLoader)
 
     args['task_name'] = task_name

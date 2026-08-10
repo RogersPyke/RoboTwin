@@ -20,7 +20,7 @@ parent_directory = os.path.dirname(current_file_path)
 
 
 def class_decorator(task_name):
-    envs_module = importlib.import_module(f"envs.{task_name}")
+    envs_module = import_task_env(task_name)
     try:
         env_class = getattr(envs_module, task_name)
         env_instance = env_class()
@@ -39,7 +39,7 @@ def get_embodiment_config(robot_file):
 def main(task_name=None, task_config=None):
 
     task = class_decorator(task_name)
-    config_path = f"./task_config/{task_config}.yml"
+    config_path = task_config_yml_path(task_config)
 
     with open(config_path, "r", encoding="utf-8") as f:
         args = yaml.load(f.read(), Loader=yaml.FullLoader)

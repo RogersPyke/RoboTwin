@@ -1,0 +1,132 @@
+"""LEFT_TASK_DESIGN:
+Source task: place_bread_skillet
+Single-arm semantic change: source puts bread and skillet on opposite sides
+    and grasps both concurrently with dual arms; the derived task initialises
+    the skillet as a static target directly in the left workspace and performs
+    only a left bread grasp-lift-place-release-retreat sequence.
+Left workspace manifest: place_bread_skillet, version 0
+Actors and clearance: bread (dynamic, x in [-0.42,-0.36], min 0.10 m from
+    skillet), skillet (static, x in [-0.26,-0.12], y in [-0.20,0.10], raised
+    +0.025 m so its functional point clears the 0.76 m table-height predicate,
+    min 0.10 m).
+Expert sequence: left grasp bread, lift z=0.10, place at skillet functional
+    point zero, release; a post-place retreat that cannot plan is skipped and
+    the arm returns home.
+Success predicate: preserve the bread-to-skillet functional-point distance and
+    height tests; add left-open and right-home checks.  No skillet-moving
+    helper exists and the skillet is never moved.
+Instruction change: {A}=skillet, {B}=bread, {a}=left; wording says the left arm
+    places the bread onto the skillet and must not claim the skillet moves.
+Pilot evidence: central-cam 30-seed pilot 0.47 (14/30 success), manifest hash
+    a8a91465b6cfbc70
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .left_task_base import LeftTaskBase, SceneRejectedError
+from .left_task_manifests import get_manifest
+from ..utils import *  # noqa: F401,F403
+
+
+class PlaceBreadSkilletLeftImpl(LeftTaskBase):
+    """Left-arm-only bread-on-skillet task.
+
+    The skillet is a static target initialised in the left workspace before the
+    episode begins; only the bread is sampled and transported by the left arm.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.manifest = get_manifest("place_bread_skillet")
+
+    def sample_layout(self) -> dict[str, object]:
+        bread_spec = self.manifest.actor_specs["bread"]
+        skillet_spec = self.manifest.actor_specs["skillet"]
+        clearance = max(bread_spec.minimum_clearance_m, skillet_spec.minimum_clearance_m)
+        for _ in range(128):
+            bread = self.sample_spec_pose(bread_spec)
+            skillet = self.sample_spec_pose(skillet_spec)
+            if float(np.linalg.norm(bread.p[:2] - skillet.p[:2])) >= clearance:
+                return {"bread": bread, "skillet": skillet}
+        raise SceneRejectedError(
+            "could not sample a feasible place_bread_skillet layout in 128 attempts"
+        )
+
+    def load_actors(self) -> None:
+        layout = self.sample_layout()
+        if not self.validate_layout(layout):
+            raise SceneRejectedError("place_bread_skillet layout rejected by validate_layout")
+        bread_id_list = [0, 1, 3, 5, 6]
+        self.bread_id = int(np.random.choice(bread_id_list))
+        self.bread = create_actor(
+            self, pose=layout["bread"], modelname="075_bread",
+            model_id=self.bread_id, convex=True,
+        )
+        # Keep the bread at its default mass; a near-zero mass makes the
+        # gripper closing impulse launch the bread away on a single arm.
+        # self.bread.set_mass(0.001)
+        skillet_id_list = [0, 1, 2, 3]
+        self.skillet_id = int(np.random.choice(skillet_id_list))
+        # Raise the static skillet slightly so its functional point clears the
+        # table-height predicate (0.76 m).  A static skillet does not settle, so
+        # its centre stays at the spawn z and the stock threshold would fail.
+        skillet_pose = layout["skillet"]
+        skillet_p = list(skillet_pose.p)
+        skillet_p[2] += 0.025
+        skillet_pose = sapien.Pose(skillet_p, skillet_pose.q)
+        self.skillet = create_actor(
+            self, pose=skillet_pose, modelname="106_skillet",
+            model_id=self.skillet_id, convex=True, is_static=True,
+        )
+        self.skillet.set_mass(0.01)
+        self.add_prohibit_area(self.bread, padding=0.03)
+        self.add_prohibit_area(self.skillet, padding=0.05)
+        self.record_layout(layout)
+        skillet_point = self.skillet.get_functional_point(0)[:3]
+        self.route_bins = self.classify_routes(
+            [("bread", np.asarray(layout["bread"].p), np.asarray(skillet_point))]
+        )
+
+    def place_bread_on_skillet_left(self) -> bool:
+        """Complete expert sequence: left grasp, lift, place, release, retreat."""
+        if not self.plan_success:
+            return False
+        arm_tag = ArmTag("left")
+        self.move(self.grasp_actor(self.bread, arm_tag=arm_tag, pre_grasp_dis=0.07))
+        if not self.plan_success:
+            return False
+        self.move_by_displacement(arm_tag=arm_tag, z=0.1)
+        if not self.plan_success:
+            return False
+        target_pose = self.skillet.get_functional_point(0)
+        self.move(self.place_actor(self.bread, arm_tag=arm_tag, target_pose=target_pose,
+                                   constrain="free", pre_dis=0.05, dis=0.05))
+        if not self.plan_success:
+            return False
+        self.move(self.open_gripper(arm_tag))
+        self.move_by_displacement(arm_tag=arm_tag, z=0.1, move_axis="arm")
+        if not self.plan_success:
+            self.plan_success = True
+        return self.left_return_home()
+
+    def play_once(self) -> dict:
+        self.place_bread_on_skillet_left()
+        self.info["info"] = {
+            "{A}": f"106_skillet/base{self.skillet_id}",
+            "{B}": f"075_bread/base{self.bread_id}",
+            "{a}": "left",
+        }
+        return self.info
+
+    def check_success(self) -> bool:
+        target_pose = self.skillet.get_functional_point(0)
+        bread_pose = self.bread.get_pose().p
+        return (
+            bool(np.all(abs(target_pose[:2] - bread_pose[:2]) < [0.035, 0.035]))
+            and bool(target_pose[2] > 0.76 + self.table_z_bias)
+            and bool(bread_pose[2] > 0.76 + self.table_z_bias)
+            and self.is_left_gripper_open()
+            and self.right_arm_stationary()
+        )

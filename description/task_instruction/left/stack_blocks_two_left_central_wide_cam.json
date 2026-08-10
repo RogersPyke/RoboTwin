@@ -1,0 +1,17 @@
+{
+  "full_description": "stack the green block onto the red block with one arm",
+  "schema": "{A} notifies the red block, {B} notifies the green block, {a} notifies the left arm to move the red block, {b} notifies the left arm to move the green block",
+  "preference": "num of words should not exceed 14. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to place {A}, then {b} stacks {B} on {A}.",
+    "With the left arm put {B} on top of {A}.",
+    "{a} moves {A}, then {b} places {B} onto {A}.",
+    "Stack {B} onto {A} using the left arm.",
+    "Place {A} with {a}, then stack {B} on {A} with {b}."
+  ],
+  "unseen": [
+    "Stack the green block on the red block.",
+    "Use the left arm to place {B} on top of {A}.",
+    "Put {B} over {A} with the left arm."
+  ]
+}

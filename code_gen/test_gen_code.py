@@ -107,7 +107,7 @@ def class_decorator_env(task_name):
     Returns:
         object: Instance of the task class.
     """
-    envs_module = importlib.import_module(f"envs.{task_name}")
+    envs_module = import_task_env(task_name)
     importlib.reload(envs_module)
     try:
         env_class = getattr(envs_module, task_name)
@@ -165,7 +165,7 @@ def setup_task_config(task_name):
         tuple: (Task instance, task configuration dictionary)
     """
     task = class_decorator_gen(task_name)
-    task_config_path = f"./task_config/{task_name}.yml"
+    task_config_path = task_config_yml_path(task_name)
 
     if not os.path.isfile(task_config_path):
         create_task_config(task_config_path, task_name)

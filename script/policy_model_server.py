@@ -17,7 +17,7 @@ from collections import deque
 sys.path.append("./")
 sys.path.append(f"./policy")
 sys.path.append("./description/utils")
-from envs._GLOBAL_CONFIGS import CONFIGS_PATH
+from envs._GLOBAL_CONFIGS import CONFIGS_PATH, import_task_env
 
 import numpy as np
 from typing import Any
@@ -184,7 +184,7 @@ class ModelServer:
 # --------------------- Utility Decorators ---------------------
 def class_decorator(task_name):
     """Instantiate environment class for given task"""
-    envs_module = importlib.import_module(f"envs.{task_name}")
+    envs_module = import_task_env(task_name)
     if not hasattr(envs_module, task_name):
         raise SystemExit("Task not found")
     return getattr(envs_module, task_name)()

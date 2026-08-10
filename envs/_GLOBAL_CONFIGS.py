@@ -38,3 +38,40 @@ WORLD_DIRECTION_DIC = {
 }
 
 ROTATE_NUM = 10
+
+
+def is_left_task(task_name: str) -> bool:
+    """Whether the task's env module lives under envs/left/.
+
+    Left-arm task families (and their camera variants) are kept in the
+    ``envs/left/`` namespace so they stay separate from the original right-arm
+    tasks.  CLI task names are bare (e.g. ``blocks_ranking_rgb_left``); this
+    helper maps that bare name to the ``left`` namespace by file existence.
+    """
+    return os.path.exists(os.path.join(ROOT_PATH, "envs", "left", f"{task_name}.py"))
+
+
+def import_task_env(task_name: str):
+    """Import and return the env module for a task, resolving envs/left/ first.
+
+    Falls back to ``envs.{task_name}`` for original (non-left) tasks so a
+    single bare task name works for both namespaces.
+    """
+    import importlib
+    if is_left_task(task_name):
+        return importlib.import_module(f"envs.left.{task_name}")
+    return importlib.import_module(f"envs.{task_name}")
+
+
+def task_config_yml_path(task_config: str) -> str:
+    """Path to the existing task config yml, preferring task_config/left/.
+
+    Left-arm task configs live in ``task_config/left/``; original configs stay
+    in ``task_config/``.  The bare config name is resolved against both and the
+    first existing file wins, so the CLI argument is unchanged.
+    """
+    for sub in ("task_config/left", "task_config"):
+        p = os.path.join(ROOT_PATH, sub, f"{task_config}.yml")
+        if os.path.exists(p):
+            return p
+    return os.path.join(ROOT_PATH, "task_config", f"{task_config}.yml")
