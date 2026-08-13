@@ -81,7 +81,11 @@ def pkl_files_to_hdf5_and_video(pkl_files, hdf5_path, video_path):
         pkl_file = load_pkl_file(pkl_file_path)
         append_data_to_structure(data_list, pkl_file)
 
-    images_to_video(np.array(data_list["observation"]["head_camera"]["rgb"]), out_path=video_path)
+    # Setting ROBOTWIN_SKIP_EPISODE_VIDEO=1 skips the per-episode demo mp4
+    # (EMIX collection without demo videos).  The HDF5 still carries the full
+    # RGB frames, so downstream conversion and indexing are unaffected.
+    if os.environ.get("ROBOTWIN_SKIP_EPISODE_VIDEO", "0") != "1":
+        images_to_video(np.array(data_list["observation"]["head_camera"]["rgb"]), out_path=video_path)
 
     with h5py.File(hdf5_path, "w") as f:
         create_hdf5_from_dict(f, data_list)
