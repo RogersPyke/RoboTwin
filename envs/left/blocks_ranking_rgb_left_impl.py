@@ -4,10 +4,11 @@ Single-arm semantic change: source chooses each block's arm from its x sign and
     switches arms with ``back_to_origin(opposite)``; the derived task samples
     all three blocks in one left workspace and ranks them serially with the
     left arm only, returning home between blocks.
-Left workspace manifest: blocks_ranking_rgb, version 0
+Left workspace manifest: blocks_ranking_rgb, version 1 (2026-08-13)
 Actors and clearance: block1/2/3 (dynamic coloured boxes, pairwise min
-    0.10 m), ordered left-arm target line in x
-    [-0.38,-0.28] at a shared y in [-0.20,-0.10].
+    0.10 m), shared pickup band x in [-0.45,-0.16], y in [-0.18,0.08],
+    yaw up to 0.75; ordered target line x bands
+    [-0.42,-0.39]/[-0.34,-0.31]/[-0.26,-0.23] at a shared y in [-0.18,-0.08].
 Expert sequence: left pick red, place on line, return home; left pick green,
     place, return home; left pick blue, place, return home.
 Success predicate: preserve source ordered-x and common-y ranking relation;
@@ -25,6 +26,27 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the 2026-08-13 widening (version 0).
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.  Old manifest hash 308a70af1adf07a2.
+#   - pickup band:  x in [-0.45, -0.22], y in [-0.08, 0.05], yaw in [0, 0.60]
+#   - pairwise min clearance: 0.10 m
+#   - target line:  red x in [-0.42, -0.40], green x in [-0.33, -0.31],
+#                   blue x in [-0.24, -0.22], shared y in [-0.20, -0.10]
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "pickup_x": (-0.45, -0.22),
+    "pickup_y": (-0.08, 0.05),
+    "pickup_yaw_rad": (0.0, 0.60),
+    "min_clearance_m": 0.10,
+    "target_red_x": (-0.42, -0.40),
+    "target_green_x": (-0.33, -0.31),
+    "target_blue_x": (-0.24, -0.22),
+    "target_y": (-0.20, -0.10),
+    "manifest_hash": "308a70af1adf07a2",
+}
 
 
 class BlocksRankingRgbLeftImpl(LeftTaskBase):
@@ -84,17 +106,21 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
         self.add_prohibit_area(self.block2, padding=0.05)
         self.add_prohibit_area(self.block3, padding=0.05)
         # Ordered target line inside the left workspace: red < green < blue x.
-        # Adjacent slots are 0.09 m apart so a post-release slide of a few
-        # centimetres cannot reorder the blocks (see the leave-a-drop retreat).
-        y_pose = np.random.uniform(-0.2, -0.1)
+        # Adjacent worst-case band extremes stay < 0.13 m apart (red_min to
+        # green_max and green_min to blue_max are each 0.11) so the check_success
+        # eps=[0.13, 0.03] predicate always holds for exactly-placed blocks while
+        # the bands are as wide as the predicate allows. y_pose is shared across
+        # the three slots so the 0.03 y tolerance is trivially met; widening it
+        # over the pickup y band lets short and long routes coexist.
+        y_pose = np.random.uniform(-0.18, -0.08)
         self.block1_target_pose = [
-            np.random.uniform(-0.42, -0.40), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(-0.42, -0.39), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.block2_target_pose = [
-            np.random.uniform(-0.33, -0.31), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(-0.34, -0.31), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.block3_target_pose = [
-            np.random.uniform(-0.24, -0.22), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(-0.26, -0.23), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.record_layout(layout)
         targets = [self.block1_target_pose, self.block2_target_pose, self.block3_target_pose]

@@ -64,13 +64,18 @@ def _register(manifest: TaskManifest) -> None:
 _register(_manifest(
     "blocks_ranking_rgb",
     [
-        # x upper bound -0.22 keeps every spawn inside the left-arm reachable
-        # region (x <= -0.20) so a grasp can always plan.
-        _spec("block1", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        # Wide randomization (iteration 2026-08-13): all three blocks share one
+        # overlapping pickup band so routes to the ordered target line start from
+        # many directions and cross. x extends right toward the validated
+        # place_object_scale_left bound (x <= -0.16 inside the reachable region),
+        # y overlaps the target-line y band so short and long routes coexist, and
+        # yaw matches the source task. The 0.10 m pairwise clearance keeps a
+        # gripper-wide minimum gap so the expert can always operate between them.
+        _spec("block1", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
-        _spec("block2", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        _spec("block2", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
-        _spec("block3", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        _spec("block3", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
     ],
 ))
