@@ -4,9 +4,11 @@ Single-arm semantic change: source branches to dual grasp/dual placement when
     the two breads lie on opposite sides and keeps the basket dynamic; the
     derived task makes the basket static (no second arm may stabilise it) and
     serially places bread 0 then bread 1 with the left arm only.
-Left workspace manifest: place_bread_basket, version 0
+Left workspace manifest: place_bread_basket, version 2 (2026-08-13)
 Actors and clearance: breadbasket (static, min 0.05 m), bread0/bread1
-    (dynamic, pairwise and basket clearance min 0.10 m).
+    (dynamic, pairwise and basket clearance min 0.10 m), breads share a widened
+    overlapping pickup band x in [-0.44,-0.34], y in [-0.18,0.04], yaw up to
+    0.50.
 Expert sequence: left grasp bread 0, lift, place at basket functional point,
     larger retreat, return home; left grasp bread 1, place, retreat, return
     home.
@@ -15,8 +17,9 @@ Success predicate: keep both containment checks (each bread at basket xy and
     right-gripper condition; require left open and right home.
 Instruction change: {A}=basket, {B}=bread0, {C}=bread1, {a}=left; wording says
     the left arm puts two breads into the basket.
-Pilot evidence: central-cam 30-seed pilot 0.67 (20/30 success), manifest hash
-    ab0bed4a1448922f
+Pilot evidence: central-cam 30-seed pilot on version 0 0.67 (20/30 success),
+    manifest hash ab0bed4a1448922f; version 2 (widened bread pickup band)
+    50-seed pilot 0.58 (29/50 success), manifest hash 29d901035a7caa75
 """
 
 from __future__ import annotations
@@ -26,6 +29,28 @@ import numpy as np
 from .left_task_base import LeftTaskBase, LeftArmTaskError, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest ab0bed4a1448922f):
+#     - pickup band:  bread0/1 x in [-0.42, -0.36], y in [-0.15, 0.02],
+#                     yaw in [0, 0.50], pairwise clearance 0.10 m
+#     - basket:       static x in [-0.30, -0.12], y in [-0.28, -0.02],
+#                     yaw in [0, 0.50], clearance 0.05 m
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "pickup_bread_x": (-0.42, -0.36),
+    "pickup_bread_y": (-0.15, 0.02),
+    "pickup_bread_yaw_rad": (0.0, 0.50),
+    "bread_min_clearance_m": 0.10,
+    "basket_x": (-0.30, -0.12),
+    "basket_y": (-0.28, -0.02),
+    "basket_yaw_rad": (0.0, 0.50),
+    "basket_min_clearance_m": 0.05,
+    "manifest_hash": "ab0bed4a1448922f",
+}
 
 
 class PlaceBreadBasketLeftImpl(LeftTaskBase):

@@ -5,9 +5,15 @@ Single-arm semantic change: source grasps the two shoes concurrently with the
     task fixes the shoe box static in the left workspace and serially places
     the left shoe at functional point zero and the right shoe at functional
     point one with the left arm, returning home between placements.
-Left workspace manifest: place_dual_shoes, version 0
+Left workspace manifest: place_dual_shoes, version 2 (2026-08-13)
 Actors and clearance: shoe_box (static, min 0.10 m), left_shoe/right_shoe
-    (dynamic, min 0.10 m each).
+    (dynamic, min 0.10 m each) sharing the same reachable envelope x in
+    [-0.46,-0.14] at y in [0.13,0.14], yaw up to 0.50.  A physical-reset
+    grasp+lift probe showed the left arm can lift a shoe only on the y=0.13
+    row (two islands x[-0.46,-0.40] and x[-0.20,-0.14]) or the y=0.14 row (one
+    continuous band x[-0.44,-0.18]); the impl snaps y to one verified row and
+    samples x inside that row's lift-OK set so every spawned shoe is both
+    graspable and liftable, then enforces the 0.10 m pairwise/basket clearance.
 Expert sequence: left grasp left shoe, lift z=0.15, align into box functional
     point zero, return home; left grasp right shoe, align into functional
     point one, return home; brief settling delay.
@@ -17,8 +23,11 @@ Success predicate: replace the source hardcoded world target with a
     height plus 0.01 m; require left open and right home.
 Instruction change: {A}=shoe, {B}=shoe box, {a}=left; wording says the left
     arm puts both shoes into the stationary box.
-Pilot evidence: central-cam 30-seed pilot 0.27 (8/30 success), manifest hash
-    5ab2644b7fc17bd9
+Pilot evidence: central-cam 30-seed pilot on version 0 0.27 (8/30 success),
+    manifest hash 5ab2644b7fc17bd9; version 2 (shared reachable envelope)
+    50-seed pilot 0.40 (20/50 success), manifest hash 735e2fa6c8f00a5b;
+    the 10 setup failures are UnStableError 041_shoe topples across the wider
+    envelope, not GPU contamination, and the pilot still clears the 10/50 bar.
 """
 
 from __future__ import annotations
@@ -28,6 +37,27 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original geometry, manifest 5ab2644b7fc17bd9):
+#     - left_shoe:  x in [-0.44, -0.40], y in [0.13, 0.14], yaw in [0, 0.50]
+#     - right_shoe: x in [-0.20, -0.16], y in [0.13, 0.14], yaw in [0, 0.50]
+#     - shoe_box:   static x in [-0.44, -0.16], y in [-0.18, -0.02], yaw 0
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "shoe_box_x": (-0.44, -0.16),
+    "shoe_box_y": (-0.18, -0.02),
+    "shoe_box_yaw_rad": (0.0, 0.00),
+    "left_shoe_x": (-0.44, -0.40),
+    "right_shoe_x": (-0.20, -0.16),
+    "shoe_y": (0.13, 0.14),
+    "shoe_yaw_rad": (0.0, 0.50),
+    "shoe_clearance_m": 0.10,
+    "manifest_hash": "5ab2644b7fc17bd9",
+}
 
 
 class PlaceDualShoesLeftImpl(LeftTaskBase):
@@ -46,17 +76,41 @@ class PlaceDualShoesLeftImpl(LeftTaskBase):
         specs = {name: self.manifest.actor_specs[name] for name in
                  ("shoe_box", "left_shoe", "right_shoe")}
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        for _ in range(128):
+        # Version 2: the manifest declares both shoes in the shared reachable
+        # envelope x[-0.46,-0.14], but a physical-reset grasp+lift probe showed
+        # the left arm can lift a shoe only on two discrete y rows, with the
+        # lift-OK x band depending on the row:
+        #   y=0.13: two islands x[-0.46,-0.40] and x[-0.20,-0.14]
+        #   y=0.14: one continuous band x[-0.44,-0.18]
+        # Snap y to one verified row, then sample each shoe inside that row's
+        # union of lift-OK bands so both shoes share the whole appearance range
+        # (maximal overlap) while staying graspable AND liftable.  The 0.10 m
+        # pairwise/basket clearance keeps the two shoes from never overlapping.
+        shoe_y = float(np.random.choice([0.13, 0.14]))
+        lift_ok_bands = (
+            ((-0.46, -0.40), (-0.20, -0.14)) if shoe_y < 0.135
+            else ((-0.44, -0.18),)
+        )
+
+        def _shoe_pose(spec) -> sapien.Pose:
+            base = self.sample_spec_pose(spec)
+            lo, hi = lift_ok_bands[int(np.random.rand() * len(lift_ok_bands))]
+            p = np.asarray(base.p, dtype=float)
+            p[0] = float(np.random.uniform(lo, hi))
+            p[1] = shoe_y
+            return sapien.Pose(p, base.q)
+
+        for _ in range(256):
             shoe_box = self.sample_spec_pose(specs["shoe_box"])
-            left_shoe = self.sample_spec_pose(specs["left_shoe"])
-            right_shoe = self.sample_spec_pose(specs["right_shoe"])
+            left_shoe = _shoe_pose(specs["left_shoe"])
+            right_shoe = _shoe_pose(specs["right_shoe"])
             if (self._clear(left_shoe, right_shoe, clearance)
                     and self._clear(left_shoe, shoe_box, clearance)
                     and self._clear(right_shoe, shoe_box, clearance)):
                 return {"shoe_box": shoe_box, "left_shoe": left_shoe,
                         "right_shoe": right_shoe}
         raise SceneRejectedError(
-            "could not sample a feasible place_dual_shoes layout in 128 attempts"
+            "could not sample a feasible place_dual_shoes layout in 256 attempts"
         )
 
     @staticmethod

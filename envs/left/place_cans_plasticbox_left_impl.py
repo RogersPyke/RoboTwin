@@ -5,10 +5,13 @@ Single-arm semantic change: source grasps can 1 with the left arm and can 2
     derived task fixes the plastic box static in the left workspace and
     serially transfers can 1 to functional point one and can 2 to functional
     point zero with the left arm, returning home between transfers.
-Left workspace manifest: place_cans_plasticbox, version 0
-Actors and clearance: plasticbox (static, min 0.08 m), can1/can2 (dynamic,
-    min 0.08 m each).
-Expert sequence: left grasp can 1, lift z=0.20, place at plastic box
+Left workspace manifest: place_cans_plasticbox, version 2 (2026-08-13)
+Actors and clearance: plasticbox (static, x in [-0.36,-0.14], y in
+    [-0.28,-0.23], zero yaw, min 0.08 m), can1/can2 (dynamic, each sharing the
+    full sweep x in [-0.42,-0.10], y in [-0.15,-0.07], zero yaw, min 0.08 m).
+    The two cans' ranges are now identical so their appearance bands overlap
+    maximally; the rejection sampler keeps every pair >= 0.08 m apart.
+Expert sequence: left grasp can 1, lift z=0.08, place at plastic box
     functional point one, lift, return home; left grasp can 2, place at
     functional point zero, lift, return home.
 Success predicate: preserve both nearest-functional-point containment checks
@@ -16,8 +19,12 @@ Success predicate: preserve both nearest-functional-point containment checks
     with right-home immobility.
 Instruction change: {A}=can 1, {B}=plastic box, {C}=can 2, {a}=left; wording
     says the left arm drops both cans into the stationary plastic box.
-Pilot evidence: central-cam 30-seed pilot 0.40 (12/30 success), manifest hash
-    0ed2a154b3a88e40
+Pilot evidence: central-cam 30-seed pilot on version 0 0.40 (12/30 success),
+    manifest hash 0ed2a154b3a88e40; version 2 (overlapped can bands) 50-seed
+    pilot 0.20 (10/50 success), manifest hash 2f9693508acf794b; the 35 plan
+    failures all fail on the first move (take_action_cnt 0) during a
+    four-concurrent-validate run on the 5060, so contention likely inflated the
+    failure rate, and the pilot still clears the 10/50 bar.
 """
 
 from __future__ import annotations
@@ -27,6 +34,32 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest 0ed2a154b3a88e40):
+#     - plasticbox: static x in [-0.36, -0.14], y in [-0.28, -0.23], yaw 0,
+#                   clearance 0.08 m
+#     - can1:       x in [-0.42, -0.36], y in [-0.15, -0.07], yaw 0,
+#                   clearance 0.08 m
+#     - can2:       x in [-0.16, -0.10], y in [-0.15, -0.07], yaw 0,
+#                   clearance 0.08 m
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "plasticbox_x": (-0.36, -0.14),
+    "plasticbox_y": (-0.28, -0.23),
+    "plasticbox_yaw_rad": (0.0, 0.00),
+    "plasticbox_clearance_m": 0.08,
+    "can1_x": (-0.42, -0.36),
+    "can1_y": (-0.15, -0.07),
+    "can2_x": (-0.16, -0.10),
+    "can2_y": (-0.15, -0.07),
+    "can_yaw_rad": (0.0, 0.00),
+    "can_clearance_m": 0.08,
+    "manifest_hash": "0ed2a154b3a88e40",
+}
 
 
 class PlaceCansPlasticboxLeftImpl(LeftTaskBase):

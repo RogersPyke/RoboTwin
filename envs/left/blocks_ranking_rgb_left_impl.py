@@ -4,19 +4,22 @@ Single-arm semantic change: source chooses each block's arm from its x sign and
     switches arms with ``back_to_origin(opposite)``; the derived task samples
     all three blocks in one left workspace and ranks them serially with the
     left arm only, returning home between blocks.
-Left workspace manifest: blocks_ranking_rgb, version 1 (2026-08-13)
+Left workspace manifest: blocks_ranking_rgb, version 2 (2026-08-13)
 Actors and clearance: block1/2/3 (dynamic coloured boxes, pairwise min
     0.10 m), shared pickup band x in [-0.45,-0.16], y in [-0.18,0.08],
-    yaw up to 0.75; ordered target line x bands
-    [-0.42,-0.39]/[-0.34,-0.31]/[-0.26,-0.23] at a shared y in [-0.18,-0.08].
+    yaw up to 0.75; ordered target line translated by line_x in
+    [-0.45,-0.34] so the ranking can sit close to or far from the arm,
+    with per-slot x offsets [0,0.04]/[0.07,0.11]/[0.14,0.18] at a shared
+    y in [-0.18,-0.08].
 Expert sequence: left pick red, place on line, return home; left pick green,
     place, return home; left pick blue, place, return home.
 Success predicate: preserve source ordered-x and common-y ranking relation;
     remove the right-gripper-open condition; require left open and right home.
 Instruction change: {A}=red block, {B}=green block, {C}=blue block, {a}..{c}
     =left; wording says the left arm ranks three coloured blocks.
-Pilot evidence: central-cam 30-seed pilot 0.80 (24/30 success), manifest hash
-    308a70af1adf07a2
+Pilot evidence: central-cam 50-seed pilots on version 1 (fixed-band targets)
+    0.54 (27/50) and on version 2 (line-translated targets) 0.60 (30/50),
+    manifest hash 3b292b9e1d535999
 """
 
 from __future__ import annotations
@@ -29,13 +32,18 @@ from ..utils import *  # noqa: F401,F403
 
 # ---------------------------------------------------------------------------
 # LEGACY_RANDOMIZATION_PARAM
-# The randomization protocol used before the 2026-08-13 widening (version 0).
+# The randomization protocols used before the current version 2 design.
 # Intentionally unused: kept as a declared header constant so the previous
-# geometry is reproducible and comparable.  Old manifest hash 308a70af1adf07a2.
-#   - pickup band:  x in [-0.45, -0.22], y in [-0.08, 0.05], yaw in [0, 0.60]
-#   - pairwise min clearance: 0.10 m
-#   - target line:  red x in [-0.42, -0.40], green x in [-0.33, -0.31],
-#                   blue x in [-0.24, -0.22], shared y in [-0.20, -0.10]
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest 308a70af1adf07a2):
+#     - pickup band:  x in [-0.45, -0.22], y in [-0.08, 0.05], yaw in [0, 0.60]
+#     - pairwise min clearance: 0.10 m
+#     - target line:  red x in [-0.42, -0.40], green x in [-0.33, -0.31],
+#                     blue x in [-0.24, -0.22], shared y in [-0.20, -0.10]
+#   Version 1 (2026-08-13 interim widening, manifest 3b292b9e1d535999): the
+#     pickup band covered the full left workspace; the target line widened to
+#     red [-0.42,-0.39]/green [-0.34,-0.31]/blue [-0.26,-0.23] at shared y in
+#     [-0.18,-0.08].  Superseded by version 2's line_x translation.
 LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
     "pickup_x": (-0.45, -0.22),
     "pickup_y": (-0.08, 0.05),
@@ -46,6 +54,17 @@ LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
     "target_blue_x": (-0.24, -0.22),
     "target_y": (-0.20, -0.10),
     "manifest_hash": "308a70af1adf07a2",
+    "version_1": {
+        "pickup_x": (-0.45, -0.16),
+        "pickup_y": (-0.18, 0.08),
+        "pickup_yaw_rad": (0.0, 0.75),
+        "min_clearance_m": 0.10,
+        "target_red_x": (-0.42, -0.39),
+        "target_green_x": (-0.34, -0.31),
+        "target_blue_x": (-0.26, -0.23),
+        "target_y": (-0.18, -0.08),
+        "manifest_hash": "3b292b9e1d535999",
+    },
 }
 
 
@@ -106,21 +125,24 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
         self.add_prohibit_area(self.block2, padding=0.05)
         self.add_prohibit_area(self.block3, padding=0.05)
         # Ordered target line inside the left workspace: red < green < blue x.
-        # Adjacent worst-case band extremes stay < 0.13 m apart (red_min to
-        # green_max and green_min to blue_max are each 0.11) so the check_success
-        # eps=[0.13, 0.03] predicate always holds for exactly-placed blocks while
-        # the bands are as wide as the predicate allows. y_pose is shared across
-        # the three slots so the 0.03 y tolerance is trivially met; widening it
-        # over the pickup y band lets short and long routes coexist.
+        # The whole line translates via ``line_x`` so the ranking can be
+        # positioned close to or far from the arm, and every slot keeps a
+        # per-slot x band.  The relative offsets hold each adjacent worst-case
+        # extreme < 0.13 m apart (green_hi-red_lo and blue_hi-green_lo are each
+        # 0.11) so the check_success eps=[0.13, 0.03] predicate always holds for
+        # exactly-placed blocks; red<green<blue is guaranteed by the 0.03 slot
+        # gaps.  y_pose is shared across the three slots so the 0.03 y tolerance
+        # is trivially met, and the full line stays inside the pickup x band.
+        line_x = np.random.uniform(-0.45, -0.34)
         y_pose = np.random.uniform(-0.18, -0.08)
         self.block1_target_pose = [
-            np.random.uniform(-0.42, -0.39), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(line_x, line_x + 0.04), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.block2_target_pose = [
-            np.random.uniform(-0.34, -0.31), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(line_x + 0.07, line_x + 0.11), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.block3_target_pose = [
-            np.random.uniform(-0.26, -0.23), y_pose, 0.74 + self.table_z_bias,
+            np.random.uniform(line_x + 0.14, line_x + 0.18), y_pose, 0.74 + self.table_z_bias,
         ] + [0, 1, 0, 0]
         self.record_layout(layout)
         targets = [self.block1_target_pose, self.block2_target_pose, self.block3_target_pose]

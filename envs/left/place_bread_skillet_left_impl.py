@@ -4,11 +4,11 @@ Single-arm semantic change: source puts bread and skillet on opposite sides
     and grasps both concurrently with dual arms; the derived task initialises
     the skillet as a static target directly in the left workspace and performs
     only a left bread grasp-lift-place-release-retreat sequence.
-Left workspace manifest: place_bread_skillet, version 0
-Actors and clearance: bread (dynamic, x in [-0.42,-0.36], min 0.10 m from
-    skillet), skillet (static, x in [-0.26,-0.12], y in [-0.20,0.10], raised
-    +0.025 m so its functional point clears the 0.76 m table-height predicate,
-    min 0.10 m).
+Left workspace manifest: place_bread_skillet, version 2 (2026-08-13)
+Actors and clearance: bread (dynamic, x in [-0.44,-0.34], y in [-0.18,0.04],
+    yaw up to 0.50, min 0.10 m from skillet), skillet (static, x in
+    [-0.26,-0.12], y in [-0.24,0.14], raised +0.025 m so its functional point
+    clears the 0.76 m table-height predicate, min 0.10 m).
 Expert sequence: left grasp bread, lift z=0.10, place at skillet functional
     point zero, release; a post-place retreat that cannot plan is skipped and
     the arm returns home.
@@ -17,8 +17,9 @@ Success predicate: preserve the bread-to-skillet functional-point distance and
     helper exists and the skillet is never moved.
 Instruction change: {A}=skillet, {B}=bread, {a}=left; wording says the left arm
     places the bread onto the skillet and must not claim the skillet moves.
-Pilot evidence: central-cam 30-seed pilot 0.47 (14/30 success), manifest hash
-    a8a91465b6cfbc70
+Pilot evidence: central-cam 30-seed pilot on version 0 0.47 (14/30 success),
+    manifest hash a8a91465b6cfbc70; version 2 (widened bread pickup band)
+    50-seed pilot 0.36 (18/50 success), manifest hash bad1d4f25f906b53
 """
 
 from __future__ import annotations
@@ -28,6 +29,28 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest a8a91465b6cfbc70):
+#     - bread pickup: x in [-0.42, -0.36], y in [-0.15, 0.02], yaw in [0, 0.50]
+#     - skillet:      static x in [-0.26, -0.12], y in [-0.24, 0.14],
+#                     yaw in [0, 0.50], raised +0.025 m, clearance 0.10 m
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "pickup_bread_x": (-0.42, -0.36),
+    "pickup_bread_y": (-0.15, 0.02),
+    "pickup_bread_yaw_rad": (0.0, 0.50),
+    "bread_min_clearance_m": 0.10,
+    "skillet_x": (-0.26, -0.12),
+    "skillet_y": (-0.24, 0.14),
+    "skillet_yaw_rad": (0.0, 0.50),
+    "skillet_clearance_m": 0.10,
+    "skillet_raised_z_m": 0.025,
+    "manifest_hash": "a8a91465b6cfbc70",
+}
 
 
 class PlaceBreadSkilletLeftImpl(LeftTaskBase):

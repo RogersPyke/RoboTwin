@@ -5,9 +5,10 @@ Single-arm semantic change: source grasps hamburg with the left arm and
     in one parallel group; the derived task fixes the tray inside the left
     workspace and serially transfers each food with the left arm, returning
     home between transfers.
-Left workspace manifest: place_burger_fries, version 0
-Actors and clearance: tray (static, min 0.08 m), hamburg (dynamic, min
-    0.08 m), frenchfries (dynamic, min 0.08 m).
+Left workspace manifest: place_burger_fries, version 2 (2026-08-13)
+Actors and clearance: tray (static, min 0.08 m), hamburg (dynamic, y in
+    [0.10,0.16], x in [-0.46,-0.34], min 0.08 m), frenchfries (dynamic, y in
+    [-0.35,-0.27], x in [-0.46,-0.34], min 0.08 m).
 Expert sequence: left grasp hamburg, lift z=0.10, place at tray functional
     point zero, release, return home; left grasp frenchfries, place at tray
     functional point one, release, return home.
@@ -16,8 +17,9 @@ Success predicate: preserve both tray-functional-point containment distances
     with right-home immobility.
 Instruction change: {A}=hamburg, {B}=tray, {C}=frenchfries, {a}=left; wording
     says the left arm places the hamburger and the french fries into the tray.
-Pilot evidence: central-cam 30-seed pilot 0.60 (18/30 success), manifest hash
-    4bb8c437289fcdf5
+Pilot evidence: central-cam 30-seed pilot on version 0 0.60 (18/30 success),
+    manifest hash 4bb8c437289fcdf5; version 2 (widened food pickup bands)
+    50-seed pilot 0.44 (22/50 success), manifest hash dd5bbabf4e2616cf
 """
 
 from __future__ import annotations
@@ -28,6 +30,33 @@ import sapien
 from .left_task_base import LeftArmTaskError, LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest 4bb8c437289fcdf5):
+#     - tray:      static x in [-0.44, -0.08], y in [-0.16, -0.04], yaw 0,
+#                  scale 2.0, clearance 0.08 m
+#     - hamburg:   x in [-0.44, -0.36], y in [0.10, 0.14], yaw in [0, 0.20],
+#                  clearance 0.08 m
+#     - fries:     x in [-0.44, -0.36], y in [-0.33, -0.27], yaw in [0, 0.20],
+#                  clearance 0.08 m
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "tray_x": (-0.44, -0.08),
+    "tray_y": (-0.16, -0.04),
+    "tray_yaw_rad": (0.0, 0.00),
+    "tray_clearance_m": 0.08,
+    "hamburg_x": (-0.44, -0.36),
+    "hamburg_y": (0.10, 0.14),
+    "hamburg_yaw_rad": (0.0, 0.20),
+    "fries_x": (-0.44, -0.36),
+    "fries_y": (-0.33, -0.27),
+    "fries_yaw_rad": (0.0, 0.20),
+    "food_clearance_m": 0.08,
+    "manifest_hash": "4bb8c437289fcdf5",
+}
 
 
 class PlaceBurgerFriesLeftImpl(LeftTaskBase):

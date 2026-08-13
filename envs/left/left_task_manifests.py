@@ -83,13 +83,19 @@ _register(_manifest(
 _register(_manifest(
     "blocks_ranking_size",
     [
-        # x upper bound -0.22 keeps every spawn inside the left-arm reachable
-        # region (x <= -0.20) so a grasp can always plan.
-        _spec("block1", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        # Wide randomization (iteration 2026-08-13): all three blocks share one
+        # overlapping pickup band so routes to the ordered target line start from
+        # many directions and cross. x extends right to the validated
+        # place_object_scale_left bound (x <= -0.16 inside the reachable
+        # region), y overlaps the target-line y band so short and long routes
+        # coexist, and yaw matches the blocks_ranking_rgb family. The 0.10 m
+        # pairwise clearance keeps a gripper-wide minimum gap so the expert can
+        # always operate between the larger size blocks.
+        _spec("block1", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
-        _spec("block2", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        _spec("block2", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
-        _spec("block3", (-0.45, -0.22), (-0.08, 0.05), (0.0, 0.60), 0.10, False,
+        _spec("block3", (-0.45, -0.16), (-0.18, 0.08), (0.0, 0.75), 0.10, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
     ],
 ))
@@ -120,18 +126,21 @@ _register(_manifest(
 _register(_manifest(
     "place_bread_basket",
     [
-        # The bread band matches the verified place_bread_skillet bread band
-        # (x in [-0.42,-0.36], y in [-0.15,0.02], 30-seed SR 0.93): the left
-        # arm's downward grasp of 075_bread is only reliable there.  The basket
-        # sweeps x in [-0.30,-0.12], y in [-0.28,-0.02] so every basket sits at
-        # least 0.06 m right of the bread band (clearance 0.05 m) and the
-        # rejection sampler never locks, while the basket yaw band keeps both
-        # camera variants seeing a varied placement.
+        # Wide randomization (iteration 2026-08-13): bread0 and bread1 share
+        # one overlapping pickup band (x in [-0.44,-0.34], y in [-0.18,0.04])
+        # around the left arm's verified downward-grasp region for 075_bread,
+        # widened modestly from the place_bread_skillet-verified band; the
+        # 0.10 m pairwise bread clearance keeps a gripper-wide gap so the two
+        # breads never touch at spawn.  The basket sweeps x in [-0.30,-0.12],
+        # y in [-0.28,-0.02] so every basket sits at least 0.04 m right of the
+        # widened bread band (clearance 0.05 m, the rejection sampler still
+        # resolves), while the basket yaw band keeps both camera variants
+        # seeing a varied placement.
         _spec("breadbasket", (-0.30, -0.12), (-0.28, -0.02), (0.0, 0.50), 0.05, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("bread0", (-0.42, -0.36), (-0.15, 0.02), (0.0, 0.50), 0.10, False,
+        _spec("bread0", (-0.44, -0.34), (-0.18, 0.04), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
-        _spec("bread1", (-0.42, -0.36), (-0.15, 0.02), (0.0, 0.50), 0.10, False,
+        _spec("bread1", (-0.44, -0.34), (-0.18, 0.04), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
     ],
 ))
@@ -139,12 +148,17 @@ _register(_manifest(
 _register(_manifest(
     "place_bread_skillet",
     [
-        _spec("bread", (-0.42, -0.36), (-0.15, 0.02), (0.0, 0.50), 0.10, False,
+        # Wide randomization (iteration 2026-08-13): the bread pickup band
+        # matches the widened place_bread_basket band (x in [-0.44,-0.34],
+        # y in [-0.18,0.04]) so the two bread families share one verified
+        # downward-grasp region.  The skillet keeps x >= -0.26, geometrically
+        # >= 0.08 m right of the widened bread band (bread x-max -0.34); the
+        # 0.10 m clearance rejects only the closest corner pairs and the
+        # rejection sampler still resolves.  y sweeps broadly in front of the
+        # workspace; the raised skillet keeps its functional point above the
+        # 0.76 m table-height predicate.
+        _spec("bread", (-0.44, -0.34), (-0.18, 0.04), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
-        # The skillet keeps x >= -0.26 so it always sits >= 0.10 m right of the
-        # bread band (bread x-max -0.36) and the clearance test never locks.
-        # y sweeps broadly in front of the workspace; the raised skillet keeps
-        # its functional point above the 0.76 m table-height predicate.
         _spec("skillet", (-0.26, -0.12), (-0.24, 0.14), (0.0, 0.50), 0.10, True,
               base_quat=(0.0, 0.0, 0.707, 0.707)),
     ],
@@ -153,23 +167,24 @@ _register(_manifest(
 _register(_manifest(
     "place_burger_fries",
     [
-        # The tray (0.31 x 0.21 m footprint at scale 2.0) sweeps the left
-        # workspace; the two foods spawn in y-split bands above and below the
-        # tray so neither settles into the tray collision hull and launches.
-        # Any food spawned geometrically inside the tray hull interpenetrates
-        # the tray rim (z in [0.739, 0.777]) and the settle phase ejects it,
-        # launching the food off the table.  The tray centre therefore stays in
-        # y in [-0.16, -0.04] so its footprint y range [-0.245, 0.065] keeps
-        # the hamburg band (y >= 0.10, tray y-max plus bun radius and margin)
-        # above it and the fries band (y <= -0.27, tray y-min minus carton
-        # half-width and margin) below it, with >= 0.10 m y separation for the
-        # clearance test.  x sweeps from the far left to just right of centre
-        # within the left arm's reliable place reach.
+        # Wide randomization (iteration 2026-08-13): the tray (0.31 x 0.21 m
+        # footprint at scale 2.0) sweeps the left workspace; the two foods
+        # spawn in y-split bands above and below the tray so neither settles
+        # into the tray collision hull and launches.  Any food spawned
+        # geometrically inside the tray hull interpenetrates the tray rim (z in
+        # [0.739, 0.777]) and the settle phase ejects it.  The food bands widen
+        # modestly within that protective envelope: hamburg y in [0.10,0.16]
+        # stays above the footprint top (0.065) and fries y in [-0.35,-0.27]
+        # stays below the footprint bottom (-0.245); both widen in x to
+        # [-0.46,-0.34] where the y-split keeps >= 0.08 m separation for the
+        # clearance test.  The tray centre stays in y in [-0.16, -0.04] and
+        # x sweeps from the far left to just right of centre within the left
+        # arm's reliable place reach.
         _spec("tray", (-0.44, -0.08), (-0.16, -0.04), (0.0, 0.00), 0.08, True,
               base_quat=(0.706527, 0.706483, -0.0291356, -0.0291767)),
-        _spec("hamburg", (-0.44, -0.36), (0.10, 0.14), (0.0, 0.20), 0.08, False,
+        _spec("hamburg", (-0.46, -0.34), (0.10, 0.16), (0.0, 0.20), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("frenchfries", (-0.44, -0.36), (-0.33, -0.27), (0.0, 0.20), 0.08, False,
+        _spec("frenchfries", (-0.46, -0.34), (-0.35, -0.27), (0.0, 0.20), 0.08, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
     ],
 ))
@@ -177,8 +192,9 @@ _register(_manifest(
 _register(_manifest(
     "place_can_basket",
     [
-        # The basket sweeps the left-front quadrant (x in [-0.36, -0.16],
-        # y in [-0.28, -0.15]) after a leftward shift from the source x=0.02
+        # Wide randomization (iteration 2026-08-13): the basket sweeps the
+        # left-front quadrant, widened slightly to x in [-0.38,-0.14], y in
+        # [-0.30,-0.15], after a leftward shift from the source x=0.02
         # centre-line position, keeping its solid plate cluster inside the left
         # arm's reliable reach.  The quat (0.5, 0.5, 0.5, 0.5) with zero yaw is
         # deterministic, which keeps the plate offset (+0.05, -0.04) used by
@@ -186,7 +202,7 @@ _register(_manifest(
         # stays >= 0.15 m below the can band (y >= 0.15 separation) so the
         # clearance test never locks, and the plate offset tracks the basket
         # centre, so a shifted basket still receives the can.
-        _spec("basket", (-0.36, -0.16), (-0.28, -0.15), (0.0, 0.00), 0.15, True,
+        _spec("basket", (-0.38, -0.14), (-0.30, -0.15), (0.0, 0.00), 0.15, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
         # The can spawns on its side (identity quat) near the left arm base
         # (x in [-0.25, -0.20], y in [0, 0.08]), matching the source layout
@@ -203,18 +219,26 @@ _register(_manifest(
     "place_cans_plasticbox",
     [
         # The plastic box sweeps x in [-0.36, -0.14] at a deep-y band in
-        # [-0.28, -0.23], behind the two can bands (y in [-0.15, -0.07] on
-        # both x flanks).  The box's y <= -0.23 keeps every can-to-box
-        # separation >= 0.08 m (the clearance) so the rejection
-        # sampler never locks, and keeping the box behind the cans (not in
-        # front) avoids blocking the left arm's grasp approach over them.  The
-        # depth matches the place_can_basket basket band (y in [-0.28,-0.15],
-        # 30-seed SR 0.37) so it sits inside the verified reach.
+        # [-0.28, -0.23], behind the two cans.  The box's y <= -0.23 keeps
+        # every can-to-box separation >= 0.08 m (the clearance) so the
+        # rejection sampler never locks, and keeping the box behind the cans
+        # (not in front) avoids blocking the left arm's grasp approach over
+        # them.  The depth matches the place_can_basket basket band
+        # (y in [-0.28,-0.15], 30-seed SR 0.37) so it sits inside the verified
+        # reach.
         _spec("plasticbox", (-0.36, -0.14), (-0.28, -0.23), (0.0, 0.00), 0.08, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("can1", (-0.42, -0.36), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
+        # Version 2: can1 and can2 now share one identical band
+        # x in [-0.42, -0.10], y in [-0.15, -0.07] — the union of the version-0
+        # left and right can flanks — so the two cans overlap maximally across
+        # the whole left reachable sweep and any can may land in either flank
+        # (near the base or out at the far edge).  The band's endpoints are the
+        # two version-0 flank extremes, each already verified IK-reachable
+        # (30-seed SR 0.40), and the rejection sampler keeps the cans >= 0.08 m
+        # apart and >= 0.08 m clear of the box.
+        _spec("can1", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("can2", (-0.16, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
+        _spec("can2", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
     ],
 ))
@@ -225,29 +249,33 @@ _register(_manifest(
         # The shoe box (0.18 x 0.26 m footprint under the stand90 quat) is a
         # tall static hull; a shoe that spawns geometrically inside that
         # footprint interpenetrates the box rim and the settle phase ejects it,
-        # raising UnStableError.  Both shoes therefore spawn in narrow bands
-        # above the box (y >= 0.13) with an x split so the two shoes never
-        # collide.  The box sweeps x in [-0.44, -0.16] and y in [-0.18, -0.02];
-        # its y half-extent is 0.13, so the footprint top sits at most at
-        # y=0.11, still below the shoe bands' y=0.13, and the y separation to
-        # the shoes is >= 0.15 m, above the 0.10 m clearance.
-        # Physical-reset grasp+lift maps over the left workspace showed that
-        # only the y=0.13..0.14 row keeps a lift reachable for the left arm:
-        # y below 0.13 (left shoe at 0.116-0.127) and the former right band x
-        # in [-0.20,-0.14] at y above 0.14 both fail with plan=False after
-        # grasp.  The bands below are the verified contiguous OK subregions:
-        # left x in [-0.44,-0.40] (y=0.13 row OK in [-0.46,-0.40], y=0.14 row
-        # OK in [-0.44,-0.30]) and right x in [-0.20,-0.16] (y=0.13 row OK in
-        # [-0.20,-0.14], y=0.14 row OK in [-0.24,-0.16]).  The two bands keep a
-        # 0.20 m x separation, well above the 0.10 m clearance.  The box quat
-        # is stand90, matching the shoe base quat: the align place constraint
-        # then keeps the shoe standing (a small wrist rotation) instead of
-        # requiring a lateral 120-degree roll that the left arm cannot reach.
+        # raising UnStableError.  Both shoes therefore spawn above the box
+        # (y >= 0.13).  The box sweeps x in [-0.44, -0.16] and y in [-0.18,
+        # -0.02]; its y half-extent is 0.13, so the footprint top sits at most
+        # at y=0.11, still below the shoe rows' y=0.13.
+        # Physical-reset grasp+lift probes (diag_ds_fullmap.py, 0.02 m grid,
+        # model 4, stand90 quat) showed the left arm can grasp AND lift a shoe
+        # only on the y=0.13 and y=0.14 rows, with the lift-OK x band depending
+        # on the row:
+        #   y=0.13: "gOOOOgggggggggOOOOg."  -> OK in x[-0.46,-0.40] (left
+        #           island) or x[-0.20,-0.14] (right island); the middle
+        #           x[-0.38,-0.22] is grasp-only and cannot lift.
+        #   y=0.14: ".gOOOOOOOOOOOOOOOg.g"  -> OK in the single continuous band
+        #           x[-0.44,-0.18]; only x=-0.46 (grasp-only) and x<=-0.16 fail.
+        # Version 2 therefore declares both shoes in the shared reachable
+        # envelope x[-0.46,-0.14] at y in [0.13,0.14] (the union of the two
+        # rows), so the two appearance ranges overlap maximally.  The impl
+        # snaps y to one verified row and samples x inside that row's lift-OK
+        # set, then enforces the 0.10 m pairwise/basket clearance so the two
+        # shoes never overlap.  The box quat is stand90, matching the shoe base
+        # quat: the align place constraint then keeps the shoe standing (a
+        # small wrist rotation) instead of requiring a lateral 120-degree roll
+        # that the left arm cannot reach.
         _spec("shoe_box", (-0.44, -0.16), (-0.18, -0.02), (0.0, 0.00), 0.10, True,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
-        _spec("left_shoe", (-0.44, -0.40), (0.13, 0.14), (0.0, 0.50), 0.10, False,
+        _spec("left_shoe", (-0.46, -0.14), (0.13, 0.14), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
-        _spec("right_shoe", (-0.20, -0.16), (0.13, 0.14), (0.0, 0.50), 0.10, False,
+        _spec("right_shoe", (-0.46, -0.14), (0.13, 0.14), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
     ],
 ))

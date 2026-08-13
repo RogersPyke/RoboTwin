@@ -5,9 +5,11 @@ Single-arm semantic change: source picks each block with whichever arm matches
     placements; the derived task samples both blocks in one left workspace,
     places block 1 on a left target and stacks block 2 onto block 1, all with
     the left arm only, waiting for block 1 to settle before stacking.
-Left workspace manifest: stack_blocks_two, version 0
-Actors and clearance: block1/block2 (dynamic boxes, pairwise min 0.10 m),
-    block 1 target in x [-0.30,-0.30] at y [-0.13,-0.13].
+Left workspace manifest: stack_blocks_two, version 2 (2026-08-13)
+Actors and clearance: block1/block2 (dynamic boxes, both sharing the identical
+    sweep x in [-0.45,-0.10], y in [-0.08,0.05], yaw up to 0.60, pairwise min
+    0.10 m), block 1 target randomized in x in [-0.34,-0.26] at y in
+    [-0.16,-0.10].
 Expert sequence: left pick block 1, place at left target, settle delay; left
     pick block 2, align to block 1 functional point one, release, return home.
 Success predicate: preserve the source stacked-geometry test (block 2 on
@@ -15,8 +17,9 @@ Success predicate: preserve the source stacked-geometry test (block 2 on
     Block 1 is not frozen; unstable seeds are rejected by the layout sampler.
 Instruction change: {A}=red block, {B}=green block, {a}..{b}=left; wording
     says the left arm stacks the green block onto the red block.
-Pilot evidence: central-cam 30-seed pilot 1.00 (30/30 success), manifest hash
-    2585a2c9d73c5073
+Pilot evidence: central-cam 30-seed pilot on version 0 1.00 (30/30 success),
+    manifest hash 2585a2c9d73c5073; version 2 (randomized stack target)
+    50-seed pilot 1.00 (50/50 success), manifest hash 2585a2c9d73c5073
 """
 
 from __future__ import annotations
@@ -26,6 +29,25 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest 2585a2c9d73c5073):
+#     - block1/block2: x in [-0.45, -0.10], y in [-0.08, 0.05],
+#                      yaw in [0, 0.60], clearance 0.10 m
+#     - block 1 target: fixed at x=-0.30, y=-0.13 (z 0.75 + table bias)
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "block_x": (-0.45, -0.10),
+    "block_y": (-0.08, 0.05),
+    "block_yaw_rad": (0.0, 0.60),
+    "block_clearance_m": 0.10,
+    "target_x": (-0.30, -0.30),
+    "target_y": (-0.13, -0.13),
+    "manifest_hash": "2585a2c9d73c5073",
+}
 
 
 class StackBlocksTwoLeftImpl(LeftTaskBase):
@@ -46,7 +68,15 @@ class StackBlocksTwoLeftImpl(LeftTaskBase):
             for name in ("block1", "block2")
         }
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        target = np.array([-0.30, -0.13], dtype=float)
+        # Version 2: the stack target is no longer fixed at (-0.30,-0.13);
+        # sample it inside a conservative reachable band (SR was 1.00 with the
+        # fixed target, so keep the sweep modest) and share the sampled value
+        # with load_actors through ``self.stack_target_xy``.
+        self.stack_target_xy = np.array([
+            float(np.random.uniform(-0.34, -0.26)),
+            float(np.random.uniform(-0.16, -0.10)),
+        ], dtype=float)
+        target = self.stack_target_xy
         for _ in range(128):
             block1 = self.sample_spec_pose(specs["block1"])
             block2 = self.sample_spec_pose(specs["block2"])
@@ -82,7 +112,10 @@ class StackBlocksTwoLeftImpl(LeftTaskBase):
         self.block2 = create_block(layout["block2"], color_lst[1])
         self.add_prohibit_area(self.block1, padding=0.07)
         self.add_prohibit_area(self.block2, padding=0.07)
-        self.block1_target_pose = [-0.30, -0.13, 0.75 + self.table_z_bias, 0, 1, 0, 0]
+        self.block1_target_pose = [
+            float(self.stack_target_xy[0]), float(self.stack_target_xy[1]),
+            0.75 + self.table_z_bias, 0, 1, 0, 0,
+        ]
         self.record_layout(layout)
         self.route_bins = self.classify_routes([
             ("block1", np.asarray(layout["block1"].p), np.asarray(self.block1_target_pose[:3])),

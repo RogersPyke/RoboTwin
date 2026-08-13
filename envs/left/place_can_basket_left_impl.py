@@ -5,8 +5,13 @@ Single-arm semantic change: source randomly selects an active arm, places the
     the derived task fixes the basket static in the left workspace, drops the
     opposite-arm grasp entirely and narrows the success predicate to a basket
     that stays within +/- 1 cm of its spawn height.
-Left workspace manifest: place_can_basket, version 0
-Actors and clearance: basket (static, min 0.15 m), can (dynamic, min 0.15 m).
+Left workspace manifest: place_can_basket, version 2 (2026-08-13)
+Actors and clearance: basket (static, swept slightly wider to x in
+    [-0.38,-0.14], y in [-0.30,-0.15], zero yaw, min 0.15 m), can (dynamic,
+    x in [-0.25,-0.20], y in [0,0.08], zero yaw, min 0.15 m).  The can band is
+    pinned by the lying-can downward-grasp IK reach (y capped at 0.08) and the
+    basket yaw is pinned at zero so the calibrated plate offset (+0.05, -0.04)
+    stays valid; the widened basket sweep is the safe randomization lever.
 Expert sequence: left grasp can, pick the nearer basket functional point,
     place, release, retreat along the arm axis, return home.
 Success predicate: preserve basket uprightness, can-in-basket distance and
@@ -16,8 +21,9 @@ Success predicate: preserve basket uprightness, can-in-basket distance and
 Instruction change: {A}=can, {B}=basket, {a}=left; wording says the left arm
     puts the can into the stationary basket and must not claim the basket
     moves.
-Pilot evidence: central-cam 30-seed pilot 0.27 (8/30 success), manifest hash
-    c37d5602554d546f
+Pilot evidence: central-cam 30-seed pilot on version 0 0.27 (8/30 success),
+    manifest hash c37d5602554d546f; version 2 (widened basket sweep) 50-seed
+    pilot 0.28 (14/50 success), manifest hash ad0055fc4f784083
 """
 
 from __future__ import annotations
@@ -28,6 +34,27 @@ import sapien
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest c37d5602554d546f):
+#     - basket: static x in [-0.36, -0.16], y in [-0.28, -0.15], yaw 0,
+#               clearance 0.15 m
+#     - can:    x in [-0.25, -0.20], y in [0, 0.08], yaw 0, clearance 0.15 m
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "basket_x": (-0.36, -0.16),
+    "basket_y": (-0.28, -0.15),
+    "basket_yaw_rad": (0.0, 0.00),
+    "basket_clearance_m": 0.15,
+    "can_x": (-0.25, -0.20),
+    "can_y": (0.0, 0.08),
+    "can_yaw_rad": (0.0, 0.00),
+    "can_clearance_m": 0.15,
+    "manifest_hash": "c37d5602554d546f",
+}
 
 
 def _rotate_quat(q: list | np.ndarray) -> list:

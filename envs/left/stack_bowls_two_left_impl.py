@@ -5,9 +5,11 @@ Single-arm semantic change: source picks each bowl with whichever arm matches
     both bowls in one left workspace, moves the lower bowl onto a left target
     and stacks the upper bowl onto it, all with the left arm only, verifying
     that the lower bowl has settled before the top-down upper grasp.
-Left workspace manifest: stack_bowls_two, version 0
-Actors and clearance: bowl1/bowl2 (dynamic, pairwise min 0.13 m), lower bowl
-    target in x [-0.30,-0.30] at y [-0.10,-0.10] and z 0.76 m.
+Left workspace manifest: stack_bowls_two, version 2 (2026-08-13)
+Actors and clearance: bowl1/bowl2 (dynamic, both sharing the identical sweep
+    x in [-0.50,-0.05], y in [-0.15,0.15], zero yaw, pairwise min 0.13 m),
+    lower bowl target randomized in x in [-0.34,-0.26] at y in [-0.14,-0.06]
+    and z 0.76 m.
 Expert sequence: left grasp lower bowl, lift z=0.10, align to left target,
     lift, settle delay; left grasp upper bowl with a top-down grasp, stack
     onto the lower bowl, lift, return home.
@@ -16,8 +18,9 @@ Success predicate: preserve the source two-height stacking geometry (aligned
     require left open and right home.
 Instruction change: {A}=lower bowl, {B}=upper bowl, {a}..{b}=left; wording
     says the left arm stacks the upper bowl onto the lower bowl.
-Pilot evidence: central-cam 30-seed pilot 0.57 (17/30 success), manifest hash
-    ace5714486a162e4
+Pilot evidence: central-cam 30-seed pilot on version 0 0.57 (17/30 success),
+    manifest hash ace5714486a162e4; version 2 (randomized stack target)
+    50-seed pilot 0.56 (28/50 success), manifest hash ace5714486a162e4
 """
 
 from __future__ import annotations
@@ -27,6 +30,25 @@ import numpy as np
 from .left_task_base import LeftTaskBase, SceneRejectedError
 from .left_task_manifests import get_manifest
 from ..utils import *  # noqa: F401,F403
+
+# ---------------------------------------------------------------------------
+# LEGACY_RANDOMIZATION_PARAM
+# The randomization protocol used before the current version 2 design.
+# Intentionally unused: kept as a declared header constant so the previous
+# geometry is reproducible and comparable.
+#   Version 0 (original source-task geometry, manifest ace5714486a162e4):
+#     - bowl1/bowl2: x in [-0.50, -0.05], y in [-0.15, 0.15], yaw 0,
+#                    clearance 0.13 m
+#     - lower bowl target: fixed at x=-0.30, y=-0.10 (z 0.76 m)
+LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
+    "bowl_x": (-0.50, -0.05),
+    "bowl_y": (-0.15, 0.15),
+    "bowl_yaw_rad": (0.0, 0.00),
+    "bowl_clearance_m": 0.13,
+    "target_x": (-0.30, -0.30),
+    "target_y": (-0.10, -0.10),
+    "manifest_hash": "ace5714486a162e4",
+}
 
 
 class StackBowlsTwoLeftImpl(LeftTaskBase):
@@ -39,7 +61,6 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
     def __init__(self) -> None:
         super().__init__()
         self.manifest = get_manifest("stack_bowls_two")
-        self.bowl1_target_pose = np.array([-0.30, -0.10, 0.76], dtype=float)
         self.quat_of_target_pose = [0.0, 0.707, 0.707, 0.0]
 
     def sample_layout(self) -> dict[str, object]:
@@ -48,7 +69,15 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
             for name in ("bowl1", "bowl2")
         }
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        target = np.array([-0.30, -0.10], dtype=float)
+        # Version 2: the stack target is no longer fixed at (-0.30,-0.10);
+        # sample it inside a conservative reachable band (SR was 0.57 with the
+        # fixed target, so keep the sweep modest) and share the sampled value
+        # with load_actors through ``self.stack_target_xy``.
+        self.stack_target_xy = np.array([
+            float(np.random.uniform(-0.34, -0.26)),
+            float(np.random.uniform(-0.14, -0.06)),
+        ], dtype=float)
+        target = self.stack_target_xy
         for _ in range(128):
             bowl1 = self.sample_spec_pose(specs["bowl1"])
             bowl2 = self.sample_spec_pose(specs["bowl2"])
@@ -79,6 +108,9 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
         self.add_prohibit_area(self.bowl1, padding=0.07)
         self.add_prohibit_area(self.bowl2, padding=0.07)
         self.record_layout({"bowl1": poses[0], "bowl2": poses[1]})
+        self.bowl1_target_pose = np.array([
+            float(self.stack_target_xy[0]), float(self.stack_target_xy[1]), 0.76,
+        ], dtype=float)
         target = self.bowl1_target_pose[:3]
         self.route_bins = self.classify_routes([
             ("bowl1", np.asarray(poses[0].p), np.asarray(target)),
