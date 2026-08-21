@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import CENTERED_BATCH_VARIANTS, LeftTaskBase, SceneRejectedError
+from ..left_task_base import CENTERED_BATCH_VARIANTS, LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -126,7 +126,7 @@ class PlaceDualShoesLeftImpl(LeftTaskBase):
                     and self._clear(right_shoe, shoe_box, clearance)):
                 return {"shoe_box": shoe_box, "left_shoe": left_shoe,
                         "right_shoe": right_shoe}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_dual_shoes layout in 256 attempts"
         )
 
@@ -137,7 +137,7 @@ class PlaceDualShoesLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("place_dual_shoes layout rejected by validate_layout")
+            raise SceneInitRejectError("place_dual_shoes layout rejected by validate_layout")
         # Box origin sits exactly on the table top (0.741); the static box
         # never settles, so the old 0.74 left it permanently 1 mm buried.
         layout["shoe_box"].p[2] = 0.741

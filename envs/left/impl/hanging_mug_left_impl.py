@@ -36,7 +36,7 @@ import warnings
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -78,7 +78,7 @@ class HangingMugLeftImpl(LeftTaskBase):
             mug_pose.q = np.array([0.707, 0.707, 0.0, 0.0])
             if self._layout_feasible(mug_pose, rack_pose):
                 return {"mug": mug_pose, "rack": rack_pose}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible hanging_mug layout in 128 attempts"
         )
 
@@ -99,7 +99,7 @@ class HangingMugLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("hanging_mug layout rejected by validate_layout")
+            raise SceneInitRejectError("hanging_mug layout rejected by validate_layout")
         # Iteration-4 pilot: only model 0 (scale 0.08) is graspable and rides
         # the tilted pillar; the other mug models either fall off the rack or
         # make the placement unreachable, so the family freezes on model 0.

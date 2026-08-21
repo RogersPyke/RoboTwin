@@ -161,7 +161,7 @@ CAMERA_SPECS: Mapping[str, CameraSpec] = {
 }
 
 
-class SceneRejectedError(RuntimeError):
+class SceneInitRejectError(RuntimeError):
     """Raised when a sampled actor layout is infeasible for the left arm."""
 
 

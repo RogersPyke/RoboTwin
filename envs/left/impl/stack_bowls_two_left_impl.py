@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -88,14 +88,14 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
             if float(np.linalg.norm(bowl2.p[:2] - target)) < 0.13:
                 continue
             return {"bowl1": bowl1, "bowl2": bowl2}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible stack_bowls_two layout in 128 attempts"
         )
 
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("stack_bowls_two layout rejected by validate_layout")
+            raise SceneInitRejectError("stack_bowls_two layout rejected by validate_layout")
         poses = [layout["bowl1"], layout["bowl2"]]
         poses = sorted(poses, key=lambda pose: float(pose.p[1]))
 

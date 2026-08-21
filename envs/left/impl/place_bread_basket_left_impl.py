@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, LeftArmTaskError, SceneRejectedError
+from ..left_task_base import LeftTaskBase, LeftArmTaskError, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -83,7 +83,7 @@ class PlaceBreadBasketLeftImpl(LeftTaskBase):
                     and self._clear(bread0, basket, basket_clearance)
                     and self._clear(bread1, basket, basket_clearance)):
                 return {"breadbasket": basket, "bread0": bread0, "bread1": bread1}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_bread_basket layout in 128 attempts"
         )
 
@@ -94,7 +94,7 @@ class PlaceBreadBasketLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("place_bread_basket layout rejected by validate_layout")
+            raise SceneInitRejectError("place_bread_basket layout rejected by validate_layout")
         id_list = [0, 1, 2, 3, 4]
         self.basket_id = int(np.random.choice(id_list))
         self.breadbasket = create_actor(

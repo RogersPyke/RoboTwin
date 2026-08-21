@@ -39,7 +39,7 @@ from ..left_task_base import (
     CENTERED_BATCH_VARIANTS,
     LeftArmTaskError,
     LeftTaskBase,
-    SceneRejectedError,
+    SceneInitRejectError,
 )
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
@@ -115,7 +115,7 @@ class PlaceBurgerFriesLeftImpl(LeftTaskBase):
                     and self._clear(hamburg, tray, clearance)
                     and self._clear(frenchfries, tray, clearance)):
                 return {"tray": tray, "hamburg": hamburg, "frenchfries": frenchfries}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_burger_fries layout in 128 attempts"
         )
 
@@ -126,7 +126,7 @@ class PlaceBurgerFriesLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("place_burger_fries layout rejected by validate_layout")
+            raise SceneInitRejectError("place_burger_fries layout rejected by validate_layout")
         self.tray_id = int(np.random.choice([0, 1, 2, 3]))
         self.tray = create_actor(
             scene=self, pose=layout["tray"], modelname="008_tray", convex=True,

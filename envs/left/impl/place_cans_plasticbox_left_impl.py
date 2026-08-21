@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -87,7 +87,7 @@ class PlaceCansPlasticboxLeftImpl(LeftTaskBase):
                     and self._clear(can1, plasticbox, clearance)
                     and self._clear(can2, plasticbox, clearance)):
                 return {"plasticbox": plasticbox, "can1": can1, "can2": can2}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_cans_plasticbox layout in 128 attempts"
         )
 
@@ -98,7 +98,7 @@ class PlaceCansPlasticboxLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError(
+            raise SceneInitRejectError(
                 "place_cans_plasticbox layout rejected by validate_layout"
             )
         self.plasticbox_id = int(np.random.choice([3, 5]))

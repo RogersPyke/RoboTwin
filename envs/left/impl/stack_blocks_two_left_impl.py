@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -89,7 +89,7 @@ class StackBlocksTwoLeftImpl(LeftTaskBase):
             if float(np.linalg.norm(block2.p[:2] - target)) < 0.15:
                 continue
             return {"block1": block1, "block2": block2}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible stack_blocks_two layout in 128 attempts"
         )
 
@@ -100,7 +100,7 @@ class StackBlocksTwoLeftImpl(LeftTaskBase):
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("stack_blocks_two layout rejected by validate_layout")
+            raise SceneInitRejectError("stack_blocks_two layout rejected by validate_layout")
         color_lst = [(1, 0, 0), (0, 1, 0)]
 
         def create_block(block_pose, color):

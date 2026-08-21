@@ -7,6 +7,7 @@ from sapien.render import clear_cache
 from collections import OrderedDict
 import pdb
 from envs import *
+from envs.left.left_task_base import SceneInitRejectError
 import yaml
 import importlib
 import json
@@ -142,6 +143,20 @@ def run(TASK_ENV, args):
 
                 if args["render_freq"]:
                     TASK_ENV.viewer.close()
+            except SceneInitRejectError as e:
+                # Initialization legality failed before any planning or expert
+                # execution: the seed is discarded as failed for this reason
+                # only, and the log states it explicitly.
+                print(" -------------")
+                print(f"simulate data episode {suc_num} fail! (seed = {epid})")
+                print(f"seed rejected: random initialization infeasible: {e}")
+                print(" -------------")
+                fail_num += 1
+                TASK_ENV.close_env()
+
+                if args["render_freq"]:
+                    TASK_ENV.viewer.close()
+                time.sleep(0.3)
             except UnStableError as e:
                 print(" -------------")
                 print(f"simulate data episode {suc_num} fail! (seed = {epid})")

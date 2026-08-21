@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -91,14 +91,14 @@ class PlaceBreadSkilletLeftImpl(LeftTaskBase):
             skillet = self.sample_spec_pose(skillet_spec)
             if float(np.linalg.norm(bread.p[:2] - skillet.p[:2])) >= clearance:
                 return {"bread": bread, "skillet": skillet}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_bread_skillet layout in 128 attempts"
         )
 
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("place_bread_skillet layout rejected by validate_layout")
+            raise SceneInitRejectError("place_bread_skillet layout rejected by validate_layout")
         bread_id_list = [0, 1, 3, 5, 6]
         self.bread_id = int(np.random.choice(bread_id_list))
         self.bread = create_actor(

@@ -35,7 +35,7 @@ from __future__ import annotations
 import numpy as np
 import sapien
 
-from ..left_task_base import LeftTaskBase, SceneRejectedError
+from ..left_task_base import LeftTaskBase, SceneInitRejectError
 from ..left_task_manifests import get_manifest
 from ...utils import *  # noqa: F401,F403
 
@@ -136,14 +136,14 @@ class PlaceCanBasketLeftImpl(LeftTaskBase):
             can = self.sample_spec_pose(can_spec)
             if float(np.linalg.norm(can.p[:2] - basket.p[:2])) >= clearance:
                 return {"basket": basket, "can": can}
-        raise SceneRejectedError(
+        raise SceneInitRejectError(
             "could not sample a feasible place_can_basket layout in 256 attempts"
         )
 
     def load_actors(self) -> None:
         layout = self.sample_layout()
         if not self.validate_layout(layout):
-            raise SceneRejectedError("place_can_basket layout rejected by validate_layout")
+            raise SceneInitRejectError("place_can_basket layout rejected by validate_layout")
         self.basket_name = "110_basket"
         self.basket_id = int(np.random.choice([0, 1]))
         basket_pose = layout["basket"]
