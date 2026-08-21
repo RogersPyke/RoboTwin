@@ -1,0 +1,17 @@
+{
+  "full_description": "three blocks of different sizes rest on the table; use one arm to rank them so the large block is leftmost, the medium block in the middle and the small block rightmost",
+  "schema": "{A} notifies the large block, {B} notifies the medium block, {C} notifies the small block, {a} notifies the left arm to move the large block, {b} notifies the left arm to move the medium block, {c} notifies the left arm to move the small block",
+  "preference": "num of words should not exceed 18. Degree of detail avg 7.",
+  "seen": [
+    "Use {a} to place {A} leftmost, {b} to place {B} in the middle and {c} to place {C} at the right.",
+    "Rank the blocks by size with the left arm: {A}, {B}, then {C}.",
+    "With the left arm order the blocks from largest to smallest.",
+    "Move {A}, {B} and {C} into one size-ordered line with the left arm.",
+    "{a} moves {A}, {b} moves {B}, {c} moves {C} from large to small."
+  ],
+  "unseen": [
+    "Order the three blocks from large to small on the table.",
+    "Use the left arm to arrange {A}, {B} and {C} by decreasing size.",
+    "Line up the big block, then the medium one, then the small one."
+  ]
+}

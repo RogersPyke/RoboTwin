@@ -1,0 +1,17 @@
+{
+  "full_description": "place the can into the stationary basket with one arm and leave the basket on the table",
+  "schema": "{A} notifies the can, {B} notifies the basket, {a} notifies the left arm",
+  "preference": "num of words should not exceed 15. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to place the can {A} into the basket {B} and keep the basket on the table.",
+    "With the left arm put {A} into the stationary basket {B}.",
+    "{a} drops the can {A} into the basket {B} without lifting it.",
+    "Place {A} into {B} with the left arm and leave {B} in place.",
+    "{a} puts the can {A} into the basket {B}."
+  ],
+  "unseen": [
+    "Put the can into the basket without moving the basket.",
+    "Use the left arm to place {A} inside {B}.",
+    "Set {A} into {B} with {a}, leaving the basket on the table."
+  ]
+}

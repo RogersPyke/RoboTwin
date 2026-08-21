@@ -1,0 +1,17 @@
+{
+  "full_description": "two breads rest on the table; use one arm to put both breads into the basket",
+  "schema": "{A} notifies the basket, {B} notifies the first bread, {C} notifies the second bread, {a} notifies the left arm",
+  "preference": "num of words should not exceed 15. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to put {B} and {C} into the basket {A}.",
+    "With the left arm place the two breads {B} and {C} into {A}.",
+    "{a} drops {B} and {C} into the basket {A}.",
+    "Put the first bread {B} and the second bread {C} into {A} with the left arm.",
+    "{a} places both breads into the basket {A}."
+  ],
+  "unseen": [
+    "Put the two breads into the basket.",
+    "Use the left arm to place {B} and {C} in {A}.",
+    "Move both breads into the basket with {a}."
+  ]
+}

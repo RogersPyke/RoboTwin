@@ -1,0 +1,17 @@
+{
+  "full_description": "put both shoes into the shoe box with one arm",
+  "schema": "{A} notifies the shoe, {B} notifies the shoe box, {a} notifies the left arm",
+  "preference": "num of words should not exceed 12. Degree of detail avg 5.",
+  "seen": [
+    "Use {a} to put the shoes {A} into the box {B}.",
+    "With the left arm place both shoes into {B}.",
+    "{a} drops the shoes into the shoe box {B}.",
+    "Put the shoes {A} into {B} with the left arm.",
+    "{a} places the shoes into the box {B}."
+  ],
+  "unseen": [
+    "Put both shoes into the shoe box.",
+    "Use the left arm to place the shoes in {B}.",
+    "Set the shoes into {B} with {a}."
+  ]
+}

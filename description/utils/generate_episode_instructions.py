@@ -143,9 +143,16 @@ def resolve_task_instruction_path(task_name: str) -> str:
 
 
 def resolve_setting_path(setting: str) -> str:
-    """Path to the existing task config yml, preferring task_config/left/."""
-    for sub in ("task_config/left", "task_config"):
-        p = os.path.join(parent_directory, f"../../{sub}/{setting}.yml")
+    """Path to the existing task config yml, preferring task_config/left/.
+
+    Left-arm configs are organized like envs/left — one subfolder per camera
+    variant, base/ holds the default central-cam configs.  Keep the folder
+    list in sync with envs/_GLOBAL_CONFIGS.py task_config_yml_path.
+    """
+    for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
+                   "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+                   "base", ""):
+        p = os.path.join(parent_directory, f"../../task_config/left/{folder + '/' if folder else ''}{setting}.yml")
         if os.path.exists(p):
             return p
     return os.path.join(parent_directory, f"../../task_config/{setting}.yml")

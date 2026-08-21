@@ -1,0 +1,17 @@
+{
+  "full_description": "hang the mug onto the rack with one arm",
+  "schema": "{A} notifies the mug, {B} notifies the rack, {a} notifies the left arm",
+  "preference": "num of words should not exceed 12. Degree of detail avg 5.",
+  "seen": [
+    "Use {a} to hang {A} on {B}.",
+    "Hang {A} onto {B} with the left arm.",
+    "{a} places {A} on the rack {B}.",
+    "With the left arm, put {A} onto {B}.",
+    "{a} hangs the mug {A} on the rack {B}."
+  ],
+  "unseen": [
+    "Hang the mug on the rack.",
+    "Use the left arm to mount {A} onto {B}.",
+    "Put {A} onto {B} with {a}."
+  ]
+}
