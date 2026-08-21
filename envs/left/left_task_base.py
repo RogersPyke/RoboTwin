@@ -39,7 +39,17 @@ from ..utils import *  # noqa: F401,F403  (ArmTag, Action, rand_pose, create_act
 from ..utils import ArmTag, Actor
 
 ArmName = Literal["left"]
-CameraVariant = Literal["central_cam", "left_oppo_cam", "central_wide_cam"]
+CameraVariant = Literal[
+    "central_cam", "left_oppo_cam", "central_wide_cam",
+    "cen_arm_right_wide_cam", "cen_arm_cen_side_cam", "cen_arm_front_cam",
+]
+
+# Camera variants that share the centred-arm batch behaviour: the left Piper
+# base is compensated back to x=0, every actor samples the shared centred-wide
+# workspace and the idle right articulation is moved out of view.
+CENTERED_BATCH_VARIANTS = (
+    "cen_arm_right_wide_cam", "cen_arm_cen_side_cam", "cen_arm_front_cam",
+)
 
 # Native qpos ordering: [left_joint_0..5, left_gripper, right_joint_0..5, right_gripper]
 LEFT_QPOS_DIM = 7
@@ -52,6 +62,13 @@ NATIVE_QPOS_DIM = LEFT_QPOS_DIM * 2
 # tolerance of 1e-3 keeps that physical lag legal while still flagging any
 # genuine right-arm motion, which would exceed it by orders of magnitude.
 RIGHT_ARM_TOLERANCE = 1e-3
+# Curobo builds its planning frame from the configured dual-arm separation, so
+# that value must stay at the validated 0.60 m. After planners are initialized,
+# the idle right articulation alone is moved to this world-x coordinate; it is
+# consequently absent from the table and D435-W frame without changing the
+# active left arm's planning coordinates.
+CENTERED_BATCH_ARM_SEPARATION_M = 0.60
+RIGHT_ARM_HIDDEN_WORLD_X_M = 5.0
 
 
 @dataclass(frozen=True)
@@ -78,16 +95,69 @@ LEFT_OPPO_CAM = CameraSpec(
     (0.0, -0.6, -0.8),
     (1.0, 0.0, 0.0),
 )
-# Central position/forward/left (preserved from the asset config) with the
+# The asset-configured central head camera pose (position (-0.032, -0.45,
+# 1.35), forward (0, 0.6, -0.8), left (-1, 0, 0) in
+# assets/embodiments/piper/config.yml) shifted 0.30 m to the +X side, with the
 # wider head camera: same 320x240 sensor, fovy widened from 37 to 60 degrees.
 CENTRAL_WIDE_CAM = CameraSpec(
-    "central_wide_cam", None, None, None, head_camera_type="D435-W"
+    "central_wide_cam",
+    (0.268, -0.45, 1.35),
+    (0.0, 0.6, -0.8),
+    (-1.0, 0.0, 0.0),
+    head_camera_type="D435-W",
+)
+# Wide version of the default head camera shifted 0.30 m to the +X (right)
+# side for the centred-arm batch: same pose as ``CENTRAL_WIDE_CAM`` — the
+# asset-configured central head camera (position (-0.032, -0.45, 1.35),
+# forward (0, 0.6, -0.8), left (-1, 0, 0)) with x_cam = x_cam + 0.30 — paired
+# with the centred-arm workspace instead of the native left-arm mount.  Same
+# 320x240 sensor, fovy widened from 37 to 60 degrees (D435-W).
+CEN_ARM_RIGHT_WIDE_CAM = CameraSpec(
+    "cen_arm_right_wide_cam",
+    (0.268, -0.45, 1.35),
+    (0.0, 0.6, -0.8),
+    (-1.0, 0.0, 0.0),
+    head_camera_type="D435-W",
+)
+# Side view of the centred-arm batch.  O is the centre of the shared actor
+# randomization envelope (CENTERED_WIDE_WORKSPACE, x/y both centred on the
+# origin); C is the active left Piper base at (0, -0.45, 0.75) after the
+# centred-arm compensation.  The camera sits at C shifted +X by the planar
+# |OC| = 0.45 m with z pinned to 0.95 m, i.e. (0.45, -0.45, 0.95), and looks
+# horizontally (0-degree depression) along the azimuth toward O.  ``left`` is
+# the horizontal ẑ×forward direction, so the image horizon is level and
+# coincides with the sight-line (up = +Z).  The 0.74 m tabletop enters the
+# bottom of the 60-deg D435-W frame 0.364 m ahead of the camera.  Wide
+# sensor, inherited from the centred batch.
+CEN_ARM_CEN_SIDE_CAM = CameraSpec(
+    "cen_arm_cen_side_cam",
+    (0.45, -0.45, 0.95),
+    (-0.707107, 0.707107, 0.0),
+    (-0.707107, -0.707107, 0.0),
+    head_camera_type="D435-W",
+)
+
+# Front view of the centred-arm batch: centred on x at (0, -0.30, 0.80),
+# aiming along +Y with a 1:1.732 vertical:horizontal ratio — arctan(1/1.732)
+# = 30 degrees of depression, forward (0, 0.866025, -0.5).  That sight-line
+# meets the 0.74 m tabletop at (0, -0.196, 0.74), just past the workspace's
+# -y edge (-0.15).  Reference geometry: the compensated left Piper base sits
+# at (0, -0.45, 0.75); the envelope spans x(-0.20, 0.20), y(-0.15, 0.15).
+CEN_ARM_FRONT_CAM = CameraSpec(
+    "cen_arm_front_cam",
+    (0.0, -0.30, 0.8),
+    (0.0, 0.866025, -0.5),
+    (-1.0, 0.0, 0.0),
+    head_camera_type="D435-W",
 )
 
 CAMERA_SPECS: Mapping[str, CameraSpec] = {
     "central_cam": CENTRAL_CAM,
     "left_oppo_cam": LEFT_OPPO_CAM,
     "central_wide_cam": CENTRAL_WIDE_CAM,
+    "cen_arm_right_wide_cam": CEN_ARM_RIGHT_WIDE_CAM,
+    "cen_arm_cen_side_cam": CEN_ARM_CEN_SIDE_CAM,
+    "cen_arm_front_cam": CEN_ARM_FRONT_CAM,
 }
 
 
@@ -179,6 +249,8 @@ class LeftTaskBase(Base_Task):
         self.expert_task_success = False
         self.audit_path = str(kwargs.get("audit_path") or "")
         super()._init_task_env_(**task_kwargs)
+        if self.camera_variant in CENTERED_BATCH_VARIANTS:
+            self.move_right_arm_out_of_view()
         self.right_home_qpos = self.capture_right_home_qpos()
         self.right_home_real_qpos = np.asarray(
             self.robot.get_right_arm_real_jointState(), dtype=np.float32
@@ -224,6 +296,22 @@ class LeftTaskBase(Base_Task):
                 )
 
         embodiment = task_kwargs["left_embodiment_config"]
+        if self.camera_variant in CENTERED_BATCH_VARIANTS:
+            embodiment_types = task_kwargs.get("embodiment")
+            if (not isinstance(embodiment_types, list) or len(embodiment_types) != 3
+                    or not all(isinstance(item, str) for item in embodiment_types[:2])):
+                raise LeftArmTaskError(
+                    "centred-arm batch requires a two-Piper embodiment specification"
+                )
+            # Robot applies -embodiment_dis / 2 to the left mount. Compensate
+            # that entire offset so the active left Piper base remains at x=0;
+            # the right articulation is moved out of view after Curobo setup.
+            robot_pose = embodiment.get("robot_pose")
+            if not isinstance(robot_pose, list) or not robot_pose or len(robot_pose[0]) != 7:
+                raise LeftArmTaskError("left_embodiment_config has no valid robot_pose")
+            robot_pose[0][0] = float(robot_pose[0][0]) + CENTERED_BATCH_ARM_SEPARATION_M / 2.0
+            from .left_task_manifests import centered_wide_workspace_manifest
+            self.manifest = centered_wide_workspace_manifest(self.manifest)
         camera_list = embodiment.get("static_camera_list")
         if not isinstance(camera_list, list):
             raise LeftArmTaskError("left_embodiment_config has no static_camera_list")
@@ -250,6 +338,20 @@ class LeftTaskBase(Base_Task):
                 )
             camera_cfg["head_camera_type"] = spec.head_camera_type
         return task_kwargs
+
+    def move_right_arm_out_of_view(self) -> None:
+        """Move only the idle right scene articulation outside the camera frame."""
+        right_pose = self.robot.right_entity.get_root_pose()
+        right_position = np.asarray(right_pose.p, dtype=np.float32).copy()
+        right_position[0] = RIGHT_ARM_HIDDEN_WORLD_X_M
+        self.robot.right_entity.set_root_pose(sapien.Pose(right_position, right_pose.q))
+        applied_pose = self.robot.right_entity.get_root_pose()
+        applied_x = float(np.asarray(applied_pose.p, dtype=np.float32)[0])
+        if not np.isclose(applied_x, RIGHT_ARM_HIDDEN_WORLD_X_M, atol=1e-4):
+            raise LeftArmTaskError(
+                "failed to move the idle right arm outside the centered-camera frame: "
+                f"expected x={RIGHT_ARM_HIDDEN_WORLD_X_M}, got x={applied_x}"
+            )
 
     # ---------------------------------------------------------------- layout
 
@@ -279,11 +381,14 @@ class LeftTaskBase(Base_Task):
         @scenario: Reuse the manifest-defined ranges in every semantic sampler.
         """
         w = spec.workspace
+        lock_yaw_for_stable_static = (
+            self.camera_variant in CENTERED_BATCH_VARIANTS and spec.static
+        )
         return rand_pose(
             xlim=[float(w.x[0]), float(w.x[1])],
             ylim=[float(w.y[0]), float(w.y[1])],
             qpos=[float(v) for v in spec.base_quat],
-            rotate_rand=True,
+            rotate_rand=not lock_yaw_for_stable_static,
             rotate_lim=[0.0, 0.0, float(w.yaw_rad[1])],
         )
 
