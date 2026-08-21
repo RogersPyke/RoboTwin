@@ -48,7 +48,13 @@ def is_left_task(task_name: str) -> bool:
     tasks.  CLI task names are bare (e.g. ``blocks_ranking_rgb_left``); this
     helper maps that bare name to the ``left`` namespace by file existence.
     """
-    return os.path.exists(os.path.join(ROOT_PATH, "envs", "left", f"{task_name}.py"))
+    left_root = os.path.join(ROOT_PATH, "envs", "left")
+    # The leading "" keeps standalone (non-wrapper) tasks such as
+    # place_object_scale_left resolvable directly under envs/left/.
+    return any(os.path.exists(os.path.join(left_root, folder, f"{task_name}.py"))
+               for folder in ("", "base", "impl", "central_wide_cam", "left_oppo_cam",
+                              "cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
+                              "cen_arm_front_cam"))
 
 
 def import_task_env(task_name: str):
@@ -59,6 +65,12 @@ def import_task_env(task_name: str):
     """
     import importlib
     if is_left_task(task_name):
+        left_root = os.path.join(ROOT_PATH, "envs", "left")
+        for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
+                       "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+                       "base", "impl"):
+            if os.path.exists(os.path.join(left_root, folder, f"{task_name}.py")):
+                return importlib.import_module(f"envs.left.{folder}.{task_name}")
         return importlib.import_module(f"envs.left.{task_name}")
     return importlib.import_module(f"envs.{task_name}")
 
@@ -66,12 +78,19 @@ def import_task_env(task_name: str):
 def task_config_yml_path(task_config: str) -> str:
     """Path to the existing task config yml, preferring task_config/left/.
 
-    Left-arm task configs live in ``task_config/left/``; original configs stay
-    in ``task_config/``.  The bare config name is resolved against both and the
-    first existing file wins, so the CLI argument is unchanged.
+    Left-arm task configs are organized like ``envs/left`` — one subfolder per
+    camera variant (``base`` holds the default central-cam configs, and utility
+    tasks like ``place_object_scale_left`` sit at the left/ root) — while
+    original configs stay in ``task_config/``.  The bare config name is
+    resolved against every candidate and the first existing file wins, so the
+    CLI argument is unchanged.  Keep the folder list in sync with
+    ``import_task_env``.
     """
-    for sub in ("task_config/left", "task_config"):
-        p = os.path.join(ROOT_PATH, sub, f"{task_config}.yml")
+    left_root = os.path.join(ROOT_PATH, "task_config", "left")
+    for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
+                   "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+                   "base", ""):
+        p = os.path.join(left_root, folder, f"{task_config}.yml")
         if os.path.exists(p):
             return p
     return os.path.join(ROOT_PATH, "task_config", f"{task_config}.yml")

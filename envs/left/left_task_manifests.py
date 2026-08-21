@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict
+from dataclasses import replace
 from typing import Mapping
 
 from .left_task_base import ActorSamplingSpec, TaskManifest, XYYawRange
@@ -55,6 +56,14 @@ _LEFT_CENTER = (-0.30, 0.0)
 ARM_BASE_X_BAND = (-0.35, -0.25)
 
 MANIFESTS: dict[str, TaskManifest] = {}
+
+# Centred-arm batch workspace candidate. All ten active tasks use this one
+# envelope unchanged during the calibration pilot. The candidate preserves the
+# broad y extent needed by shoes and bowls, while removing table-edge x values
+# and large yaw rotations that make a centre-mounted Piper unplannable.
+CENTERED_WIDE_WORKSPACE = XYYawRange(
+    x=(-0.20, 0.20), y=(-0.15, 0.15), yaw_rad=(0.0, 0.50)
+)
 
 
 def _register(manifest: TaskManifest) -> None:
@@ -126,17 +135,16 @@ _register(_manifest(
 _register(_manifest(
     "place_bread_basket",
     [
-        # Wide randomization (iteration 2026-08-13): bread0 and bread1 share
-        # one overlapping pickup band (x in [-0.44,-0.34], y in [-0.18,0.04])
-        # around the left arm's verified downward-grasp region for 075_bread,
-        # widened modestly from the place_bread_skillet-verified band; the
-        # 0.10 m pairwise bread clearance keeps a gripper-wide gap so the two
-        # breads never touch at spawn.  The basket sweeps x in [-0.30,-0.12],
-        # y in [-0.28,-0.02] so every basket sits at least 0.04 m right of the
-        # widened bread band (clearance 0.05 m, the rejection sampler still
-        # resolves), while the basket yaw band keeps both camera variants
-        # seeing a varied placement.
-        _spec("breadbasket", (-0.30, -0.12), (-0.28, -0.02), (0.0, 0.50), 0.05, True,
+        # Union randomization (iteration 2026-08-14): the breadbasket now
+        # sweeps the whole union of the family's appearance ranges
+        # (x in [-0.44,-0.12], y in [-0.28,0.04]) so it can appear anywhere the
+        # breads can, overlapping the bread pickup band maximally.  The basket
+        # clearance is footprint-aware: the 076_breadbasket collision hull has
+        # a ~0.097 m y half-extent, so the 0.13 m pairwise clearance keeps any
+        # bread centre outside the basket hull (bread half-extent ~0.039 m).
+        # The two breads keep the verified 075_bread downward-grasp band
+        # (x in [-0.44,-0.34], y in [-0.18,0.04]) and a 0.10 m mutual gap.
+        _spec("breadbasket", (-0.44, -0.12), (-0.28, 0.04), (0.0, 0.50), 0.13, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
         _spec("bread0", (-0.44, -0.34), (-0.18, 0.04), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
@@ -148,18 +156,17 @@ _register(_manifest(
 _register(_manifest(
     "place_bread_skillet",
     [
-        # Wide randomization (iteration 2026-08-13): the bread pickup band
-        # matches the widened place_bread_basket band (x in [-0.44,-0.34],
-        # y in [-0.18,0.04]) so the two bread families share one verified
-        # downward-grasp region.  The skillet keeps x >= -0.26, geometrically
-        # >= 0.08 m right of the widened bread band (bread x-max -0.34); the
-        # 0.10 m clearance rejects only the closest corner pairs and the
-        # rejection sampler still resolves.  y sweeps broadly in front of the
-        # workspace; the raised skillet keeps its functional point above the
-        # 0.76 m table-height predicate.
+        # Union randomization (iteration 2026-08-14): the skillet now sweeps
+        # the whole union of the family's appearance ranges (x in [-0.44,-0.12],
+        # y in [-0.24,0.14]) so it can appear anywhere the bread can,
+        # overlapping the bread pickup band maximally.  The skillet clearance
+        # is footprint-aware: the 106_skillet collision hull has a ~0.135 m
+        # half-extent, so the 0.17 m pairwise clearance keeps the bread centre
+        # outside the skillet hull (bread half-extent ~0.039 m).  The bread
+        # keeps the verified 075_bread downward-grasp band.
         _spec("bread", (-0.44, -0.34), (-0.18, 0.04), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
-        _spec("skillet", (-0.26, -0.12), (-0.24, 0.14), (0.0, 0.50), 0.10, True,
+        _spec("skillet", (-0.44, -0.12), (-0.24, 0.14), (0.0, 0.50), 0.17, True,
               base_quat=(0.0, 0.0, 0.707, 0.707)),
     ],
 ))
@@ -167,22 +174,19 @@ _register(_manifest(
 _register(_manifest(
     "place_burger_fries",
     [
-        # Wide randomization (iteration 2026-08-13): the tray (0.31 x 0.21 m
-        # footprint at scale 2.0) sweeps the left workspace; the two foods
-        # spawn in y-split bands above and below the tray so neither settles
-        # into the tray collision hull and launches.  Any food spawned
-        # geometrically inside the tray hull interpenetrates the tray rim (z in
-        # [0.739, 0.777]) and the settle phase ejects it.  The food bands widen
-        # modestly within that protective envelope: hamburg y in [0.10,0.16]
-        # stays above the footprint top (0.065) and fries y in [-0.35,-0.27]
-        # stays below the footprint bottom (-0.245); both widen in x to
-        # [-0.46,-0.34] where the y-split keeps >= 0.08 m separation for the
-        # clearance test.  The tray centre stays in y in [-0.16, -0.04] and
-        # x sweeps from the far left to just right of centre within the left
-        # arm's reliable place reach.
+        # Union randomization (iteration 2026-08-14): hamburg and frenchfries
+        # now share one identical band (x in [-0.46,-0.34], y in [0.10,0.16])
+        # so the two foods overlap maximally in appearance, both spawning
+        # strictly above the tray footprint.  The tray (0.31 x 0.21 m footprint
+        # at scale 2.0, collision z in [0.737,0.769]) sweeps the lower
+        # workspace; its footprint top is at most y=0.061 (tray centre y-max
+        # -0.04 plus the 0.101 m y half-extent), so both foods at centre
+        # y >= 0.10 keep their hulls clear of the tray rim and never inter-
+        # penetrate (hamburg half ~0.034 m, frenchfries hull ~0.048 m).  The
+        # 0.08 m pairwise clearance keeps the two foods apart at spawn.
         _spec("tray", (-0.44, -0.08), (-0.16, -0.04), (0.0, 0.00), 0.08, True,
               base_quat=(0.706527, 0.706483, -0.0291356, -0.0291767)),
-        _spec("hamburg", (-0.46, -0.34), (0.10, 0.16), (0.0, 0.20), 0.08, False,
+        _spec("hamburg", (-0.46, -0.34), (-0.35, -0.27), (0.0, 0.20), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
         _spec("frenchfries", (-0.46, -0.34), (-0.35, -0.27), (0.0, 0.20), 0.08, False,
               base_quat=(1.0, 0.0, 0.0, 0.0)),
@@ -192,17 +196,17 @@ _register(_manifest(
 _register(_manifest(
     "place_can_basket",
     [
-        # Wide randomization (iteration 2026-08-13): the basket sweeps the
-        # left-front quadrant, widened slightly to x in [-0.38,-0.14], y in
-        # [-0.30,-0.15], after a leftward shift from the source x=0.02
-        # centre-line position, keeping its solid plate cluster inside the left
-        # arm's reliable reach.  The quat (0.5, 0.5, 0.5, 0.5) with zero yaw is
-        # deterministic, which keeps the plate offset (+0.05, -0.04) used by
-        # place_can_basket_left_impl valid across every episode.  The basket
-        # stays >= 0.15 m below the can band (y >= 0.15 separation) so the
-        # clearance test never locks, and the plate offset tracks the basket
-        # centre, so a shifted basket still receives the can.
-        _spec("basket", (-0.38, -0.14), (-0.30, -0.15), (0.0, 0.00), 0.15, True,
+        # Union randomization (iteration 2026-08-14): the basket sweeps
+        # x in [-0.38,-0.12], y in [-0.30,0.00], widened upward so its
+        # appearance band touches the can band (y in [0,0.08]) at y=0, giving
+        # the two actors overlapping possible regions.  The quat (0.5,0.5,0.5,
+        # 0.5) with zero yaw stays deterministic so the plate offset
+        # (+0.05,-0.04) used by place_can_basket_left_impl remains valid.  The
+        # 0.15 m pairwise clearance (can half-extent ~0.025 m, basket ~0.115 m)
+        # keeps the lying can outside the basket hull whenever the bands
+        # approach.  The can band itself is pinned by the lying-can downward-
+        # grasp IK reach (y capped at 0.08, x in [-0.25,-0.20]).
+        _spec("basket", (-0.38, -0.12), (-0.30, 0.00), (0.0, 0.00), 0.15, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
         # The can spawns on its side (identity quat) near the left arm base
         # (x in [-0.25, -0.20], y in [0, 0.08]), matching the source layout
@@ -218,24 +222,18 @@ _register(_manifest(
 _register(_manifest(
     "place_cans_plasticbox",
     [
-        # The plastic box sweeps x in [-0.36, -0.14] at a deep-y band in
-        # [-0.28, -0.23], behind the two cans.  The box's y <= -0.23 keeps
-        # every can-to-box separation >= 0.08 m (the clearance) so the
-        # rejection sampler never locks, and keeping the box behind the cans
-        # (not in front) avoids blocking the left arm's grasp approach over
-        # them.  The depth matches the place_can_basket basket band
-        # (y in [-0.28,-0.15], 30-seed SR 0.37) so it sits inside the verified
-        # reach.
-        _spec("plasticbox", (-0.36, -0.14), (-0.28, -0.23), (0.0, 0.00), 0.08, True,
+        # Union randomization (iteration 2026-08-14): the plastic box now
+        # sweeps x in [-0.42,-0.10], y in [-0.28,-0.02], the union of the
+        # family's appearance ranges, so it can appear anywhere the cans can,
+        # overlapping the can band (x in [-0.42,-0.10], y in [-0.15,-0.07])
+        # maximally.  The box clearance is footprint-aware: the 062_plasticbox
+        # collision hull has a ~0.096 m y half-extent, so the 0.13 m pairwise
+        # clearance keeps a can centre outside the box hull (can half-extent
+        # ~0.025 m).  The two cans keep one shared identical band and a 0.08 m
+        # mutual gap; the rejection sampler keeps every can >= 0.13 m clear of
+        # the box.
+        _spec("plasticbox", (-0.42, -0.10), (-0.28, -0.02), (0.0, 0.00), 0.13, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        # Version 2: can1 and can2 now share one identical band
-        # x in [-0.42, -0.10], y in [-0.15, -0.07] — the union of the version-0
-        # left and right can flanks — so the two cans overlap maximally across
-        # the whole left reachable sweep and any can may land in either flank
-        # (near the base or out at the far edge).  The band's endpoints are the
-        # two version-0 flank extremes, each already verified IK-reachable
-        # (30-seed SR 0.40), and the rejection sampler keeps the cans >= 0.08 m
-        # apart and >= 0.08 m clear of the box.
         _spec("can1", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
         _spec("can2", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
@@ -250,9 +248,12 @@ _register(_manifest(
         # tall static hull; a shoe that spawns geometrically inside that
         # footprint interpenetrates the box rim and the settle phase ejects it,
         # raising UnStableError.  Both shoes therefore spawn above the box
-        # (y >= 0.13).  The box sweeps x in [-0.44, -0.16] and y in [-0.18,
+        # (y >= 0.13).  The box sweeps x in [-0.46, -0.14] and y in [-0.18,
         # -0.02]; its y half-extent is 0.13, so the footprint top sits at most
-        # at y=0.11, still below the shoe rows' y=0.13.
+        # at y=0.11, still below the shoe rows' y=0.13.  Union randomization
+        # (iteration 2026-08-14): the box x band widens to the full shoe x
+        # band, so the container's appearance range overlaps the shoes'
+        # appearance range in x.
         # Physical-reset grasp+lift probes (diag_ds_fullmap.py, 0.02 m grid,
         # model 4, stand90 quat) showed the left arm can grasp AND lift a shoe
         # only on the y=0.13 and y=0.14 rows, with the lift-OK x band depending
@@ -262,16 +263,13 @@ _register(_manifest(
         #           x[-0.38,-0.22] is grasp-only and cannot lift.
         #   y=0.14: ".gOOOOOOOOOOOOOOOg.g"  -> OK in the single continuous band
         #           x[-0.44,-0.18]; only x=-0.46 (grasp-only) and x<=-0.16 fail.
-        # Version 2 therefore declares both shoes in the shared reachable
-        # envelope x[-0.46,-0.14] at y in [0.13,0.14] (the union of the two
-        # rows), so the two appearance ranges overlap maximally.  The impl
-        # snaps y to one verified row and samples x inside that row's lift-OK
-        # set, then enforces the 0.10 m pairwise/basket clearance so the two
+        # The impl snaps y to one verified row and samples x inside that row's
+        # lift-OK set, then enforces the pairwise/basket clearance so the two
         # shoes never overlap.  The box quat is stand90, matching the shoe base
         # quat: the align place constraint then keeps the shoe standing (a
         # small wrist rotation) instead of requiring a lateral 120-degree roll
         # that the left arm cannot reach.
-        _spec("shoe_box", (-0.44, -0.16), (-0.18, -0.02), (0.0, 0.00), 0.10, True,
+        _spec("shoe_box", (-0.46, -0.14), (-0.18, -0.02), (0.0, 0.00), 0.13, True,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
         _spec("left_shoe", (-0.46, -0.14), (0.13, 0.14), (0.0, 0.50), 0.10, False,
               base_quat=(0.707, 0.707, 0.0, 0.0)),
@@ -311,6 +309,25 @@ def get_manifest(semantic_task: str) -> TaskManifest:
     if semantic_task not in MANIFESTS:
         raise KeyError(f"Unknown left-arm semantic task: {semantic_task!r}")
     return MANIFESTS[semantic_task]
+
+
+def centered_wide_workspace_manifest(manifest: TaskManifest) -> TaskManifest:
+    """Return the new-batch manifest with one common actor spawn envelope.
+
+    The deprecated hanging-mug family is deliberately never transformed or
+    collected. Per-actor orientation, collision footprint and static/dynamic
+    identity remain the same; only the initial randomization envelope is shared.
+    """
+    if manifest.semantic_task == "hanging_mug":
+        raise ValueError("deprecated hanging_mug cannot use the centred-wide batch")
+    specs = {
+        name: replace(
+            spec,
+            workspace=CENTERED_WIDE_WORKSPACE,
+        )
+        for name, spec in manifest.actor_specs.items()
+    }
+    return replace(manifest, actor_specs=specs)
 
 
 def _canonical_dict(manifest: TaskManifest) -> dict:
