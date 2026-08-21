@@ -138,8 +138,9 @@ class PlaceDualShoesLeftImpl(LeftTaskBase):
         layout = self.sample_layout()
         if not self.validate_layout(layout):
             raise SceneRejectedError("place_dual_shoes layout rejected by validate_layout")
-        # Box origin sits on the table top; the shoes rest just above it.
-        layout["shoe_box"].p[2] = 0.74
+        # Box origin sits exactly on the table top (0.741); the static box
+        # never settles, so the old 0.74 left it permanently 1 mm buried.
+        layout["shoe_box"].p[2] = 0.741
         self.shoe_box = create_actor(
             scene=self, pose=layout["shoe_box"], modelname="007_shoe-box",
             convex=True, is_static=True,

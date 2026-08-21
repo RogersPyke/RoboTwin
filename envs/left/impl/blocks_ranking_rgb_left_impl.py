@@ -89,8 +89,6 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
             block1 = self.sample_spec_pose(specs["block1"])
             block2 = self.sample_spec_pose(specs["block2"])
             block3 = self.sample_spec_pose(specs["block3"])
-            for pose in (block1, block2, block3):
-                pose.p[2] = 0.765
             if (self._pairwise_clear(block1, block2, clearance)
                     and self._pairwise_clear(block2, block3, clearance)
                     and self._pairwise_clear(block1, block3, clearance)):
@@ -109,6 +107,13 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
             raise SceneRejectedError("blocks_ranking_rgb layout rejected by validate_layout")
         size = np.random.uniform(0.015, 0.025)
         half_size = (size, size, size)
+        # Spawn each block with its bottom exactly on the table (the box origin
+        # is its geometric centre), mirroring blocks_ranking_size.  The old
+        # fixed z=0.765 hovered small blocks up to 9 mm at spawn; the settle
+        # loop hid it from observations, but exact contact keeps the spawn
+        # geometry honest for both variants.
+        for block in layout.values():
+            block.p[2] = 0.741 + size
         self.block1 = create_box(
             scene=self, pose=layout["block1"], half_size=half_size,
             color=(1, 0, 0), name="box",

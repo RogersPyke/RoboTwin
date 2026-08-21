@@ -8,10 +8,12 @@ Left workspace manifest: place_bread_skillet, version 3 (2026-08-14)
 Actors and clearance: bread (dynamic, x in [-0.44,-0.34], y in [-0.18,0.04],
     yaw up to 0.50), skillet (static, union sweep x in [-0.44,-0.12], y in
     [-0.24,0.14] covering the whole family appearance envelope so the skillet
-    overlaps the bread band, raised +0.025 m so its functional point clears the
-    0.76 m table-height predicate, footprint-aware clearance min 0.17 m).
-    The 0.17 m skillet clearance keeps the bread centre outside the
-    106_skillet hull.
+    overlaps the bread band, spawned at table-contact height with no raise,
+    footprint-aware clearance min 0.17 m).  The 0.17 m skillet clearance keeps
+    the bread centre outside the 106_skillet hull.  Version 4 removed the
+    historical +0.025 m raise: a static skillet never settles, so the raise
+    left it floating ~2 cm above the table in every frame; the success height
+    gates were recalibrated to contact instead.
 Expert sequence: left grasp bread, lift z=0.10, place at skillet functional
     point zero, release; a post-place retreat that cannot plan is skipped and
     the arm returns home.
@@ -57,6 +59,17 @@ LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
     "manifest_hash": "a8a91465b6cfbc70",
 }
 
+# Nominal table surface (rand_pose's default zlim and the created table height).
+TABLE_SURFACE_Z = 0.741
+# Contact-height success floor.  Measured with the shipped hulls at the
+# manifest quat and z=0.741: the skillet functional point sits at
+# 0.740-0.759 m across model_ids 0-3 and bread settling inside the pan rests
+# at 0.748-0.783 m, so the old stock 0.76 gate only passed because the
+# skillet was floated +0.025 m.  These gates now just catch gross failures
+# (fallen through the table); the tight 0.035 m functional-point xy gate is
+# what actually pins the bread inside the pan.
+SUCCESS_MIN_HEIGHT_Z = 0.73
+
 
 class PlaceBreadSkilletLeftImpl(LeftTaskBase):
     """Left-arm-only bread-on-skillet task.
@@ -97,15 +110,13 @@ class PlaceBreadSkilletLeftImpl(LeftTaskBase):
         # self.bread.set_mass(0.001)
         skillet_id_list = [0, 1, 2, 3]
         self.skillet_id = int(np.random.choice(skillet_id_list))
-        # Raise the static skillet slightly so its functional point clears the
-        # table-height predicate (0.76 m).  A static skillet does not settle, so
-        # its centre stays at the spawn z and the stock threshold would fail.
-        skillet_pose = layout["skillet"]
-        skillet_p = list(skillet_pose.p)
-        skillet_p[2] += 0.025
-        skillet_pose = sapien.Pose(skillet_p, skillet_pose.q)
+        # Spawn the static skillet at table-contact height: with the manifest
+        # quat the shipped 106_skillet hulls put the pan bottom at -2.5..0 mm
+        # for z=0.741, so the origin needs no offset.  A static actor never
+        # settles, so any raise would float in every collected frame (the
+        # historical +0.025 m raise did exactly that).
         self.skillet = create_actor(
-            self, pose=skillet_pose, modelname="106_skillet",
+            self, pose=layout["skillet"], modelname="106_skillet",
             model_id=self.skillet_id, convex=True, is_static=True,
         )
         self.skillet.set_mass(0.01)
@@ -153,8 +164,8 @@ class PlaceBreadSkilletLeftImpl(LeftTaskBase):
         bread_pose = self.bread.get_pose().p
         return (
             bool(np.all(abs(target_pose[:2] - bread_pose[:2]) < [0.035, 0.035]))
-            and bool(target_pose[2] > 0.76 + self.table_z_bias)
-            and bool(bread_pose[2] > 0.76 + self.table_z_bias)
+            and bool(target_pose[2] > SUCCESS_MIN_HEIGHT_Z + self.table_z_bias)
+            and bool(bread_pose[2] > SUCCESS_MIN_HEIGHT_Z + self.table_z_bias)
             and self.is_left_gripper_open()
             and self.right_arm_stationary()
         )

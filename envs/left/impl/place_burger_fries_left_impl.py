@@ -130,7 +130,7 @@ class PlaceBurgerFriesLeftImpl(LeftTaskBase):
         self.tray_id = int(np.random.choice([0, 1, 2, 3]))
         self.tray = create_actor(
             scene=self, pose=layout["tray"], modelname="008_tray", convex=True,
-            model_id=self.tray_id, scale=(2.0, 2.0, 2.0), is_static=True,
+            model_id=self.tray_id, is_static=True,
         )
         self.tray.set_mass(0.05)
         # Model 0 is the only hamburg hull that yields a reachable downward
