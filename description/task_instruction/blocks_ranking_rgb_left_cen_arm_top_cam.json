@@ -1,0 +1,17 @@
+{
+  "full_description": "three colored blocks rest on the table; use one arm to line them up so the red block is leftmost, the green block in the middle and the blue block rightmost",
+  "schema": "{A} notifies the red block, {B} notifies the green block, {C} notifies the blue block, {a} notifies the left arm to move the red block, {b} notifies the left arm to move the green block, {c} notifies the left arm to move the blue block",
+  "preference": "num of words should not exceed 18. Degree of detail avg 7.",
+  "seen": [
+    "Use {a} to put {A} at the left, {b} to put {B} in the middle and {c} to put {C} at the right.",
+    "Rank the blocks with the left arm: {A}, then {B}, then {C}.",
+    "Arrange {A}, {B} and {C} in a line using {a}, {b} and {c}.",
+    "With the left arm place {A} leftmost, {B} middle and {C} rightmost.",
+    "{a} moves {A}, {b} moves {B}, {c} moves {C} into one ordered line."
+  ],
+  "unseen": [
+    "Line up the three colored blocks so red, green and blue read left to right.",
+    "Use the left arm to rank {A}, {B} and {C} on the table.",
+    "Put the red block first, the green block second and the blue block third."
+  ]
+}

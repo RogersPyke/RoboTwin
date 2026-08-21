@@ -9,7 +9,7 @@ Actors and clearance: block1/2/3 (dynamic coloured boxes, pairwise min
     0.10 m), shared pickup band x in [-0.45,-0.16], y in [-0.18,0.08],
     yaw up to 0.75; ordered target line sampled as three consecutive
     slots on one straight line in the xoy plane whose angle with the x
-    axis stays within +-45 deg, with the two adjacent gaps drawn
+    axis stays within +-15 deg, with the two adjacent gaps drawn
     independently from [0.10,0.16] m, and every slot inside the same
     envelope as the blocks' own initial randomization band (the
     centred-wide batch envelope when that variant is active).
@@ -80,14 +80,19 @@ LEGACY_RANDOMIZATION_PARAM: dict[str, object] = {
 
 # Version 3 (2026-08-21) target-line randomization: three consecutive slots
 # on one straight line in the xoy plane.  The line's angle with the x axis is
-# uniform in +-45 deg (so block1 < block2 < block3 in x always holds), each
+# uniform in +-15 deg (so block1 < block2 < block3 in x always holds), each
 # adjacent gap is drawn independently from TARGET_GAP_RANGE_M, and every slot
 # stays inside the blocks' own initial-randomization envelope.  The gap bounds
 # exist because the smallest gap must keep the worst-case adjacent placed
 # footprints clear (2 * 0.025 m block halves + the expert's ~0.02 m placement
 # drift per slot), while the largest keeps the full <= 0.32 m span fitting
-# inside the envelope diagonally even at the 45 deg extreme.
-TARGET_LINE_MAX_ANGLE_RAD: float = float(np.deg2rad(45.0))
+# inside the envelope diagonally even at the 15 deg extreme.
+# Tightened from the original +-45 deg to +-15 deg on 2026-08-22.
+TARGET_LINE_MAX_ANGLE_RAD: float = float(np.deg2rad(15.0))
+# Success-check slope bound: a line steeper than this cannot come
+# from a +-15 deg sample plus placement noise (1.5x slack on the
+# tangent, ~21.9 deg).
+TARGET_LINE_REJECT_SLOPE: float = 1.5 * float(np.tan(TARGET_LINE_MAX_ANGLE_RAD))
 TARGET_GAP_RANGE_M: tuple[float, float] = (0.10, 0.16)
 
 
@@ -128,7 +133,7 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
         """Sample the three ordered target slots on one random straight line.
 
         The line lies in the xoy plane with its angle to the x axis uniform in
-        +-45 deg, the two adjacent gaps are drawn independently from
+        +-15 deg, the two adjacent gaps are drawn independently from
         ``TARGET_GAP_RANGE_M``, and the first slot is placed so the whole
         span stays inside the blocks' initial-randomization envelope (the
         manifest band, or the centred-wide batch envelope when that variant
@@ -234,7 +239,7 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
         """Check three blocks sit on one x-ordered line near the x axis.
 
         The tilted target lines replace the old shared-y relation, so success
-        now means: strictly increasing x (guaranteed by the +-45 deg line
+        now means: strictly increasing x (guaranteed by the +-15 deg line
         sampling), the middle block within one placement tolerance of the
         end-to-end line, and each adjacent gap inside the sampled band with
         drift slack.
@@ -242,9 +247,10 @@ class BlocksRankingRgbLeftImpl(LeftTaskBase):
         if not (p1[0] < p2[0] < p3[0]):
             return False
         axis = p3[:2] - p1[:2]
-        # A line drifting past ~56 deg from the x axis cannot come from a
-        # +-45 deg sample plus placement noise; reject it as a failure.
-        if abs(axis[1]) > 1.5 * abs(axis[0]):
+        # A line drifting past ~21.9 deg from the x axis cannot come
+        # from a +-15 deg sample plus placement noise; reject it as a
+        # failure.
+        if abs(axis[1]) > TARGET_LINE_REJECT_SLOPE * abs(axis[0]):
             return False
         axis_len = np.linalg.norm(axis)
         perp = abs(axis[0] * (p2[1] - p1[1]) - axis[1] * (p2[0] - p1[0])) / axis_len

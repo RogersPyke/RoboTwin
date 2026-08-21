@@ -69,13 +69,16 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
             for name in ("bowl1", "bowl2")
         }
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        # Version 2: the stack target is no longer fixed at (-0.30,-0.10);
-        # sample it inside a conservative reachable band (SR was 0.57 with the
-        # fixed target, so keep the sweep modest) and share the sampled value
-        # with load_actors through ``self.stack_target_xy``.
+        # Version 3 (2026-08-22): the stack target is drawn from the actors'
+        # own shared workspace (the centred-wide batch envelope under the
+        # cen_arm variants), so placement targets share the same global
+        # randomization range as the spawns instead of a narrower hardcoded
+        # band.  The sampled value is shared with load_actors through
+        # ``self.stack_target_xy``.
+        target_ws = specs["bowl1"].workspace
         self.stack_target_xy = np.array([
-            float(np.random.uniform(-0.18, 0.18)),
-            float(np.random.uniform(-0.12, 0.12)),
+            float(np.random.uniform(target_ws.x[0], target_ws.x[1])),
+            float(np.random.uniform(target_ws.y[0], target_ws.y[1])),
         ], dtype=float)
         target = self.stack_target_xy
         for _ in range(128):

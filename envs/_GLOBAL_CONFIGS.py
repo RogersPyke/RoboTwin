@@ -53,8 +53,8 @@ def is_left_task(task_name: str) -> bool:
     # place_object_scale_left resolvable directly under envs/left/.
     return any(os.path.exists(os.path.join(left_root, folder, f"{task_name}.py"))
                for folder in ("", "base", "impl", "central_wide_cam", "left_oppo_cam",
-                              "cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
-                              "cen_arm_front_cam"))
+                              "cen_arm_right_wide_cam", "cen_arm_near_side_cam",
+                              "cen_arm_side_cam", "cen_arm_front_cam", "cen_arm_top_cam"))
 
 
 def import_task_env(task_name: str):
@@ -66,8 +66,9 @@ def import_task_env(task_name: str):
     import importlib
     if is_left_task(task_name):
         left_root = os.path.join(ROOT_PATH, "envs", "left")
-        for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
-                       "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+        for folder in ("cen_arm_right_wide_cam", "cen_arm_near_side_cam",
+                       "cen_arm_side_cam", "cen_arm_front_cam", "cen_arm_top_cam",
+                       "central_wide_cam", "left_oppo_cam",
                        "base", "impl"):
             if os.path.exists(os.path.join(left_root, folder, f"{task_name}.py")):
                 return importlib.import_module(f"envs.left.{folder}.{task_name}")
@@ -87,8 +88,9 @@ def task_config_yml_path(task_config: str) -> str:
     ``import_task_env``.
     """
     left_root = os.path.join(ROOT_PATH, "task_config", "left")
-    for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
-                   "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+    for folder in ("cen_arm_right_wide_cam", "cen_arm_near_side_cam",
+                   "cen_arm_side_cam", "cen_arm_front_cam", "cen_arm_top_cam",
+                   "central_wide_cam", "left_oppo_cam",
                    "base", ""):
         p = os.path.join(left_root, folder, f"{task_config}.yml")
         if os.path.exists(p):

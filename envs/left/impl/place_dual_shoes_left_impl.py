@@ -16,7 +16,9 @@ Actors and clearance: shoe_box (static, union sweep x in [-0.46,-0.14], y in
     impl snaps y to one verified row and samples x inside that row's lift-OK
     set so every spawned shoe is both graspable and liftable, then enforces the
     pairwise/basket clearance.  The box y half-extent keeps its footprint top at
-    y<=0.11, below the shoe rows' y=0.13.
+    y<=0.11, below the shoe rows' y=0.13.  A 2026-08-22 shared-envelope pilot
+    (shoe x and full box pose from the one envelope) measured 1/30 success, so
+    the physical y rows, x lift bands and box y cap stay (see sample_layout).
 Expert sequence: left grasp left shoe, lift z=0.15, align into box functional
     point zero, return home; left grasp right shoe, align into functional
     point one, return home; brief settling delay.
@@ -81,16 +83,19 @@ class PlaceDualShoesLeftImpl(LeftTaskBase):
         specs = {name: self.manifest.actor_specs[name] for name in
                  ("shoe_box", "left_shoe", "right_shoe")}
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        # Version 2: the manifest declares both shoes in the shared reachable
-        # envelope x[-0.46,-0.14], but a physical-reset grasp+lift probe showed
-        # the left arm can lift a shoe only on two discrete y rows, with the
-        # lift-OK x band depending on the row:
+        # Version 2 (reverted 2026-08-22): the manifest declares both shoes in
+        # the shared reachable envelope x[-0.46,-0.14], but a physical-reset
+        # grasp+lift probe showed the left arm can lift a shoe only on two
+        # discrete y rows, with the lift-OK x band depending on the row:
         #   y=0.13: two islands x[-0.46,-0.40] and x[-0.20,-0.14]
         #   y=0.14: one continuous band x[-0.44,-0.18]
         # Snap y to one verified row, then sample each shoe inside that row's
         # union of lift-OK bands so both shoes share the whole appearance range
         # (maximal overlap) while staying graspable AND liftable.  The 0.10 m
         # pairwise/basket clearance keeps the two shoes from never overlapping.
+        # A 2026-08-22 30-seed pilot of full shared-envelope sampling measured
+        # 1/30 success (13 unstable spawns from box/shoe-row proximity, 16
+        # plan failures from non-liftable x), so the physical bands stay.
         centered_batch = self.camera_variant in CENTERED_BATCH_VARIANTS
         centered_x_offset = 0.30 if centered_batch else 0.0
         shoe_y = float(np.random.choice([0.13, 0.14]))

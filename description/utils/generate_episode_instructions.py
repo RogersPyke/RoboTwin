@@ -149,8 +149,9 @@ def resolve_setting_path(setting: str) -> str:
     variant, base/ holds the default central-cam configs.  Keep the folder
     list in sync with envs/_GLOBAL_CONFIGS.py task_config_yml_path.
     """
-    for folder in ("cen_arm_right_wide_cam", "cen_arm_cen_side_cam",
-                   "cen_arm_front_cam", "central_wide_cam", "left_oppo_cam",
+    for folder in ("cen_arm_right_wide_cam", "cen_arm_near_side_cam",
+                   "cen_arm_side_cam", "cen_arm_front_cam", "cen_arm_top_cam",
+                   "central_wide_cam", "left_oppo_cam",
                    "base", ""):
         p = os.path.join(parent_directory, f"../../task_config/left/{folder + '/' if folder else ''}{setting}.yml")
         if os.path.exists(p):

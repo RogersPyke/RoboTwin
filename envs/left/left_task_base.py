@@ -41,14 +41,16 @@ from ..utils import ArmTag, Actor
 ArmName = Literal["left"]
 CameraVariant = Literal[
     "central_cam", "left_oppo_cam", "central_wide_cam",
-    "cen_arm_right_wide_cam", "cen_arm_cen_side_cam", "cen_arm_front_cam",
+    "cen_arm_right_wide_cam", "cen_arm_near_side_cam", "cen_arm_side_cam",
+    "cen_arm_front_cam", "cen_arm_top_cam",
 ]
 
 # Camera variants that share the centred-arm batch behaviour: the left Piper
 # base is compensated back to x=0, every actor samples the shared centred-wide
 # workspace and the idle right articulation is moved out of view.
 CENTERED_BATCH_VARIANTS = (
-    "cen_arm_right_wide_cam", "cen_arm_cen_side_cam", "cen_arm_front_cam",
+    "cen_arm_right_wide_cam", "cen_arm_near_side_cam", "cen_arm_side_cam",
+    "cen_arm_front_cam", "cen_arm_top_cam",
 )
 
 # Native qpos ordering: [left_joint_0..5, left_gripper, right_joint_0..5, right_gripper]
@@ -119,18 +121,37 @@ CEN_ARM_RIGHT_WIDE_CAM = CameraSpec(
     (-1.0, 0.0, 0.0),
     head_camera_type="D435-W",
 )
-# Side view of the centred-arm batch.  O is the centre of the shared actor
-# randomization envelope (CENTERED_WIDE_WORKSPACE, x/y both centred on the
-# origin); C is the active left Piper base at (0, -0.45, 0.75) after the
-# centred-arm compensation.  The camera sits at C shifted +X by the planar
-# |OC| = 0.45 m with z pinned to 0.95 m, i.e. (0.45, -0.45, 0.95), and looks
-# horizontally (0-degree depression) along the azimuth toward O.  ``left`` is
-# the horizontal ẑ×forward direction, so the image horizon is level and
-# coincides with the sight-line (up = +Z).  The 0.74 m tabletop enters the
-# bottom of the 60-deg D435-W frame 0.364 m ahead of the camera.  Wide
-# sensor, inherited from the centred batch.
-CEN_ARM_CEN_SIDE_CAM = CameraSpec(
-    "cen_arm_cen_side_cam",
+# Near side view of the centred-arm batch.  O is the centre of the shared
+# actor randomization envelope (CENTERED_WIDE_WORKSPACE, x/y both centred on
+# the origin); C is the active left Piper base at (0, -0.45, 0.75) after the
+# centred-arm compensation.  The camera sits at C shifted +X by 0.20 m and
+# raised to z = 1.35 m, i.e. (0.20, -0.45, 1.35), and looks at the point
+# (0, 0, 0.90) on the workspace axis — sight-line distance
+# sqrt(0.20^2 + 0.45^2 + 0.45^2) = 0.6671 m with a 42.42-degree depression
+# angle; the horizontal projection of the sight-line still passes through O
+# at planar |OC| = sqrt(0.20^2 + 0.45^2) = 0.4924 m.  ``left`` is the
+# horizontal ẑ×forward direction, so the image horizon is level (up has +Z
+# and +Y components).  Wide sensor, inherited from the centred batch.
+CEN_ARM_NEAR_SIDE_CAM = CameraSpec(
+    "cen_arm_near_side_cam",
+    (0.20, -0.45, 1.35),
+    (-0.299813, 0.674579, -0.674579),
+    (-0.913812, -0.406138, 0.0),
+    head_camera_type="D435-W",
+)
+
+# Far side view of the centred-arm batch: the camera sits at
+# (0.45, -0.45, 0.95) — diagonal (+X, -Y) corner outside the shared actor
+# envelope — and looks horizontally (0-degree depression) at the point
+# (0, 0, 0.95), the workspace centre at camera height, so the horizontal
+# projection of the sight-line passes through O at planar distance
+# sqrt(0.45^2 + 0.45^2) = 0.6364 m.  forward is the unit vector from the
+# camera to the sight point, (-0.707107, 0.707107, 0); ``left`` is the
+# horizontal ẑ×forward direction (-0.707107, -0.707107, 0), so the image
+# horizon is level and coincides with the sight-line (up = +Z).  Wide sensor,
+# inherited from the centred batch.
+CEN_ARM_SIDE_CAM = CameraSpec(
+    "cen_arm_side_cam",
     (0.45, -0.45, 0.95),
     (-0.707107, 0.707107, 0.0),
     (-0.707107, -0.707107, 0.0),
@@ -151,13 +172,32 @@ CEN_ARM_FRONT_CAM = CameraSpec(
     head_camera_type="D435-W",
 )
 
+# Top-down view of the centred-arm batch: the camera sits 0.76 m above the
+# 0.74 m tabletop at (0, -0.10, 1.50) — directly over the workspace — with
+# forward (0, 0, -1), a 90-degree depression angle perpendicular to the
+# tabletop.  ``left`` stays (-1, 0, 0) as in the front/right views, so
+# image-up is world +Y (the far side of the table) and the compensated left
+# Piper base at (0, -0.45, 0.75) sits at the bottom of the frame.  With the
+# D435-W fovy 60 the 0.76 m height covers a 0.877 m y extent (the frame
+# spans y in [-0.54, 0.34], clearing the shared envelope's y(-0.15, 0.15)
+# with margin on both edges) and a 1.17 m x extent (x in [-0.69, 0.49]).
+CEN_ARM_TOP_CAM = CameraSpec(
+    "cen_arm_top_cam",
+    (0.0, -0.10, 1.50),
+    (0.0, 0.0, -1.0),
+    (-1.0, 0.0, 0.0),
+    head_camera_type="D435-W",
+)
+
 CAMERA_SPECS: Mapping[str, CameraSpec] = {
     "central_cam": CENTRAL_CAM,
     "left_oppo_cam": LEFT_OPPO_CAM,
     "central_wide_cam": CENTRAL_WIDE_CAM,
     "cen_arm_right_wide_cam": CEN_ARM_RIGHT_WIDE_CAM,
-    "cen_arm_cen_side_cam": CEN_ARM_CEN_SIDE_CAM,
+    "cen_arm_near_side_cam": CEN_ARM_NEAR_SIDE_CAM,
+    "cen_arm_side_cam": CEN_ARM_SIDE_CAM,
     "cen_arm_front_cam": CEN_ARM_FRONT_CAM,
+    "cen_arm_top_cam": CEN_ARM_TOP_CAM,
 }
 
 

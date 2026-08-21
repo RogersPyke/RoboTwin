@@ -1,0 +1,17 @@
+{
+  "full_description": "stack the upper bowl onto the lower bowl with one arm",
+  "schema": "{A} notifies the lower bowl, {B} notifies the upper bowl, {a} notifies the left arm to move the lower bowl, {b} notifies the left arm to move the upper bowl",
+  "preference": "num of words should not exceed 14. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to place {A}, then {b} stacks {B} on {A}.",
+    "With the left arm put {B} on top of {A}.",
+    "{a} moves {A}, then {b} places {B} onto {A}.",
+    "Stack {B} onto {A} using the left arm.",
+    "Place {A} with {a}, then stack {B} on {A} with {b}."
+  ],
+  "unseen": [
+    "Stack the upper bowl on the lower bowl.",
+    "Use the left arm to place {B} on top of {A}.",
+    "Put {B} over {A} with the left arm."
+  ]
+}

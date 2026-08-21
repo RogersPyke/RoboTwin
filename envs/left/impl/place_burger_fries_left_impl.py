@@ -15,6 +15,10 @@ Actors and clearance: tray (static, x in [-0.44,-0.08], y in [-0.16,-0.04],
     grab (choose_grasp_pose fails).  Version 3 therefore puts BOTH foods in the
     shared lower band, which keeps maximal appearance overlap and clears the
     reachability bar.
+    Version 4 (2026-08-22) shared-envelope policy: under the cen_arm variants
+    tray, hamburg and frenchfries are all drawn directly from the one shared
+    spawn envelope with no y-band separation; overlaps are handled only by the
+    pairwise clearance rejection, so occlusion candidates may fail planning.
 Expert sequence: left grasp hamburg, lift z=0.10, place at tray functional
     point zero, release, return home; left grasp frenchfries, place at tray
     functional point one, release, return home.
@@ -36,7 +40,6 @@ import numpy as np
 import sapien
 
 from ..left_task_base import (
-    CENTERED_BATCH_VARIANTS,
     LeftArmTaskError,
     LeftTaskBase,
     SceneInitRejectError,
@@ -87,30 +90,17 @@ class PlaceBurgerFriesLeftImpl(LeftTaskBase):
         specs = {name: self.manifest.actor_specs[name] for name in
                  ("tray", "hamburg", "frenchfries")}
         clearance = max(spec.minimum_clearance_m for spec in specs.values())
-        centered_batch = self.camera_variant in CENTERED_BATCH_VARIANTS
 
-        def _resolve_centered_pose(spec, y_range: tuple[float, float]):
-            pose = self.sample_spec_pose(spec)
-            position = np.asarray(pose.p, dtype=float)
-            position[1] = float(np.random.uniform(*y_range))
-            return sapien.Pose(position, pose.q)
-
+        # Version 3 (2026-08-22): every actor — tray, hamburg and frenchfries —
+        # is drawn directly from the shared spawn envelope (the centred-wide
+        # batch envelope under the cen_arm variants); no y-band separation.
+        # Tray-rim and food overlaps are handled purely by the pairwise
+        # clearance rejection below.  Approach-occlusion candidates that the
+        # old y resolver eliminated are now possible and may fail planning.
         for _ in range(128):
-            if centered_batch:
-                # The centred batch gives every actor the same declared spawn
-                # envelope.  Its placement resolver separates the tray and
-                # foods along y after a candidate draw, eliminating tray-rim
-                # intersections and the left-arm approach occlusion that make
-                # an otherwise valid shared-envelope sample unplannable.
-                tray = _resolve_centered_pose(specs["tray"], (-0.15, -0.05))
-                hamburg = _resolve_centered_pose(specs["hamburg"], (0.06, 0.15))
-                frenchfries = _resolve_centered_pose(
-                    specs["frenchfries"], (0.06, 0.15)
-                )
-            else:
-                tray = self.sample_spec_pose(specs["tray"])
-                hamburg = self.sample_spec_pose(specs["hamburg"])
-                frenchfries = self.sample_spec_pose(specs["frenchfries"])
+            tray = self.sample_spec_pose(specs["tray"])
+            hamburg = self.sample_spec_pose(specs["hamburg"])
+            frenchfries = self.sample_spec_pose(specs["frenchfries"])
             if (self._clear(hamburg, frenchfries, clearance)
                     and self._clear(hamburg, tray, clearance)
                     and self._clear(frenchfries, tray, clearance)):

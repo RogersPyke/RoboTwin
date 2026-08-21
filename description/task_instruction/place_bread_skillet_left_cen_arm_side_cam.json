@@ -1,0 +1,17 @@
+{
+  "full_description": "place the bread onto the skillet with one arm, leaving the skillet on the table",
+  "schema": "{A} notifies the skillet, {B} notifies the bread, {a} notifies the left arm",
+  "preference": "num of words should not exceed 12. Degree of detail avg 5.",
+  "seen": [
+    "Use {a} to place {B} onto the skillet {A}.",
+    "With the left arm put the bread {B} on {A}.",
+    "{a} sets {B} onto the skillet {A}.",
+    "Place {B} onto {A} with the left arm.",
+    "{a} puts the bread {B} on the skillet {A}."
+  ],
+  "unseen": [
+    "Put the bread onto the skillet.",
+    "Use the left arm to place {B} on {A}.",
+    "Set {B} on top of {A} with {a}."
+  ]
+}

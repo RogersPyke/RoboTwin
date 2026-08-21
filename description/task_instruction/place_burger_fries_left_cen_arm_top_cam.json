@@ -1,0 +1,17 @@
+{
+  "full_description": "put the hamburger and the french fries into the tray with one arm",
+  "schema": "{A} notifies the hamburger, {B} notifies the tray, {C} notifies the french fries, {a} notifies the left arm",
+  "preference": "num of words should not exceed 15. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to place {A} and {C} into the tray {B}.",
+    "With the left arm put the hamburger {A} and the french fries {C} into {B}.",
+    "{a} drops {A} and {C} into the tray {B}.",
+    "Put {A} and {C} into {B} with the left arm.",
+    "{a} places the food into the tray {B}."
+  ],
+  "unseen": [
+    "Put the hamburger and the fries into the tray.",
+    "Use the left arm to place {A} and {C} in {B}.",
+    "Move both food items into the tray with {a}."
+  ]
+}

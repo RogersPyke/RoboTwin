@@ -1,0 +1,17 @@
+{
+  "full_description": "drop both cans into the plastic box with one arm",
+  "schema": "{A} notifies the first can, {B} notifies the plastic box, {C} notifies the second can, {a} notifies the left arm",
+  "preference": "num of words should not exceed 15. Degree of detail avg 6.",
+  "seen": [
+    "Use {a} to drop {A} and {C} into the plastic box {B}.",
+    "With the left arm put the two cans {A} and {C} into {B}.",
+    "{a} places {A} and {C} into the plastic box {B}.",
+    "Put both cans {A} and {C} into {B} with the left arm.",
+    "{a} drops the cans into the plastic box {B}."
+  ],
+  "unseen": [
+    "Put both cans into the plastic box.",
+    "Use the left arm to place {A} and {C} in {B}.",
+    "Move the two cans into the box with {a}."
+  ]
+}
