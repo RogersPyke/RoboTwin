@@ -65,6 +65,42 @@ CENTERED_WIDE_WORKSPACE = XYYawRange(
     x=(-0.20, 0.20), y=(-0.15, 0.15), yaw_rad=(0.0, 0.50)
 )
 
+# Per-family overrides for the centred-arm batch (arm base at x=0).  A family
+# that cannot hold the full shared envelope keeps its own symmetric envelope
+# here instead.  place_cans_plasticbox (2026-08-23 yaw iteration, task-specific
+# enlarged envelope sanctioned for this family alone): the plasticbox centre
+# sweeps x in [-0.10,0.10], y in [-0.28,-0.20] WITH yaw in [-0.60,0.60] rad
+# (sampled by the impl's _sample_box_pose because sample_spec_pose locks yaw
+# for static actors in the centred batch); both cans sample one shared
+# standing band x in [-0.18,0.18], y in [-0.24,-0.02] with FIXED upright
+# orientation (yaw 0).  The impl's rejection sampler derives each can's
+# admissible region from the sampled box pose and geometry: a can footprint
+# (radius 0.029) must clear the box's yaw-rotated collision rectangle
+# (half-extents 0.078 x 0.097) by >= 0.05 m, and can pairs keep the 0.015 m
+# per-axis AABB margin.
+CENTERED_FAMILY_OVERRIDES: dict[str, dict[str, XYYawRange]] = {
+    "place_cans_plasticbox": {
+        "plasticbox": XYYawRange(x=(-0.10, 0.10), y=(-0.28, -0.20), yaw_rad=(-0.60, 0.60)),
+        "can1": XYYawRange(x=(-0.18, 0.18), y=(-0.24, -0.02), yaw_rad=(0.0, 0.00)),
+        "can2": XYYawRange(x=(-0.18, 0.18), y=(-0.24, -0.02), yaw_rad=(0.0, 0.00)),
+    },
+    # stack_bowls_two (2026-08-23 reachable-envelope iteration): a 200-seed
+    # pilot of the full shared envelope (results/pilot/yaw_v6) showed the
+    # place pose (fixed bowl quat mapped onto the grasp offset) is
+    # IK-unreachable for targets beyond x~0.1 / y~0.0 — plan failure 147/200
+    # and zero successes with target x>0.12 or y>0.05 — while spawns over the
+    # same region stay graspable (the planner picks its own approach).  Both
+    # bowls AND the stack target therefore sample one shared reachable band
+    # (success ~0.5 throughout, per target-region bins of the same pilot), so
+    # the collected stack-point distribution matches the bowl spawn
+    # distribution instead of collapsing to the reachable corner of a wider
+    # envelope.
+    "stack_bowls_two": {
+        "bowl1": XYYawRange(x=(-0.20, 0.05), y=(-0.15, 0.00), yaw_rad=(0.0, 0.00)),
+        "bowl2": XYYawRange(x=(-0.20, 0.05), y=(-0.15, 0.00), yaw_rad=(0.0, 0.00)),
+    },
+}
+
 
 def _register(manifest: TaskManifest) -> None:
     MANIFESTS[manifest.semantic_task] = manifest
@@ -222,21 +258,27 @@ _register(_manifest(
 _register(_manifest(
     "place_cans_plasticbox",
     [
-        # Union randomization (iteration 2026-08-14): the plastic box now
-        # sweeps x in [-0.42,-0.10], y in [-0.28,-0.02], the union of the
-        # family's appearance ranges, so it can appear anywhere the cans can,
-        # overlapping the can band (x in [-0.42,-0.10], y in [-0.15,-0.07])
-        # maximally.  The box clearance is footprint-aware: the 062_plasticbox
-        # collision hull has a ~0.096 m y half-extent, so the 0.13 m pairwise
-        # clearance keeps a can centre outside the box hull (can half-extent
-        # ~0.025 m).  The two cans keep one shared identical band and a 0.08 m
-        # mutual gap; the rejection sampler keeps every can >= 0.13 m clear of
-        # the box.
-        _spec("plasticbox", (-0.42, -0.10), (-0.28, -0.02), (0.0, 0.00), 0.13, True,
+        # Symmetric flanking randomization (version 4, 2026-08-22): the
+        # version 3 union envelope (box and cans all sweeping x in
+        # [-0.42,-0.10]) pilots at 0.28 but realizes only ~0.05 in collection
+        # (3479 seeds for 184 episodes, ~20% of failures UnStableError from
+        # cans spawning against the box hull).  Version 4 restores the
+        # version 0 flanking structure and makes it exactly mirror-symmetric
+        # about the left-workspace centre x=-0.26 (the closest feasible
+        # analogue of table-centre symmetry for a left-arm-only task):
+        #   - plasticbox centre band x in [-0.37,-0.15] (self-symmetric about
+        #     -0.26), y in [-0.28,-0.23];
+        #   - can1 x in [-0.42,-0.36] and can2 x in [-0.16,-0.10], mirror
+        #     images (mirror(x) = -0.52 - x), y in [-0.15,-0.07].
+        # The x bands alone no longer guarantee separation, so the impl's
+        # rejection sampler uses per-axis footprint clearance (see
+        # place_cans_plasticbox_left_impl): box half-extents (0.078, 0.097),
+        # can half-extent 0.029, 0.01 m margin.
+        _spec("plasticbox", (-0.37, -0.15), (-0.28, -0.23), (0.0, 0.00), 0.13, True,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("can1", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
+        _spec("can1", (-0.42, -0.36), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
-        _spec("can2", (-0.42, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
+        _spec("can2", (-0.16, -0.10), (-0.15, -0.07), (0.0, 0.00), 0.08, False,
               base_quat=(0.5, 0.5, 0.5, 0.5)),
     ],
 ))
@@ -320,10 +362,11 @@ def centered_wide_workspace_manifest(manifest: TaskManifest) -> TaskManifest:
     """
     if manifest.semantic_task == "hanging_mug":
         raise ValueError("deprecated hanging_mug cannot use the centred-wide batch")
+    override = CENTERED_FAMILY_OVERRIDES.get(manifest.semantic_task, {})
     specs = {
         name: replace(
             spec,
-            workspace=CENTERED_WIDE_WORKSPACE,
+            workspace=override.get(name, CENTERED_WIDE_WORKSPACE),
         )
         for name, spec in manifest.actor_specs.items()
     }

@@ -20,7 +20,20 @@ Instruction change: {A}=lower bowl, {B}=upper bowl, {a}..{b}=left; wording
     says the left arm stacks the upper bowl onto the lower bowl.
 Pilot evidence: central-cam 30-seed pilot on version 0 0.57 (17/30 success),
     manifest hash ace5714486a162e4; version 2 (randomized stack target)
-    50-seed pilot 0.56 (28/50 success), manifest hash ace5714486a162e4
+    50-seed pilot 0.56 (28/50 success), manifest hash ace5714486a162e4;
+    version 4 (2026-08-23) adds a place pre_dis ladder (0.09/0.06/0.04) in
+    move_bowl because the fixed 0.09 pre pose sat at the ~1.03 m left-EE
+    ceiling over far-side targets and biased accepted stack points to the
+    front half of the version 3 envelope; version 5 (same day,
+    CENTERED_FAMILY_OVERRIDES) narrows the shared bowl/target envelope to
+    the empirically place-reachable band x in [-0.20,0.05], y in [-0.15,0]
+    (the fixed-quat place pose is IK-unreachable beyond it, 200-seed pilot
+    results/pilot/yaw_v6: zero successes with target x>0.12 or y>0.05), so
+    stack points and spawns share one distribution (~0.5 success rate
+    throughout the band); 200-seed pilot 0.41 (81/200 plus 78 layout
+    rejections, results/pilot/yaw_v6; accepted target range x[-0.20,0.05]
+    y[-0.15,0] identical to the spawn range, per-region success 0.40-0.86),
+    centered-batch override hash 1e073369b8efd616
 """
 
 from __future__ import annotations
@@ -141,9 +154,21 @@ class StackBowlsTwoLeftImpl(LeftTaskBase):
         if not self.plan_success:
             return False
         target_pose_7 = target_pose.tolist() + self.quat_of_target_pose
-        self.move(self.place_actor(actor, target_pose=target_pose_7, arm_tag=arm_tag,
-                                   functional_point_id=0, pre_dis=0.09, dis=0.0,
-                                   constrain="free"))
+        # pre_dis ladder (version 4, 2026-08-23): the single 0.09 pre pose put
+        # the EE at the ~1.03 m ceiling over far-side (positive-y) targets,
+        # which biased accepted stack points to the front half of the
+        # envelope.  Shorter pre distances give the planner a reachable
+        # approach there (the retry-ladder pattern proven by
+        # place_cans_plasticbox); during replay plan_success stays True so
+        # only the first entry is consumed.
+        for index, pre_dis in enumerate((0.09, 0.06, 0.04)):
+            if index > 0:
+                if self.plan_success:
+                    break
+                self.plan_success = True
+            self.move(self.place_actor(actor, target_pose=target_pose_7, arm_tag=arm_tag,
+                                       functional_point_id=0, pre_dis=pre_dis, dis=0.0,
+                                       constrain="free"))
         if not self.plan_success:
             return False
         self.move_by_displacement(arm_tag=arm_tag, z=0.09)
