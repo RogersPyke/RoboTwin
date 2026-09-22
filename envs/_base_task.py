@@ -214,7 +214,15 @@ class Base_Task(gym.Env):
         sapien.render.set_camera_shader_dir("rt")
         sapien.render.set_ray_tracing_samples_per_pixel(32)
         sapien.render.set_ray_tracing_path_depth(8)
-        sapien.render.set_ray_tracing_denoiser("oidn")
+        # Manual denoiser switch: OIDN is on by default for parity with all
+        # historical batches; set ROBOTWIN_RT_DENOISER=none to collect/evaluate
+        # on raw noisy ray-traced frames (SAPIEN Literal['none','oidn','optix']).
+        rt_denoiser = os.environ.get("ROBOTWIN_RT_DENOISER", "oidn").strip().lower()
+        if rt_denoiser not in ("oidn", "optix", "none"):
+            raise ValueError(
+                f"ROBOTWIN_RT_DENOISER must be one of 'oidn', 'optix', 'none', got {rt_denoiser!r}"
+            )
+        sapien.render.set_ray_tracing_denoiser(rt_denoiser)
 
         # declare sapien scene
         scene_config = sapien.SceneConfig()
